@@ -1,0 +1,49 @@
+# /venv
+# /flask_session
+# /line_plot.py
+# /scatter_plot.py
+# /pie_chart.py
+# /myenv
+# /tmp
+# /__pycache__
+# /uploads
+# /config.py
+# dashboard_save/__pycache__
+
+
+
+
+
+
+
+# Ignore Python virtual environments
+/venv
+/myenv
+
+# Flask session files
+/flask_session
+
+# Python bytecode files
+__pycache__/
+/**/__pycache__/
+/*.py[cod]
+*.py[cod]
+
+# Ignore temporary files and folders
+/tmp
+/uploads
+
+# Config and script files you may not want in version control
+/config.py
+/line_plot.py
+/scatter_plot.py
+/pie_chart.py
+
+# Bytecode files in dashboard_save directory
+dashboard_save/__pycache__/
+
+# Ignore system or IDE-specific files (optional best practices)
+*.log
+*.swp
+.DS_Store
+.vscode/
