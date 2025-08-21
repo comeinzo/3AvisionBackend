@@ -10,6 +10,8 @@ import pandas as pd
 import re  
 import ast
 import json
+import numpy as np
+
 
 from statsmodels.tsa.seasonal import seasonal_decompose
 
@@ -30,24 +32,6 @@ def create_connection():
 # Function to create the table if it doesn't exist
 def create_dashboard_table(conn):
     
-    # create_table_query = """
-    # CREATE TABLE IF NOT EXISTS table_dashboard (
-    #     id SERIAL PRIMARY KEY,
-    #     user_id integer, 
-    #     company_name VARCHAR(255),  
-    #     file_name VARCHAR(255), 
-    #     chart_ids VARCHAR(255),
-    #     position VARCHAR(255),
-    #     chart_size VARCHAR(255),
-    #     chart_type VARCHAR(255),
-    #     chart_Xaxis VARCHAR(255),
-    #     chart_Yaxis VARCHAR(255),
-    #     chart_aggregate VARCHAR(255),
-    #     filterdata text,
-    #     clicked_category VARCHAR(255),
-    #     heading VARCHAR(255),dashboard_name VARCHAR(255),chartcolor VARCHAR(255),droppableBgColor VARCHAR(255),opacity VARCHAR(255),image_ids VARCHAR(255)
-    # );
-    # """
     create_table_query = """
     CREATE TABLE IF NOT EXISTS table_dashboard (
         id SERIAL PRIMARY KEY,
@@ -68,7 +52,12 @@ def create_dashboard_table(conn):
         chartcolor TEXT,
         droppableBgColor TEXT,
         opacity TEXT,
-        image_ids TEXT
+        image_ids TEXT,
+        project_name VARCHAR(255),
+        font_style_state VARCHAR(255),
+        font_size VARCHAR(255),
+        font_color VARCHAR(255)
+
     );
     """
 
@@ -96,54 +85,23 @@ def create_dashboard_table(conn):
 
 
 
-# def insert_combined_chart_details(conn, combined_chart_details):
-    
-    
-#     insert_query = """
-#     INSERT INTO table_dashboard 
-#     (user_id,company_name,file_name, chart_ids, position,chart_size, chart_type, chart_Xaxis, chart_Yaxis, chart_aggregate, filterdata, clicked_category,heading,chartcolor,droppableBgColor,opacity,image_ids)
-#     VALUES (%s,%s,%s, %s, %s, %s, %s, %s, %s, %s, %s,%s,%s,%s,%s,%s,%s)
-#     """
-    
-#     try:
-#         cursor = conn.cursor()
-#         cursor.execute(insert_query, (
-#             combined_chart_details['user_id'],
-#             combined_chart_details['company_name'],
-#             combined_chart_details['file_name'],
-#             combined_chart_details['chart_ids'], 
-#             str(combined_chart_details['positions']),
-#             str(combined_chart_details['sizes']), 
-#             str(combined_chart_details['chart_types']),
-#             str(combined_chart_details['chart_Xaxes']), 
-#             str(combined_chart_details['chart_Yaxes']), 
-#             str(combined_chart_details['chart_aggregates']),
-#             str(combined_chart_details['filterdata']), 
-#             combined_chart_details['clicked_category'],
-#             combined_chart_details['heading'],
-#             json.dumps(combined_chart_details['chartcolor']),
-#             combined_chart_details['droppableBgColor'],
-#             combined_chart_details['opacities'],
-#             json.dumps(combined_chart_details['image_ids'])
-
-#         ))
-#         conn.commit()
-#         cursor.close()
-#     except Exception as e:
-#         print(f"Error inserting combined chart details: {e}")
 def insert_combined_chart_details(conn, combined_chart_details):
     try:
         # Alter table if any relevant column is VARCHAR(255)
         alter_columns_if_needed(conn)
-
+        cursor = conn.cursor()
+        cursor.execute("SELECT MAX(id) FROM table_dashboard")
+        last_dashboard_id = cursor.fetchone()[0] or 0
+        new_dashboard_id = last_dashboard_id + 1
         insert_query = """
         INSERT INTO table_dashboard 
-        (user_id, company_name, file_name, chart_ids, position, chart_size, chart_type, chart_Xaxis, chart_Yaxis, chart_aggregate, filterdata, clicked_category, heading, chartcolor, droppableBgColor, opacity, image_ids)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        (id,user_id, company_name, file_name, chart_ids, position, chart_size, chart_type, chart_Xaxis, chart_Yaxis, chart_aggregate, filterdata, clicked_category, heading, chartcolor, droppableBgColor, opacity, image_ids,project_name)
+        VALUES (%s,%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,%s)
         """
 
-        cursor = conn.cursor()
+        
         cursor.execute(insert_query, (
+            new_dashboard_id,
             combined_chart_details['user_id'],
             combined_chart_details['company_name'],
             combined_chart_details['file_name'],
@@ -160,7 +118,8 @@ def insert_combined_chart_details(conn, combined_chart_details):
             json.dumps(combined_chart_details['chartcolor']),
             combined_chart_details['droppableBgColor'],
             combined_chart_details['opacities'],
-            json.dumps(combined_chart_details['image_ids'])
+            json.dumps(combined_chart_details['image_ids']),
+            combined_chart_details['project_name']
         ))
         conn.commit()
         cursor.close()
@@ -299,7 +258,141 @@ def get_dashboard_names(user_id, database_name):
             conn_datasource.close()
 
     return dashboard_names
+def fetch_project_names(user_id, database_name):
+    conn_company = get_company_db_connection(database_name)
+    all_employee_ids = []
 
+    if conn_company:
+        try:
+            with conn_company.cursor() as cursor:
+                cursor.execute("""
+                    SELECT column_name FROM information_schema.columns
+                    WHERE table_name='employee_list' AND column_name='reporting_id'
+                """)
+                column_exists = cursor.fetchone()
+
+                if column_exists:
+                    cursor.execute("""
+                        WITH RECURSIVE subordinates AS (
+                            SELECT employee_id, reporting_id
+                            FROM employee_list
+                            WHERE reporting_id = %s
+
+                            UNION
+
+                            SELECT e.employee_id, e.reporting_id
+                            FROM employee_list e
+                            INNER JOIN subordinates s ON e.reporting_id = s.employee_id
+                        )
+                        SELECT employee_id FROM subordinates
+                        UNION
+                        SELECT %s;
+                    """, (user_id, user_id))
+                    reporting_employees = [row[0] for row in cursor.fetchall()]
+                    all_employee_ids = list(map(int, reporting_employees)) + [int(user_id)]
+                else:
+                    all_employee_ids = [int(user_id)] # If no reporting_id, just include user_id
+        except psycopg2.Error as e:
+            print(f"Error fetching reporting employees for project names: {e}")
+        finally:
+            conn_company.close()
+
+    conn_datasource = get_db_connection("datasource")
+    project_names = []
+
+    if conn_datasource and all_employee_ids:
+        try:
+            with conn_datasource.cursor() as cursor:
+                placeholders = ', '.join(['%s'] * len(all_employee_ids))
+                query = f"""
+                    SELECT DISTINCT project_name FROM table_dashboard
+                    WHERE user_id IN ({placeholders}) AND company_name = %s;
+                """
+                cursor.execute(query, tuple(map(str, all_employee_ids)) + (database_name,))
+                project_names = [row[0] for row in cursor.fetchall()]
+        except psycopg2.Error as e:
+            print(f"Error fetching project names: {e}")
+        finally:
+            conn_datasource.close()
+
+    return project_names
+
+
+def get_dashboard_names(user_id, database_name, project_name=None):
+    # Step 1: Get employees reporting to the given user_id from the company database.
+    conn_company = get_company_db_connection(database_name)
+    reporting_employees = []
+
+    if conn_company:
+        try:
+            with conn_company.cursor() as cursor:
+                cursor.execute("""
+                    SELECT column_name FROM information_schema.columns
+                    WHERE table_name='employee_list' AND column_name='reporting_id'
+                """)
+                column_exists = cursor.fetchone()
+
+                if column_exists:
+                    cursor.execute("""
+                        WITH RECURSIVE subordinates AS (
+                            SELECT employee_id, reporting_id
+                            FROM employee_list
+                            WHERE reporting_id = %s
+
+                            UNION
+
+                            SELECT e.employee_id, e.reporting_id
+                            FROM employee_list e
+                            INNER JOIN subordinates s ON e.reporting_id = s.employee_id
+                        )
+                        SELECT employee_id FROM subordinates
+                        UNION
+                        SELECT %s;
+                    """, (user_id, user_id))
+                    reporting_employees = [row[0] for row in cursor.fetchall()]
+                else:
+                    reporting_employees = [] # If no reporting_id, only user_id will be considered below
+
+        except psycopg2.Error as e:
+            print(f"Error fetching reporting employees: {e}")
+        finally:
+            conn_company.close()
+
+    # Include the user's own employee_id for fetching their charts.
+    all_employee_ids = list(map(int, reporting_employees)) + [int(user_id)]
+
+    # Step 2: Fetch dashboard names for these employees from the datasource database.
+    conn_datasource = get_db_connection("datasource")
+    dashboard_names = {}
+
+    if conn_datasource:
+        try:
+            with conn_datasource.cursor() as cursor:
+                placeholders = ', '.join(['%s'] * len(all_employee_ids))
+                query = f"""
+                    SELECT user_id, file_name FROM table_dashboard
+                    WHERE user_id IN ({placeholders}) AND company_name = %s AND project_name = %s
+                """
+                params = tuple(map(str, all_employee_ids)) + (database_name, project_name)
+
+                if project_name: # Add project_name filter if provided
+                    query += " AND project_name = %s"
+                    params += (project_name,)
+
+                cursor.execute(query, params)
+                dashboards = cursor.fetchall()
+                print("dashboards",dashboards)
+
+                # for uid, file_name in dashboards:
+                #     if uid not in dashboard_names:
+                #         dashboard_names[uid] = []
+                #     dashboard_names[uid].append(file_name)
+        except psycopg2.Error as e:
+            print(f"Error fetching dashboard details: {e}")
+        finally:
+            conn_datasource.close()
+
+    return dashboards
 def get_Edit_dashboard_names(user_id, database_name):
     """
     Fetch dashboards created only by the given user_id in the 'datasource' database,
@@ -364,512 +457,6 @@ def fetch_external_db_connection(database_name,selected_user):
         print(f"Error fetching connection details: {e}")
         return None
 
-
-
-
-
-# def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour):
-#     conn = create_connection()  # Initial connection to your main database
-#     print("Chart areacolour:", areacolour)
-#     if conn:
-#         try:
-#             print("chart_ids",chart_ids)
-#             if isinstance(chart_ids, str):
-#                 chart_ids = list(map(int, re.findall(r'\d+', chart_ids)))                
-#                 print("chart_ids",chart_ids)
-#             if isinstance(positions, str):
-#                 positions = ast.literal_eval(positions)  # If positions are passed as a string, convert it to list of dicts
-#              # Ensure filter_options is a list
-#             if isinstance(filter_options, str):
-#                 filter_options = ast.literal_eval(filter_options)
-#             if isinstance(areacolour, str):
-#                 areacolour = [color.strip() for color in re.findall(r'#(?:[0-9a-fA-F]{6})', areacolour)]  # Extract color hex codes into a list
-
-
-#             # Create a dictionary to map chart_id -> position
-#             # chart_positions = {chart_id: positions[idx] for idx, chart_id in enumerate(chart_ids)}
-#             # print("Chart Positions:", chart_positions)
-#             # # Create a dictionary to map chart_id -> filter_options
-#             # chart_filters = {chart_id: filter_options[idx] for idx, chart_id in enumerate(chart_ids)}
-#             chart_positions = {chart_id: positions[idx] if idx < len(positions) else None for idx, chart_id in enumerate(chart_ids)}
-#             chart_filters = {chart_id: filter_options[idx] if idx < len(filter_options) else None for idx, chart_id in enumerate(chart_ids)}
-#             # areacolour={chart_id:areacolour[idx] if idx < len(positions) else None for idx, chart_id in enumerate(chart_ids)}
-#             # print("Chart Filters:", chart_filters)
-#             chart_areacolour = {}
-#             for idx, chart_id in enumerate(chart_ids):
-#                 if idx < len(areacolour):
-#                     chart_areacolour[chart_id] = areacolour[idx]
-#                 else:
-#                     chart_areacolour[chart_id] = None  # Or some default color
-
-#             print("Chart Filters:", chart_filters)
-#             print("Processed chart_areacolour:", chart_areacolour)
-#             for chart_id, position in chart_positions.items():
-#                 if not isinstance(position, dict) or 'x' not in position or 'y' not in position:
-#                     print(f"Invalid position for chart_id {chart_id}: {position}")
-#                     return []
-#             sorted_chart_ids = sorted(chart_ids, key=lambda x: (chart_positions.get(x, {'x': 0, 'y': 0})['x'], chart_positions.get(x, {'x': 0, 'y': 0})['y']))
-#             chart_data_list = []
-#             print("chart_data_list",chart_data_list)
-#             for chart_id in sorted_chart_ids:
-#                 cursor = conn.cursor()
-#                 cursor.execute("SELECT id, database_name, selected_table, x_axis, y_axis, aggregate, chart_type, filter_options, chart_heading, chart_color, selectedUser,xfontsize,fontstyle,categorycolor,valuecolor,yfontsize,headingColor,ClickedTool,Bgcolour FROM table_chart_save WHERE id = %s", (chart_id,))
-#                 chart_data = cursor.fetchone()
-#                 cursor.close()
-
-#                 if chart_data:
-#                     # Extract chart data
-#                     database_name = chart_data[1]  # Assuming `database_name` is the second field
-#                     table_name = chart_data[2]
-#                     x_axis = chart_data[3]
-#                     y_axis = chart_data[4]  # Assuming y_axis is a list
-#                     aggregate = chart_data[5]
-#                     chart_type = chart_data[6]
-#                     chart_heading = chart_data[8]
-#                     chart_color = chart_data[9]  # Assuming chart_color is a list
-#                     selected_user = chart_data[10]  # Extract the selectedUser field
-#                     xfontsize = chart_data[11]
-#                     fontstyle = chart_data[12]
-#                     categorycolor = chart_data[13]
-#                     valuecolor = chart_data[14]
-#                     yfontsize = chart_data[15]
-#                     headingColor=chart_data[16]
-#                     ClickedTool=chart_data[17]
-#                     areacolour = chart_areacolour.get(chart_id)
-#                     filter_options = chart_filters.get(chart_id, {})
-#                     print("Chart filter_options:", filter_options)
-                    
-#                     # Determine the aggregation function
-#                     aggregate_py = {
-#                         'count': 'count',
-#                         'sum': 'sum',
-#                         'average': 'mean',
-#                         'minimum': 'min',
-#                         'maximum': 'max'
-#                     }.get(aggregate, 'sum')  # Default to 'sum' if no match
-
-#                     # Check if selectedUser is NULL
-#                     if selected_user is None:
-#                         # Use the default local connection if selectedUser is NULL
-#                         connection = get_db_connection_view(database_name)
-#                         masterdatabasecon=create_connection()
-#                         print('Using local database connection')
-
-#                     else:
-#                         # Use external connection if selectedUser is provided
-#                         connection = fetch_external_db_connection(database_name, selected_user)
-#                         host = connection[3]
-#                         dbname = connection[7]
-#                         user = connection[4]
-#                         password = connection[5]
-
-#                         # Create a new psycopg2 connection using the details from the tuple
-#                         connection = psycopg2.connect(
-#                             dbname=dbname,
-#                             user=user,
-#                             password=password,
-#                             host=host
-#                         )
-#                         print('External Connection established:', connection)
-#                     if chart_type == "wordCloud":
-#                         if len(y_axis) == 0:
-#                             x_axis_columns_str = ', '.join(x_axis)
-#                             print("x_axis_columns_str:", x_axis_columns_str)
-#                             query = f"""
-#                                 SELECT word, COUNT(*) AS word_count
-#                                 FROM (
-#                                     SELECT regexp_split_to_table({x_axis_columns_str}, '\\s+') AS word
-#                                     FROM {table_name}
-#                                 ) AS words
-#                                 GROUP BY word
-#                                 ORDER BY word_count DESC;
-#                             """
-#                             print("WordCloud SQL Query:", query)
-
-#                             try:
-#                                 cursor = connection.cursor()
-#                                 cursor.execute(query)
-#                                 data = cursor.fetchall()
-#                                 cursor.close()
-#                                 print("wordcloulddata",data)
-#                                 if data:
-#                                     categories = [row[0] for row in data]  # Words
-#                                     values = [row[1] for row in data]     # Counts
-
-#                                     chart_data_list.append({
-#                                         "chart_id": chart_id,
-#                                         "categories": categories,
-#                                         "values": values,
-#                                         "chart_type": chart_type,
-#                                         "chart_heading": chart_heading,
-#                                         "positions": chart_positions.get(chart_id),
-#                                         "xfontsize": xfontsize,
-#                                         "fontstyle" :fontstyle,
-#                                         "categorycolor" :categorycolor,
-#                                         "valuecolor" :valuecolor,
-#                                         "yfontsize" :yfontsize,
-#                                         "headingColor":headingColor,
-#                                         "filter_options":filter_options,
-#                                         "ClickedTool":ClickedTool,
-#                                         "Bgcolour":areacolour,
-#                                         "table_name":table_name,
-                                    
-#                                     })
-#                                     continue
-#                                 else:
-#                                     print("No data returned for WordCloud query")
-#                             except Exception as e:
-#                                 print("Error executing WordCloud query:", e)
-#                                 chart_data_list.append({
-#                                     "error": f"WordCloud query failed: {str(e)}"
-#                                 })
-#                     # Handle singleValueChart type separately
-#                     elif chart_type == "singleValueChart":
-#                         print("sv")
-#                         single_value_result = fetchText_data(database_name, table_name, x_axis[0], aggregate,selected_user)
-#                         print("Single Value Result for Chart ID", chart_id, ":", single_value_result)
-#                         # Append single value chart data
-#                         chart_data_list.append({
-#                             "chart_id": chart_id,
-#                             "chart_type": chart_type,
-#                             "chart_heading": chart_heading,
-#                             "value": single_value_result,
-#                             "positions": chart_positions.get(chart_id),
-#                             "xfontsize": xfontsize,
-#                             "fontstyle" :fontstyle,
-#                             "categorycolor" :categorycolor,
-#                             "valuecolor" :valuecolor,
-#                             "yfontsize" :yfontsize,
-#                             "headingColor":headingColor, 
-#                             "filter_options":filter_options ,
-#                             "x_axis": x_axis,
-#                             "y_axis": y_axis,   
-#                             "ClickedTool":ClickedTool, 
-#                             "Bgcolour":areacolour,
-#                             "table_name":table_name,
-#                         })
-#                         continue  # Skip further processing for this chart ID
-#                     # Proceed with category and value generation for non-singleValueChart types
-#                     dataframe = fetch_chart_data(connection, table_name)
-#                     print("Chart ID", chart_id)
-#                     print("Chart Type", chart_type)
-#                     # Convert y_axis values if required (either in time format or as numeric)
-#                     for axis in y_axis:
-#                         try:
-#                             dataframe[axis] = pd.to_datetime(dataframe[axis], errors='raise', format='%H:%M:%S')
-#                             dataframe[axis] = dataframe[axis].dt.hour * 60 + dataframe[axis].dt.minute + dataframe[axis].dt.second / 60
-#                             print(f"Converted Time to Minutes for {axis}: ", dataframe[axis].head())
-#                         except ValueError:
-#                             dataframe[axis] = pd.to_numeric(dataframe[axis], errors='coerce')
-#                     # Check if the aggregation type is count
-#                     if aggregate_py == 'count' and chart_type not in ["duealbarChart", "duealChart","treeHierarchy","Butterfly"]:
-#                         print("COUNT AGGREGATION")
-#                         print("Aggregate is count", aggregate_py)
-#                         print("X-Axis:", x_axis)
-#                         df=fetch_chart_data(connection, table_name)
-#                         print("dataframe---------",df.head(5))
-#                         grouped_df = df.groupby(x_axis[0]).size().reset_index(name="count")
-#                         print("grouped_df---------",grouped_df)
-#                         print("Grouped DataFrame (count):", grouped_df.head())
-#                         categories = grouped_df[x_axis[0]].tolist()
-#                         values = grouped_df["count"].tolist()
-#                         filtered_categories = []
-#                         filtered_values = []
-#                         for category, value in zip(categories, values):
-#                             if category in filter_options:
-#                                 filtered_categories.append(category)
-#                                 filtered_values.append(value)
-#                         print("Filtered Categories:", filtered_categories)
-#                         print("Filtered Values:", filtered_values)
-#                         chart_data_list.append({
-#                             "categories": filtered_categories,
-#                             "values": filtered_values,
-#                             "chart_id": chart_id,
-#                             "chart_type": chart_type,
-#                             "chart_color": chart_color,
-#                             "x_axis": x_axis,
-#                             "y_axis": y_axis,
-#                             "aggregate": aggregate,
-#                             "positions": chart_positions.get(chart_id),
-#                             "xfontsize": xfontsize,
-#                             "fontstyle" :fontstyle,
-#                             "categorycolor" :categorycolor,
-#                             "valuecolor" :valuecolor,
-#                             "yfontsize" :yfontsize,
-#                             "chart_heading":chart_heading,
-#                             "headingColor":headingColor,
-#                             "filter_options":filter_options, 
-#                             "ClickedTool":ClickedTool,
-#                             "Bgcolour":areacolour,
-#                             "table_name":table_name,       
-#                         })
-#                         continue  # Skip further processing for this chart ID
-#                     if chart_type == "treeHierarchy":
-#                         print("Tree hierarchy chart detected")
-#                         print("Tree hierarchy chart detected")
-
-#                         print("tableName====================", table_name)
-#                         print("x_axis====================", x_axis)
-#                         print("filter_options====================", filter_options)
-#                         print("y_axis====================", y_axis)
-#                         print("aggregate====================", aggregate)
-#                         print("databaseName====================", database_name)
-#                         print("selectedUser====================", selected_user)
-#                         if isinstance(filter_options, str):
-#                             try:
-#                                 filter_options = json.loads(filter_options)  # Convert JSON string to dict
-#                             except json.JSONDecodeError:
-#                                 raise ValueError("Invalid JSON format for filter_options")
-#                         data = fetch_data_tree(table_name, x_axis, filter_options, y_axis, aggregate, database_name,selected_user)
-#                         categories = data.get("categories", [])
-#                         values = data.get("values", [])
-#                         print("categories",categories)
-#                         print("values",values)
-#                         chart_data_list.append({
-#                                 "categories": categories,
-#                                 "values": values,
-#                                 "chart_id": chart_id,
-#                                 "chart_type": chart_type,
-#                                 "chart_color": chart_color,
-#                                 "x_axis": x_axis,
-#                                 "y_axis": y_axis,
-#                                 "aggregate": aggregate,
-#                                 "positions": chart_positions.get(chart_id),
-#                                 "xfontsize": xfontsize,
-#                                 "fontstyle" :fontstyle,
-#                                 "categorycolor" :categorycolor,
-#                                 "valuecolor" :valuecolor,
-#                                 "yfontsize" :yfontsize,
-#                                 "chart_heading":chart_heading,
-#                                 "headingColor":headingColor,
-#                                 "filter_options":filter_options,
-#                                 "ClickedTool":ClickedTool ,
-#                                 "Bgcolour":areacolour , 
-#                                 "table_name":table_name,
-#                             })
-#                         continue 
-#                     if chart_type == "duealChart" :
-#                             print("Dual AXIS Chart")
-#                             if isinstance(filter_options, str):
-#                                 try:
-#                                     filter_options = json.loads(filter_options)  # Convert JSON string to dict
-#                                 except json.JSONDecodeError:
-#                                     raise ValueError("Invalid JSON format for filter_options")
-#                             data = fetch_data_for_duel(table_name, x_axis, filter_options, y_axis, aggregate, database_name, selected_user)
-#                             chart_data_list.append({
-#                                 "categories": [row[0] for row in data],
-#                                     "series1":[row[1] for row in data],
-#                                     "series2": [row[2] for row in data],
-#                                     "chart_id": chart_id,
-#                                     "chart_type": chart_type,
-#                                     "chart_color": chart_color,
-#                                     "x_axis": x_axis,
-#                                     "y_axis": y_axis,
-#                                     "aggregate": aggregate,
-#                                     "positions": chart_positions.get(chart_id),
-#                                     "xfontsize": xfontsize,
-#                                     "fontstyle" :fontstyle,
-#                                     "categorycolor" :categorycolor,
-#                                     "valuecolor" :valuecolor,
-#                                     "yfontsize" :yfontsize,
-#                                     "chart_heading":chart_heading,
-#                                     "headingColor":headingColor,
-#                                     "filter_options":filter_options,
-#                                     "ClickedTool":ClickedTool,
-#                                     "Bgcolour":areacolour,
-#                                     "table_name":table_name,
-#                             })
-#                     elif chart_type == "Butterfly":
-#                             print("Butterfly Chart")
-#                             if isinstance(filter_options, str):
-#                                 try:
-#                                     filter_options = json.loads(filter_options)  # Convert JSON string to dict
-#                                 except json.JSONDecodeError:
-#                                     raise ValueError("Invalid JSON format for filter_options")
-#                             data = fetch_data_for_duel(table_name, x_axis, filter_options, y_axis, aggregate, database_name, selected_user)
-#                             chart_data_list.append({
-#                                 "categories": [row[0] for row in data],
-#                                     "series1":[row[1] for row in data],
-#                                     "series2": [row[2] for row in data],
-#                                     "chart_id": chart_id,
-#                                     "chart_type": chart_type,
-#                                     "chart_color": chart_color,
-#                                     "x_axis": x_axis,
-#                                     "y_axis": y_axis,
-#                                     "aggregate": aggregate,
-#                                     "positions": chart_positions.get(chart_id),
-#                                     "xfontsize": xfontsize,
-#                                     "fontstyle" :fontstyle,
-#                                     "categorycolor" :categorycolor,
-#                                     "valuecolor" :valuecolor,
-#                                     "yfontsize" :yfontsize,
-#                                     "chart_heading":chart_heading,
-#                                     "headingColor":headingColor,
-#                                     "filter_options":filter_options,
-#                                     "ClickedTool":ClickedTool,
-#                                     "Bgcolour":areacolour,
-#                                     "table_name":table_name,
-#                             })
-#                     elif chart_type == "duealbarChart":
-#                         print("duealbarChart")
-#                         # filter_options = json.loads(filter_options)
-#                         if isinstance(filter_options, str):
-#                                 try:
-#                                     filter_options = json.loads(filter_options)  # Convert JSON string to dict
-#                                 except json.JSONDecodeError:
-#                                     raise ValueError("Invalid JSON format for filter_options")
-#                         datass = fetch_data_for_duel_bar(table_name, x_axis, filter_options, y_axis, aggregate, database_name,selected_user)
-#                         print("datass",datass)
-                       
-#                         chart_data_list.append({
-#                             "categories": [row[0] for row in datass],
-#                                 "series1":[row[1] for row in datass],
-#                                 "series2": [row[2] for row in datass],
-#                                 "chart_id": chart_id,
-#                                 "chart_type": chart_type,
-#                                 "chart_color": chart_color,
-#                                 "x_axis": x_axis,
-#                                 "y_axis": y_axis,
-#                                 "aggregate": aggregate,
-#                                 "positions": chart_positions.get(chart_id),
-#                                 "xfontsize": xfontsize,
-#                                 "fontstyle" :fontstyle,
-#                                 "categorycolor" :categorycolor,
-#                                 "valuecolor" :valuecolor,
-#                                 "yfontsize" :yfontsize,
-#                                 "chart_heading":chart_heading,
-#                                 "headingColor":headingColor,
-#                                 "filter_options":filter_options,
-#                                 "ClickedTool":ClickedTool,
-#                                 "Bgcolour":areacolour,
-#                                 "table_name":table_name,
-#                         })
-
-#                     elif chart_type == "sampleAitestChart":
-#                         try:
-#                             # Fetch chart data
-#                             df = fetch_chart_data(connection, table_name)
-#                             print("Chart ID", chart_id)
-#                             print("//////////",df.head(5))
-                            
-#                             # Handle column data types (conversion and cleaning)
-#                             df, numeric_columns, text_columns = handle_column_data_types(df)
-
-#                             # Generate histogram details
-#                             histogram_details = generate_histogram_details(df)
-#                             connection.close()
-#                             chart_data_list.append({
-#                              "histogram_details": histogram_details,  
-#                              "chart_type": chart_type
-#                         })
-#                         except Exception as e:
-#                             print("Error while processing chart:", e)
-#                             return jsonify({"error": "An error occurred while generating the chart."}), 500
-#                     elif chart_type == "AiCharts":
-#                         try:
-#                             # Fetch chart data
-#                             df=fetch_ai_saved_chart_data(masterdatabasecon, tableName="table_chart_save",chart_id=chart_id)
-#                             print("Chart ID", chart_id)
-#                             print("df:",df)
-#                             connection.close()
-#                             chart_data_list.append({
-#                              "histogram_details": df,  
-#                              "chart_type": chart_type
-#                         })
-#                         except Exception as e:
-#                             print("Error while processing chart:", e)
-#                             return jsonify({"error": "An error occurred while generating the chart."}), 500
-#                     else:
-#                         # grouped_df = dataframe.groupby(x_axis)[y_axis].agg(aggregate_py).reset_index()
-#                         # print("Grouped DataFrame:", grouped_df.head())
-
-#                         # categories = grouped_df[x_axis[0]].tolist()
-#                         # values = [float(value) for value in grouped_df[y_axis[0]]]
-
-#                         # # Filter categories and values based on filter_options
-#                         # filtered_categories = []
-#                         # filtered_values = []
-#                         # for category, value in zip(categories, values):
-#                         #     if category in filter_options:
-#                         #         filtered_categories.append(category)
-#                         #         filtered_values.append(value)
-
-#                         # print("Filtered Categories:", filtered_categories)
-#                         # print("Filtered Values:", filtered_values)
-
-#                         # chart_data_list.append({
-#                         #     "categories": filtered_categories,
-#                         #     "values": filtered_values,
-#                         #     "chart_id": chart_id,
-#                         #     "chart_type": chart_type,
-#                         #     "chart_color": chart_color,
-#                         #     "x_axis": x_axis,
-#                         #     "y_axis": y_axis,
-#                         #     "aggregate": aggregate,
-#                         #     "positions": chart_positions.get(chart_id),
-#                         #     "xfontsize": xfontsize,
-#                         #     "fontstyle" :fontstyle,
-#                         #     "categorycolor" :categorycolor,
-#                         #     "valuecolor" :valuecolor,
-#                         #     "yfontsize" :yfontsize,
-#                         #     "chart_heading":chart_heading,
-#                         #     "headingColor":headingColor
-                                    
-#                         # })
-#                         grouped_df = dataframe.groupby(x_axis[0])[y_axis].agg(aggregate_py).reset_index()
-#                         print("Grouped DataFrame:", grouped_df.head())
-#                         categories = grouped_df[x_axis[0]].tolist()
-#                         # values = [float(value) for value in grouped_df[y_axis[0]]]
-#                         if isinstance(categories[0], pd.Timestamp):  # Assumes at least one value is present
-#                             categories = [category.strftime('%Y-%m-%d') for category in categories]
-#                         else:
-#                             categories = [str(category) for category in categories]  
-#                         values = [float(value) for value in grouped_df[y_axis[0]]]
-
-#                         print("categories--222",categories)
-#                         print("values--222",values)
-#                         # Filter categories and values based on filter_options
-#                         filtered_categories = []
-#                         filtered_values = []
-#                         for category, value in zip(categories, values):
-#                             if category in filter_options:
-#                                 filtered_categories.append(category)
-#                                 filtered_values.append(value)
-#                         print("Filtered Categories:", filtered_categories)
-#                         print("Filtered Values:", filtered_values)
-#                         chart_data_list.append({
-#                             "categories": filtered_categories,
-#                             "values": filtered_values,
-#                             "chart_id": chart_id,
-#                             "chart_type": chart_type,
-#                             "chart_color": chart_color,
-#                             "x_axis": x_axis,
-#                             "y_axis": y_axis,
-#                             "aggregate": aggregate,
-#                             "positions": chart_positions.get(chart_id),
-#                             "xfontsize": xfontsize,
-#                             "fontstyle" :fontstyle,
-#                             "categorycolor" :categorycolor,
-#                             "valuecolor" :valuecolor,
-#                             "yfontsize" :yfontsize,
-#                             "chart_heading":chart_heading,
-#                             "headingColor":headingColor,
-#                             "table_name":table_name,
-#                             "filter_options":filter_options,
-#                             "ClickedTool":ClickedTool,
-#                             "Bgcolour":areacolour,
-#                             "table_name":table_name,
-#                         })
-
-#             conn.close()  # Close the main connection
-#             return chart_data_list
-
-#         except psycopg2.Error as e:
-#             print("Error fetching chart data:", e)
-#             conn.close()
-#             return None
-#     else:
-#         return None
 
 
 
@@ -1074,10 +661,6 @@ def apply_calculations(dataframe, calculationData, x_axis, y_axis):
     return dataframe
 
 
-import numpy as np
-
-
-
 
 
 def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,droppableBgColor,opacity,image_ids,chart_type):
@@ -1141,42 +724,47 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
 
             print("Processed chart_opacities:", chart_opacities)
           
-            print("chart typ", chart_type)
+
+            import json
             try:
+                # Step 1: Normalize chart_type into a list
                 if isinstance(chart_type, str):
                     chart_type_str = chart_type.strip()
 
                     if chart_type_str.startswith("[") and chart_type_str.endswith("]"):
                         try:
-                            # First try proper JSON parsing
+                            # Try parsing as JSON (e.g., '["bar", "line"]')
                             chart_type_values = json.loads(chart_type_str)
                         except json.JSONDecodeError:
-                            # Fall back to ast.literal_eval (handles "['text']" and similar)
+                            # Fallback to literal_eval for Python-style strings (e.g., "['bar', 'line']")
                             chart_type_values = ast.literal_eval(chart_type_str)
 
                     elif chart_type_str.startswith("{") and chart_type_str.endswith("}"):
-                        # PostgreSQL array-style string
+                        # Handle PostgreSQL array-style string (e.g., "{bar,line}")
                         clean_str = chart_type_str.strip('{}')
-                        chart_type_values = [s.strip().strip('"') for s in clean_str.split(',')]
+                        chart_type_values = [s.strip().strip('"') for s in clean_str.split(',') if s.strip()]
                     else:
+                        # Single value string
                         chart_type_values = [chart_type_str]
 
                 elif isinstance(chart_type, list):
                     chart_type_values = chart_type
+
                 else:
                     raise ValueError("Unsupported chart_type format")
 
+                # Step 2: Map values to chart_ids
                 chart_type_value = {
                     chart_id: chart_type_values[idx] if idx < len(chart_type_values) else None
                     for idx, chart_id in enumerate(chart_ids)
                 }
+
                 print("chart_type_value:", chart_type_value)
 
             except Exception as e:
                 print("Error processing chart_type values:", e)
                 chart_type_value = {chart_id: None for chart_id in chart_ids}
-                print("chart_type:", chart_type)
-
+                print("chart_type_value:", chart_type_value)
             chart_positions = {chart_id: positions[idx] if idx < len(positions) else None for idx, chart_id in enumerate(chart_ids)}
             chart_filters = {chart_id: filter_options[idx] if idx < len(filter_options) else None for idx, chart_id in enumerate(chart_ids)}
             # areacolour={chart_id:areacolour[idx] if idx < len(positions) else None for idx, chart_id in enumerate(chart_ids)}
@@ -1203,7 +791,7 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
             print("chart_data_list",chart_data_list)
             for chart_id in sorted_chart_ids:
                 cursor = conn.cursor()
-                cursor.execute("SELECT id, database_name, selected_table, x_axis, y_axis, aggregate, chart_type, filter_options, chart_heading, chart_color, selectedUser,xfontsize,fontstyle,categorycolor,valuecolor,yfontsize,headingColor,ClickedTool,Bgcolour,OptimizationData,calculationdata,selectedFrequency,chart_name FROM table_chart_save WHERE id = %s", (chart_id,))
+                cursor.execute("SELECT id, database_name, selected_table, x_axis, y_axis, aggregate, chart_type, filter_options, chart_heading, chart_color, selectedUser,xfontsize,fontstyle,categorycolor,valuecolor,yfontsize,headingColor,ClickedTool,Bgcolour,OptimizationData,calculationdata,selectedFrequency,chart_name,user_id FROM table_chart_save WHERE id = %s", (chart_id,))
 #                 cursor.execute("""
 #     SELECT id, database_name, selected_table, x_axis, y_axis, aggregate, chart_type,
 #            filter_options, chart_heading, chart_color, selectedUser, xfontsize,
@@ -1242,6 +830,7 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                     final_opacity = chart_opacities.get(chart_id, 1.0) # Default to 1.0 if not found in the passed opacities
                     selectedFrequency=chart_data[21]
                     chart_name=chart_data[22]
+                    user_id=chart_data[23]
                     
                     print("Chart OptimizationData:", OptimizationData)
                     print("final_opacity",final_opacity)
@@ -1307,7 +896,7 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                                         "chart_id": chart_id,
                                         "categories": categories,
                                         "values": values,
-                                        "chart_type":chart_data[6],
+                                        "chart_type": chart_type,
                                         "chart_heading": chart_heading,
                                         "positions": chart_positions.get(chart_id),
                                         "xfontsize": xfontsize,
@@ -1321,7 +910,8 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                                         "Bgcolour":areacolour,
                                         "table_name":table_name,
                                         "opacity":final_opacity,
-                                        "chart_name":chart_name 
+                                        "chart_name":chart_name,
+                                        "user_id": user_id,
 
                                     
                                     })
@@ -1401,21 +991,7 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                                     "error": f"Not enough data for decomposition. At least {2 * period} points needed."
                                 }), 400
 
-                            # Perform decomposition
-                            # decomposition = seasonal_decompose(ts_data, model='additive', period=period)
-
-                            # # Align and extract data
-                            # aligned_index = decomposition.observed.dropna().index \
-                            #     .intersection(decomposition.trend.dropna().index) \
-                            #     .intersection(decomposition.seasonal.dropna().index) \
-                            #     .intersection(decomposition.resid.dropna().index)
-
-                            # dates = aligned_index.strftime('%Y-%m-%d').tolist()
-                            # observed = decomposition.observed.dropna().tolist()
-                            # # observed = decomposition.observed.loc[aligned_index].tolist()
-                            # trend = decomposition.trend.loc[aligned_index].tolist()
-                            # seasonal = decomposition.seasonal.loc[aligned_index].tolist()
-                            # residual = decomposition.resid.loc[aligned_index].tolist()
+                           
                             decomposition = seasonal_decompose(ts_data, model='additive', period=period)
 
                             trend = decomposition.trend.dropna().tolist()
@@ -1430,7 +1006,7 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                                 "categories": dates,
                                 "values": observed,
                                 "chart_id": chart_id,
-                                "chart_type": chart_data[6],
+                                "chart_type": chart_type,
                                 "chart_color": chart_color,
                                 "x_axis": x_axis,
                                 "y_axis": y_axis,
@@ -1451,7 +1027,8 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                                 "opacity": final_opacity,
                                 "calculationData": calculationData,
                                 "selectedFrequency":selectedFrequency,
-                                "chart_name":chart_name 
+                                "chart_name": (user_id, chart_name),
+                                "user_id": user_id 
                             })
 
                         except Exception as e:
@@ -1465,7 +1042,7 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                         # Append single value chart data
                         chart_data_list.append({
                             "chart_id": chart_id,
-                            "chart_type": chart_data[6],
+                            "chart_type": chart_type,
                             "chart_heading": chart_heading,
                             "value": single_value_result,
                             "positions": chart_positions.get(chart_id),
@@ -1482,69 +1059,43 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                             "Bgcolour":areacolour,
                             "table_name":table_name,
                             "opacity":final_opacity,
-                            "chart_name":chart_name  
+                            "chart_name": (user_id, chart_name),
+                            "user_id": user_id  
+                        })
+                        continue  # Skip further processing for this chart ID
+                    elif chart_type == "meterGauge":
+                        print("meterGauge")
+                        single_value_result = fetchText_data(database_name, table_name, x_axis[0], aggregate,selected_user)
+                        print("Single Value Result for Chart ID", chart_id, ":", single_value_result)
+                        # Append single value chart data
+                        chart_data_list.append({
+                            "chart_id": chart_id,
+                            "chart_type": chart_type,
+                            "chart_heading": chart_heading,
+                            "value": single_value_result,
+                            "positions": chart_positions.get(chart_id),
+                            "xfontsize": xfontsize,
+                            "fontstyle" :fontstyle,
+                            "categorycolor" :categorycolor,
+                            "valuecolor" :valuecolor,
+                            "yfontsize" :yfontsize,
+                            "headingColor":headingColor, 
+                            "filter_options":filter_options ,
+                            "x_axis": x_axis,
+                            "y_axis": y_axis,   
+                            "ClickedTool":ClickedTool, 
+                            "Bgcolour":areacolour,
+                            "chart_color": chart_color,
+                            "table_name":table_name,
+                            "opacity":final_opacity,
+                            "chart_name": (user_id, chart_name),
+                            "user_id": user_id  
                         })
                         continue  # Skip further processing for this chart ID
                     # Proceed with category and value generation for non-singleValueChart types
                     dataframe = fetch_chart_data(connection, table_name)
                     print("Chart ID", chart_id)
-                    print("Chart Type", chart_type)
-                    # Convert y_axis values if required (either in time format or as numeric)
-                    # if calculationData and calculationData.get('calculation') and calculationData.get('columnName'):
-                    #     calc_formula = calculationData['calculation']
-                    #     new_col_name = calculationData['columnName']
-
-                    #     if new_col_name in y_axis:
-                    #                 # Handle "if (...) then ... else ..." expressions
-                    #         if calc_formula.strip().lower().startswith("if"):
-                    #                     # Match pattern: if(condition) then 'value' else 'value'
-                    #             match = re.match(
-                    #                 r"if\s*\((.+?)\)\s*then\s*'?(.*?)'?\s*else\s*'?(.*?)'?$",
-                    #                 calc_formula.strip(),
-                    #                         re.IGNORECASE
-                    #                     )
-                    #             if not match:
-                    #                 raise ValueError("Invalid if-then-else format in calculation.")
-
-                    #             condition_expr, then_val, else_val = match.groups()
-
-                    #             def replace_column(match_obj):
-                    #                 col_name = match_obj.group(1)
-                    #                 if col_name in dataframe.columns:
-                    #                     return f"dataframe['{col_name}']"
-                    #                 else:
-                    #                     raise ValueError(f"Column {col_name} not found in DataFrame.")
-
-                    #                     # Replace column references in condition expression
-                    #             condition_expr_python = re.sub(r'\[(.*?)\]', replace_column, condition_expr)
-
-                    #             print("Evaluating formula as np.where:", f"np.where({condition_expr_python}, '{then_val}', '{else_val}')")
-                    #                     # Evaluate the condition safely
-                    #             dataframe[new_col_name] = np.where(eval(condition_expr_python), then_val, else_val)
-
-                    #         else:
-                    #                     # Regular math formula
-                    #             def replace_column(match_obj):
-                    #                 col_name = match_obj.group(1)
-                    #                 if col_name in dataframe.columns:
-                    #                     return f"dataframe['{col_name}']"
-                    #                 else:
-                    #                     raise ValueError(f"Column {col_name} not found in DataFrame.")
-
-                    #             calc_formula_python = re.sub(r'\[(.*?)\]', replace_column, calc_formula)
-                    #             print("Evaluating formula:", calc_formula_python)
-                    #             dataframe[new_col_name] = eval(calc_formula_python)
-
-                    #         print(f"New column '{new_col_name}' created.")
-                    #        # Replace only the column that matches the calculated column name
-                    #         y_axis = [
-                    #             new_col_name if col == new_col_name else col
-                    #             for col in y_axis
-                    #         ]
-                    # if calculationData and calculationData.get('calculation') and calculationData.get('columnName'):
-                    #         calc_formula = calculationData['calculation']
-                    #         new_col_name = calculationData['columnName']
-                    #         replace_col_name = calculationData.get('replaceColumn', new_col_name)
+                 
                     if calculationData and isinstance(calculationData, list):
                         for calc_entry in calculationData:
                             calc_formula = calc_entry.get('calculation', '').strip()
@@ -1775,18 +1326,19 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                     #         "calculationData":calculationData ,
                     #         "chart_name":chart_name     
                     #     })
-                    if aggregate_py == 'count' and chart_type not in ["duealbarChart", "duealChart","treeHierarchy","Butterfly","tablechart"]:
+                    if aggregate_py == 'count' and chart_type not in ["duealbarChart", "duealChart","treeHierarchy","Butterfly","tablechart","stackedbar"]:
                         print("COUNT AGGREGATION")
                         print("Aggregate is count", aggregate_py)
                         print("table_name:", table_name)
                         print("y_axis:", y_axis)
                         print("filter_options:", filter_options)
                         print("X-Axis:", x_axis)
+                        print("chart type",chart_type)
                         
                         if chart_type is None:
                             chart_typec = chart_data[6]  # Fallback to database value
                             print(f"WARNING: chart_type was None for chart_id {chart_id}, using database value: {chart_type}")
-                        print("chart_type:", chart_typec)                 
+                        # print("chart_type:", chart_typec)                 
                         # Start with fresh data - don't rely on the potentially modified dataframe
                         df = fetch_chart_data(connection, table_name)
                         print("Original df rows before any processing:", len(df))
@@ -1874,11 +1426,40 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                             # Group the filtered dataframe
                             print(f"\nGrouping by: {x_axis[0]}")
                             grouped_df = df.groupby(x_axis[0]).size().reset_index(name="count")
-                            print("Grouped DataFrame after filtering:", grouped_df)
                             
+                            
+                            # print("Grouped DataFrame after filtering:", grouped_df)
+                            
+                            # # Extract final categories and values
+                            # categories = grouped_df[x_axis[0]].tolist()
+                            # values = grouped_df["count"].tolist()
+                            # Group the filtered dataframe
+
+
+                            print("Grouped DataFrame after filtering:", grouped_df)
+
+                            # Apply optimization filters (top10, bottom10, both5) if specified
+                            if 'OptimizationData' in locals() or 'OptimizationData' in globals():
+                                if OptimizationData == 'top10':
+                                    # Sort descending and get top 10
+                                    grouped_df = grouped_df.sort_values(by="count", ascending=False).head(10)
+                                    print("Applied top10 optimization filter")
+                                elif OptimizationData == 'bottom10':
+                                    # Sort ascending and get bottom 10
+                                    grouped_df = grouped_df.sort_values(by="count", ascending=True).head(10)
+                                    print("Applied bottom10 optimization filter")
+                                elif OptimizationData == 'both5':
+                                    # Get top 5 and bottom 5
+                                    top_df = grouped_df.sort_values(by="count", ascending=False).head(5)
+                                    bottom_df = grouped_df.sort_values(by="count", ascending=True).head(5)
+                                    grouped_df = pd.concat([top_df, bottom_df])
+                                    print("Applied both5 optimization filter")
+
                             # Extract final categories and values
                             categories = grouped_df[x_axis[0]].tolist()
                             values = grouped_df["count"].tolist()
+
+
                             
                             print(f"Final Categories: {categories}")
                             print(f"Final Values: {values}")
@@ -1891,7 +1472,7 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                             "categories": categories,
                             "values": values,
                             "chart_id": chart_id,
-                            "chart_type": chart_data[6],
+                            "chart_type": chart_type,
                             "chart_color": chart_color,
                             "x_axis": x_axis,
                             "y_axis": y_axis,
@@ -1910,13 +1491,14 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                             "table_name": table_name,  
                             "opacity": final_opacity,
                             "calculationData": calculationData,
-                            "chart_name":chart_name      
+                            "chart_name": (user_id, chart_name),
+                            "user_id": user_id      
                         })
                         continue 
 
 
 
-                        continue  # Skip further processing for this chart ID
+                        # continue  # Skip further processing for this chart ID
                     if chart_type == "tablechart":
                         print("Tree hierarchy chart detected")
                         print("Tree hierarchy chart detected")
@@ -1942,7 +1524,7 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                                 "categories": categories,
                                 "values": values,
                                 "chart_id": chart_id,
-                                "chart_type": chart_data[6],
+                                "chart_type": chart_type,
                                 "chart_color": chart_color,
                                 "x_axis": x_axis,
                                 "y_axis": y_axis,
@@ -1961,7 +1543,8 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                                 "table_name":table_name,
                                 "opacity":final_opacity ,
                                 "calculationData":calculationData,
-                                "chart_name":chart_name    
+                                 "chart_name": (user_id, chart_name),
+                                "user_id": user_id    
                             })
                         continue 
                     if chart_type == "treeHierarchy":
@@ -2009,7 +1592,7 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                                 "categories": categories,
                                 "values": values,
                                 "chart_id": chart_id,
-                                "chart_type": chart_data[6],
+                                "chart_type": chart_type,
                                 "chart_color": chart_color,
                                 "x_axis": x_axis,
                                 "y_axis": y_axis,
@@ -2028,7 +1611,8 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                                 "table_name":table_name,
                                 "opacity":final_opacity,
                                 "calculationData":calculationData ,
-                                "chart_name":chart_name    
+                                "chart_name": (user_id, chart_name),
+                                "user_id": user_id    
                             })
                         continue 
                     if chart_type == "duealChart" :
@@ -2074,7 +1658,7 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                                     "series1":[row[1] for row in data],
                                     "series2": [row[2] for row in data],
                                     "chart_id": chart_id,
-                                    "chart_type": chart_data[6],
+                                    "chart_type": chart_type,
                                     "chart_color": chart_color,
                                     "x_axis": x_axis,
                                     "y_axis": y_axis,
@@ -2093,7 +1677,8 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                                     "table_name":table_name,
                                     "opacity":final_opacity,
                                     "calculationData":calculationData,
-                                    "chart_name":chart_name     
+                                    "chart_name": (user_id, chart_name),
+                                    "user_id": user_id     
                             })
                     elif chart_type == "Butterfly":
                             print("Butterfly Chart")
@@ -2123,7 +1708,7 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                                     "series1":[row[1] for row in data],
                                     "series2": [row[2] for row in data],
                                     "chart_id": chart_id,
-                                    "chart_type": chart_data[6],
+                                    "chart_type":chart_type,
                                     "chart_color": chart_color,
                                     "x_axis": x_axis,
                                     "y_axis": y_axis,
@@ -2142,9 +1727,10 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                                     "table_name":table_name,
                                     "opacity":final_opacity,
                                     "calculationData":calculationData,
-                                    "chart_name":chart_name     
+                                    "chart_name": (user_id, chart_name),
+                                    "user_id": user_id     
                             })
-                    elif chart_type == "duealbarChart":
+                    elif chart_type in ["duealbarChart", "stackedbar"]:
                         print("duealbarChart")
                         # filter_options = json.loads(filter_options)
                         print('calculationData',calculationData)
@@ -2177,7 +1763,7 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                                 "series1":[row[1] for row in datass],
                                 "series2": [row[2] for row in datass],
                                 "chart_id": chart_id,
-                                "chart_type": chart_data[6],
+                                "chart_type": chart_type,
                                 "chart_color": chart_color,
                                 "x_axis": x_axis,
                                 "y_axis": y_axis,
@@ -2196,7 +1782,8 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                                 "table_name":table_name,
                                 "opacity":final_opacity,
                                 "calculationData":calculationData ,
-                                "chart_name":chart_name    
+                                "chart_name": (user_id, chart_name),
+                                "user_id": user_id    
                         })
 
                     elif chart_type == "sampleAitestChart":
@@ -2279,7 +1866,7 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                             "categories": filtered_categories,
                             "values": filtered_values,
                             "chart_id": chart_id,
-                            "chart_type": chart_data[6],
+                            "chart_type": chart_type,
                             "chart_color": chart_color,
                             "x_axis": x_axis,
                             "y_axis": y_axis,
@@ -2300,55 +1887,13 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                             "OptimizationData": OptimizationData if 'OptimizationData' in locals() or 'OptimizationData' in globals() else None,
                             "opacity":final_opacity,
                             "calculationData":calculationData,
-                            "chart_name":chart_name      
+                            "chart_name": (user_id, chart_name),
+
+                            "user_id": user_id      
                         })
 
 
-                        # grouped_df = dataframe.groupby(x_axis[0])[y_axis].agg(aggregate_py).reset_index()
-                        # print("Grouped DataFrame:", grouped_df.head())
-                        # categories = grouped_df[x_axis[0]].tolist()
-                        # # values = [float(value) for value in grouped_df[y_axis[0]]]
-                        # if isinstance(categories[0], pd.Timestamp):  # Assumes at least one value is present
-                        #     categories = [category.strftime('%Y-%m-%d') for category in categories]
-                        # else:
-                        #     categories = [str(category) for category in categories]  
-                        # values = [float(value) for value in grouped_df[y_axis[0]]]
-
-                        # print("categories--222",categories)
-                        # print("values--222",values)
-                        # # Filter categories and values based on filter_options
-                        # filtered_categories = []
-                        # filtered_values = []
-                        # for category, value in zip(categories, values):
-                        #     if category in filter_options:
-                        #         filtered_categories.append(category)
-                        #         filtered_values.append(value)
-                        # print("Filtered Categories:", filtered_categories)
-                        # print("Filtered Values:", filtered_values)
-                        # chart_data_list.append({
-                        #     "categories": filtered_categories,
-                        #     "values": filtered_values,
-                        #     "chart_id": chart_id,
-                        #     "chart_type": chart_type,
-                        #     "chart_color": chart_color,
-                        #     "x_axis": x_axis,
-                        #     "y_axis": y_axis,
-                        #     "aggregate": aggregate,
-                        #     "positions": chart_positions.get(chart_id),
-                        #     "xfontsize": xfontsize,
-                        #     "fontstyle" :fontstyle,
-                        #     "categorycolor" :categorycolor,
-                        #     "valuecolor" :valuecolor,
-                        #     "yfontsize" :yfontsize,
-                        #     "chart_heading":chart_heading,
-                        #     "headingColor":headingColor,
-                        #     "table_name":table_name,
-                        #     "filter_options":filter_options,
-                        #     "ClickedTool":ClickedTool,
-                        #     "Bgcolour":areacolour,
-                        #     "table_name":table_name,
-                        # })
-
+                      
             conn.close()  # Close the main connection
             return chart_data_list
 

@@ -2,6 +2,8 @@ from flask import Flask, request, jsonify
 import psycopg2
 import bcrypt
 import logging
+
+import binascii
 from config import PASSWORD, USER_NAME, HOST, PORT
 
 def get_db_connection(dbname="datasource"):
@@ -55,17 +57,6 @@ def create_database(organizationName):
         conn.close()
 
 
-# def create_table_if_not_exists(cursor):
-#     cursor.execute("""
-#     CREATE TABLE IF NOT EXISTS organizationdatatest (
-#         id SERIAL PRIMARY KEY,
-#         organizationName VARCHAR(255) NOT NULL,
-#         email VARCHAR(255) NOT NULL,
-#         userName VARCHAR(255) NOT NULL,
-#         password VARCHAR(255) NOT NULL
-#         logo VARCHAR(255)  -- new column
-#     );
-#     """)
 
 def create_table_if_not_exists(cursor):
     # Create table if it doesn't exist
@@ -144,18 +135,7 @@ def fetch_usersdata():
         conn.close()
 
 
-# def fetch_login_data(email, password):
-#     conn = get_db_connection()
-#     cursor = conn.cursor()
-#     create_table_if_not_exists(cursor)
 
-#     # SQL query to check if email and password match
-#     cursor.execute("SELECT * FROM organizationdatatest WHERE email = %s AND password = %s", (email, password))
-#     user = cursor.fetchone()
-
-#     cursor.close()
-#     conn.close()    
-#     return { "user": user}
 
 def fetch_login_data(email, password):
     conn = get_db_connection()
@@ -180,45 +160,6 @@ def fetch_login_data(email, password):
 
 
 
-import binascii
-import bcrypt
-# def fetch_company_login_data(email, password, company):
-#     conn = connect_db(company)
-#     cursor = conn.cursor()
-
-#     # First query to fetch the user details (except password)
-#     cursor.execute("SELECT employee_id, employee_name, role_id, email FROM employee_list WHERE email = %s", (email,))
-#     user = cursor.fetchone()
-
-#     if user:
-#         # Second query to fetch the hashed password separately
-#         cursor.execute("SELECT password FROM employee_list WHERE email = %s", (email,))
-#         hashed_password_row = cursor.fetchone()
-
-#         if hashed_password_row:
-#             stored_hash_with_hex = hashed_password_row[0]  # Get the password from the result
-#             stored_hash_bytes = binascii.unhexlify(stored_hash_with_hex.replace('\\x', ''))
-
-#             # Check if the password matches the hashed password
-#             if bcrypt.checkpw(password.encode('utf-8'), stored_hash_bytes):
-#                 print("Password match!")
-#                 cursor.close()
-#                 conn.close()
-#                 return user  # Return the user details (without the password)
-#             else:
-#                 print("Password does not match!")
-#         else:
-#             print("Password not found!")
-
-#     else:
-#         print("User not found!")
-
-#     cursor.close()
-#     conn.close()
-#     return None
-
-import binascii
-import bcrypt
 
 def fetch_company_login_data(email, password, company):
     conn = connect_db(company)
@@ -301,77 +242,6 @@ def fetch_company_login_data(email, password, company):
                     conne.close()
                     return None
 
-    #         if bcrypt.checkpw(password.encode('utf-8'), stored_hash_bytes):
-    #             print("Password match!")
-    #             # role_conn = get_db_connection() # Connect to the role database only if password matches
-    #             # role_cursor = role_conn.cursor()
-
-    #             try:
-    #                 cursor.execute("SELECT permissions FROM role WHERE role_id = %s", (user[2],))
-    #                 role_data = cursor.fetchone()
-    #                 permissions = role_data[0] if role_data else None # Handle case where role is not found
-    #             finally:
-    #                 cursor.close() if cursor else None  # Check if role_cursor exists before closing
-    #                 # role_conn.close() if role_conn else None   # Check if role_conn exists before closing
-    #             # Check if 'logo' column exists
-    #             cursor1.execute("""
-    #             SELECT column_name 
-    #             FROM information_schema.columns 
-    #             WHERE table_name = 'organizationdatatest' AND column_name = 'logo';
-    #             """)
-    #             logo_column_exists  = cursor1.fetchone()
-
-    #             # If not, add the column
-    #             if not logo_column_exists :
-    #                 cursor.execute("""
-    #                 ALTER TABLE organizationdatatest ADD COLUMN logo VARCHAR(255);
-    #                 """)
-    #             cursor1.execute("SELECT logo FROM organizationdatatest WHERE organizationname = %s", (company,))
-    #             logo_row = cursor1.fetchone()
-    #             logo_path = None
-    #             if logo_row:
-    #                 logo_path = logo_row[0]  # e.g., 'company_abc/logo.png'
-    #             # New query to fetch all table names in the database
-    #             # cursor.execute("SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'")
-    #             cursor.execute("""
-    #                 SELECT table_name 
-    #                 FROM information_schema.tables 
-    #                 WHERE table_schema = 'public'
-    #                 AND table_name NOT IN ('employee_list', 'datasource')
-    #             """)
-    #             tables = cursor.fetchall()
-                
-    #             # Print or log the table names
-    #             print("Tables in the database:")
-    #             for table in tables:
-    #                 print(table[0])
-
-    #             cursor.close()
-    #             conn.close()
-    #             cursor1.close()
-    #             # return user,tables  # Return the user details (without the password)
-    #             return {
-    #                 "user": user,  # User details
-    #                 "permissions": permissions, # Role Name
-    #                 "tables": tables,  # List of table names
-    #                 "logo_url": f"http://localhost:5000/static/{logo_path}" if logo_path else None
-
-                   
-    #             }
-    #         else:
-    #             print("Password does not match!")
-    #     else:
-    #         print("Password not found!")
-
-    # else:
-    #     print("User not found!")
-
-    # cursor.close()
-    # conn.close()
-    # return None
-
-
-
 
 def fetch_company_data():
     conn = get_db_connection()
@@ -399,22 +269,6 @@ def fetch_role_id_data():
 
 
 
-
-# def create_user_table(conn):
-#     try:
-#         with conn.cursor() as cursor:
-#             cursor.execute("""
-#                 CREATE TABLE IF NOT EXISTS employee_list (
-#                     employee_id SERIAL PRIMARY KEY,
-#                     employee_name VARCHAR(255),
-#                     role_id VARCHAR(255),
-#                     e_mail VARCHAR(255),
-#                     password VARCHAR(255)
-#                 );
-#             """)
-#         conn.commit()
-#     except Exception as e:
-#         print(f"Error creating table: {e}")
 
 def create_user_table(conn):
     try:

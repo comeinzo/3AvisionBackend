@@ -749,7 +749,181 @@ def create_database_view(company_name, view_config):
             connection.close()
         raise
 
-def create_database_viewdb(company_name, view_config,selectedUser):
+# def create_database_viewdb(company_name, view_config,selectedUser):
+#     print("company name =    ",company_name)
+#     """
+#     Create a database view based on the provided configuration
+    
+#     Args:
+#         company_name (str): Name of the company/database
+#         view_config (dict): Configuration for the view
+#             - viewName (str): Name of the view
+#             - baseTable (str): Base table name
+#             - selectedColumns (list, optional): List of selected columns
+#             - dateFilter (dict, optional): Date filter configuration
+#             - columnConditions (list, optional): Column condition configurations
+    
+#     Returns:
+#         dict: Success message and view details
+#     """
+#     try:
+#         # connection = get_company_db_connection(company_name)
+#         if not company_name:
+#             raise ValueError("Database name is missing")
+
+#         if not selectedUser or selectedUser.lower() == 'null':
+#             print("Using default local database connection...")
+#             # connection_string = f"dbname={company_name} user={USER_NAME} password={PASSWORD} host={HOST}"
+#             connection = get_company_db_connection(company_name)
+#         else:  # External connection
+#             connection_details = fetch_external_db_connection(company_name, selectedUser)
+#             if not connection_details:
+#                 raise Exception(f"Unable to fetch external database connection details for user '{selectedUser}'")
+
+#             db_details = {
+#                 "host": connection_details[3],
+#                 "database": connection_details[7],
+#                 "user": connection_details[4],
+#                 "password": connection_details[5],
+#                 "port": int(connection_details[6])
+#             }
+            
+#             print(f"Connecting to external database: {db_details['database']}@{db_details['host']}:{db_details['port']} as {db_details['user']}")
+#             connection = psycopg2.connect(
+#                 dbname=db_details['database'],
+#                 user=db_details['user'],
+#                 password=db_details['password'],
+#                 host=db_details['host'],
+#                 port=db_details['port'],
+#             )
+#         cursor = connection.cursor()
+
+#         view_name = view_config['viewName'].lower()
+#         base_table = view_config['baseTable']
+#         selected_columns = view_config.get('selectedColumns')
+#         date_filter = view_config.get('dateFilter')
+#         column_conditions = view_config.get('columnConditions')
+
+#         # Build the SELECT clause
+#         if selected_columns and len(selected_columns) > 0:
+#             # Validate that all selected columns exist
+#             all_columns = get_table_columns(company_name, base_table)
+#             invalid_columns = [col for col in selected_columns if col not in all_columns]
+#             if invalid_columns:
+#                 raise ValueError(f'Invalid columns: {invalid_columns}')
+            
+#             columns_str = ', '.join([f'"{col}"' for col in selected_columns])
+#         else:
+#             columns_str = '*'
+
+#         # Build the WHERE clause
+#         where_conditions = []
+#         query_params = []
+        
+#         # Add date filter
+#         if date_filter:
+#             date_column = date_filter['column']
+#             start_date = date_filter['startDate']
+#             end_date = date_filter['endDate']
+            
+#             # Validate date column exists
+#             cursor.execute("""
+#                 SELECT column_name 
+#                 FROM information_schema.columns 
+#                 WHERE table_name = %s AND column_name = %s
+#             """, (base_table, date_column))
+            
+#             if not cursor.fetchone():
+#                 raise ValueError(f'Date column {date_column} not found in table {base_table}')
+            
+#             where_conditions.append(f'"{date_column}" >= %s AND "{date_column}" <= %s')
+#             query_params.extend([start_date, end_date])
+
+#         # Add column conditions
+#         if column_conditions:
+#             condition_parts, condition_params = build_where_conditions(column_conditions)
+#             where_conditions.extend(condition_parts)
+#             query_params.extend(condition_params)
+
+#         # Build WHERE clause
+#         where_clause = ""
+#         if where_conditions:
+#             where_clause = " WHERE " + " AND ".join(where_conditions)
+
+#         # Build the complete CREATE VIEW query
+#         create_view_query = f'''
+#             CREATE VIEW "{view_name}" AS 
+#             SELECT {columns_str} 
+#             FROM "{base_table}"{where_clause}
+#         '''
+
+#         print(f"Creating view with query: {create_view_query}")
+#         print(f"Query parameters: {query_params}")
+
+#         # Execute the CREATE VIEW statement
+#         if query_params:
+#             # For views with parameters, we need to substitute them directly
+#             # since CREATE VIEW doesn't support parameterized queries
+#             formatted_query = create_view_query
+#             for param in query_params:
+#                 formatted_query = formatted_query.replace('%s', f"'{param}'", 1)
+#             cursor.execute(formatted_query)
+#         else:
+#             cursor.execute(create_view_query)
+
+#         # Commit the transaction
+#         connection.commit()
+
+#         # Get view information
+#         cursor.execute("""
+#             SELECT schemaname, viewname, definition 
+#             FROM pg_views 
+#             WHERE viewname = %s
+#         """, (view_name,))
+        
+#         view_info = cursor.fetchone()
+
+#         cursor.close()
+#         connection.close()
+
+#         return {
+#             'success': True,
+#             'message': f'View "{view_name}" created successfully',
+#             'viewName': view_name,
+#             'baseTable': base_table,
+#             'columnsCount': len(selected_columns) if selected_columns else 'all',
+#             'hasDateFilter': bool(date_filter),
+#             'hasColumnConditions': bool(column_conditions),
+#             'definition': view_info[2] if view_info else None
+#         }
+
+#     except psycopg2.Error as e:
+#         print(f"PostgreSQL error creating view: {e}")
+#         if 'connection' in locals() and connection:
+#             connection.rollback()
+#             cursor.close()
+#             connection.close()
+        
+#         # Handle specific PostgreSQL errors
+#         if 'already exists' in str(e):
+#             raise ValueError(f'View "{view_name}" already exists')
+#         else:
+#             raise ValueError(f'Database error: {str(e)}')
+    
+#     except Exception as e:
+#         print(f"Error creating view: {e}")
+#         if 'connection' in locals() and connection:
+#             connection.rollback()
+#             cursor.close()
+#             connection.close()
+#         raise
+
+
+
+
+
+def create_database_viewdb(company_name, view_config, selectedUser):
+    print("company name =    ", company_name)
     """
     Create a database view based on the provided configuration
     
@@ -761,19 +935,20 @@ def create_database_viewdb(company_name, view_config,selectedUser):
             - selectedColumns (list, optional): List of selected columns
             - dateFilter (dict, optional): Date filter configuration
             - columnConditions (list, optional): Column condition configurations
+        selectedUser (str): User selection for database connection
     
     Returns:
         dict: Success message and view details
     """
     try:
-        # connection = get_company_db_connection(company_name)
+        # Validate required parameters
         if not company_name:
             raise ValueError("Database name is missing")
 
-        if not selectedUser or selectedUser.lower() == 'null':
+        # Establish database connection
+        if not selectedUser or selectedUser.lower() == 'null' or selectedUser.lower() == 'local':
             print("Using default local database connection...")
-            connection_string = f"dbname={company_name} user={USER_NAME} password={PASSWORD} host={HOST}"
-            connection = psycopg2.connect(connection_string)
+            connection = get_company_db_connection(company_name)
         else:  # External connection
             connection_details = fetch_external_db_connection(company_name, selectedUser)
             if not connection_details:
@@ -795,21 +970,29 @@ def create_database_viewdb(company_name, view_config,selectedUser):
                 host=db_details['host'],
                 port=db_details['port'],
             )
+        
         cursor = connection.cursor()
 
+        # Extract view configuration
         view_name = view_config['viewName'].lower()
         base_table = view_config['baseTable']
         selected_columns = view_config.get('selectedColumns')
         date_filter = view_config.get('dateFilter')
         column_conditions = view_config.get('columnConditions')
 
-        # Build the SELECT clause
+        # Build the SELECT clause with column validation
         if selected_columns and len(selected_columns) > 0:
-            # Validate that all selected columns exist
-            all_columns = get_table_columns(company_name, base_table)
+            # Validate that all selected columns exist using the current connection
+            cursor.execute("""
+                SELECT column_name 
+                FROM information_schema.columns 
+                WHERE table_name = %s
+            """, (base_table,))
+            
+            all_columns = [row[0] for row in cursor.fetchall()]
             invalid_columns = [col for col in selected_columns if col not in all_columns]
             if invalid_columns:
-                raise ValueError(f'Invalid columns: {invalid_columns}')
+                raise ValueError(f'Invalid columns: {invalid_columns}. Available columns: {all_columns}')
             
             columns_str = ', '.join([f'"{col}"' for col in selected_columns])
         else:
@@ -833,7 +1016,7 @@ def create_database_viewdb(company_name, view_config,selectedUser):
             """, (base_table, date_column))
             
             if not cursor.fetchone():
-                raise ValueError(f'Date column {date_column} not found in table {base_table}')
+                raise ValueError(f'Date column "{date_column}" not found in table "{base_table}"')
             
             where_conditions.append(f'"{date_column}" >= %s AND "{date_column}" <= %s')
             query_params.extend([start_date, end_date])
@@ -848,6 +1031,15 @@ def create_database_viewdb(company_name, view_config,selectedUser):
         where_clause = ""
         if where_conditions:
             where_clause = " WHERE " + " AND ".join(where_conditions)
+
+        # Check if view already exists and drop it if it does
+        cursor.execute("""
+            SELECT 1 FROM pg_views WHERE viewname = %s
+        """, (view_name,))
+        
+        if cursor.fetchone():
+            print(f"View '{view_name}' already exists. Dropping it first...")
+            cursor.execute(f'DROP VIEW IF EXISTS "{view_name}" CASCADE')
 
         # Build the complete CREATE VIEW query
         create_view_query = f'''
@@ -865,7 +1057,10 @@ def create_database_viewdb(company_name, view_config,selectedUser):
             # since CREATE VIEW doesn't support parameterized queries
             formatted_query = create_view_query
             for param in query_params:
-                formatted_query = formatted_query.replace('%s', f"'{param}'", 1)
+                if isinstance(param, str):
+                    formatted_query = formatted_query.replace('%s', f"'{param}'", 1)
+                else:
+                    formatted_query = formatted_query.replace('%s', str(param), 1)
             cursor.execute(formatted_query)
         else:
             cursor.execute(create_view_query)
@@ -882,6 +1077,9 @@ def create_database_viewdb(company_name, view_config,selectedUser):
         
         view_info = cursor.fetchone()
 
+        # Get column count for response
+        columns_count = len(selected_columns) if selected_columns else 'all'
+
         cursor.close()
         connection.close()
 
@@ -890,7 +1088,7 @@ def create_database_viewdb(company_name, view_config,selectedUser):
             'message': f'View "{view_name}" created successfully',
             'viewName': view_name,
             'baseTable': base_table,
-            'columnsCount': len(selected_columns) if selected_columns else 'all',
+            'columnsCount': columns_count,
             'hasDateFilter': bool(date_filter),
             'hasColumnConditions': bool(column_conditions),
             'definition': view_info[2] if view_info else None
@@ -900,7 +1098,8 @@ def create_database_viewdb(company_name, view_config,selectedUser):
         print(f"PostgreSQL error creating view: {e}")
         if 'connection' in locals() and connection:
             connection.rollback()
-            cursor.close()
+            if 'cursor' in locals() and cursor:
+                cursor.close()
             connection.close()
         
         # Handle specific PostgreSQL errors
@@ -912,10 +1111,82 @@ def create_database_viewdb(company_name, view_config,selectedUser):
     except Exception as e:
         print(f"Error creating view: {e}")
         if 'connection' in locals() and connection:
-            connection.rollback()
-            cursor.close()
-            connection.close()
+            try:
+                connection.rollback()
+                if 'cursor' in locals() and cursor:
+                    cursor.close()
+                connection.close()
+            except:
+                pass  # Connection might already be closed
         raise
+
+
+def build_where_conditions(column_conditions):
+    """
+    Helper function to build WHERE conditions from column conditions
+    
+    Args:
+        column_conditions (list): List of column condition dictionaries
+    
+    Returns:
+        tuple: (condition_parts, condition_params)
+    """
+    condition_parts = []
+    condition_params = []
+    
+    for condition in column_conditions:
+        column = condition['column']
+        operator = condition['operator'].upper()
+        value = condition['value']
+        value2 = condition.get('value2', '')
+        data_type = condition.get('dataType', 'text')
+        
+        if operator in ['=', '!=', '<>', '<', '>', '<=', '>=']:
+            condition_parts.append(f'"{column}" {operator} %s')
+            condition_params.append(value)
+        
+        elif operator in ['LIKE', 'ILIKE']:
+            condition_parts.append(f'"{column}" {operator} %s')
+            condition_params.append(value)
+        
+        elif operator == 'IN':
+            if isinstance(value, str):
+                # Split comma-separated values
+                values = [v.strip() for v in value.split(',')]
+            else:
+                values = value if isinstance(value, list) else [value]
+            
+            placeholders = ', '.join(['%s'] * len(values))
+            condition_parts.append(f'"{column}" IN ({placeholders})')
+            condition_params.extend(values)
+        
+        elif operator == 'BETWEEN':
+            condition_parts.append(f'"{column}" BETWEEN %s AND %s')
+            condition_params.extend([value, value2])
+        
+        elif operator == 'IS NULL':
+            condition_parts.append(f'"{column}" IS NULL')
+        
+        elif operator == 'IS NOT NULL':
+            condition_parts.append(f'"{column}" IS NOT NULL')
+        
+        else:
+            # Default case
+            condition_parts.append(f'"{column}" {operator} %s')
+            condition_params.append(value)
+    
+    return condition_parts, condition_params
+
+
+
+
+
+
+
+
+
+
+
 
 def get_user_views(company_name):
     """

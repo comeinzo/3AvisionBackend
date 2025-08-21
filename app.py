@@ -1,81 +1,240 @@
-import os
-from flask_cors import CORS
+# ==============================
+# Standard Library Imports
+# ==============================
+import ast
+import binascii
 import json
-from flask import Flask, request, jsonify,session,send_file
-from werkzeug.utils import secure_filename
-from excel_upload import upload_excel_to_postgresql
-from csv_upload import upload_csv_to_postgresql
-from dashboard_design import get_database_table_names
-from bar_chart import fetch_data_tree, fetch_data ,drill_down,fetch_column_name ,calculationFetch,fetch_data_for_duel,fetch_data_for_duel_bar ,perform_calculation,get_column_names,fetchText_data,edit_fetch_data,fetch_hierarchical_data,Hierarchial_drill_down,convert_calculation_to_sql
+import logging
+import os
+import re
+import threading
+import uuid
+
+import whisper
+import spacy
 import traceback
-from user_upload import handle_manual_registration, handle_file_upload_registration, get_db_connection
-import bar_chart as bc
-from dashboard_save.dashboard_save import insert_combined_chart_details, create_dashboard_table, create_connection,get_dashboard_names,get_dashboard_view_chart_data,get_Edit_dashboard_names
-from signup.signup import insert_user_data,fetch_usersdata,fetch_login_data,connect_db,create_user_table,encrypt_password,fetch_company_login_data
+
+import urllib.parse
+from datetime import datetime, timedelta
+from functools import lru_cache, wraps
+from urllib.parse import quote_plus
+
+# ==============================
+# Third-Party Imports
+# ==============================
+import bcrypt
+import jwt
+import matplotlib
+import pandas as pd
+import numpy as np  # Add this if not already imported at the top
 import psycopg2
-from audio import allowed_file,transcribe_audio_with_timestamps,save_file_to_db
-from histogram_utils import generate_histogram_details,handle_column_data_types
-from json_upload import upload_json_to_postgresql
-from config import  ALLOWED_EXTENSIONS,DB_NAME,USER_NAME,PASSWORD,HOST,PORT
-from ai_charts import analyze_data
-from upload import is_table_used_in_charts
+import pytz
+import sweetviz as sv
+from functools import reduce
+from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
+from apscheduler.schedulers.background import BackgroundScheduler
+from flask import Flask, jsonify, request, session, send_file, current_app
+from flask_cors import CORS
+from flask_mail import Mail, Message
+from flask_session import Session  # Flask-Session for server-side session handling
+from flask_socketio import SocketIO, emit
+from flask_apscheduler import APScheduler
+from psycopg2 import sql
+from sendgrid import SendGridAPIClient
+from sendgrid.helpers.mail import Mail
 from sqlalchemy import create_engine, text
 from sqlalchemy.exc import SQLAlchemyError
 from statsmodels.tsa.seasonal import seasonal_decompose
-import pandas as pd
-import logging
-from flask import Flask, request, jsonify, session
-from flask_session import Session  # Flask-Session for server-side session handling
-from TransferData import fetch_data_with_columns,fetch_table_details,insert_dataframe_with_upsert
-import ast
+from werkzeug.utils import secure_filename
+from urllib.parse import parse_qs
+from psycopg2.extras import RealDictCursor
 
-import uuid
-from urllib.parse import quote_plus
-import sweetviz as sv
-import matplotlib
-import re
-from flask_socketio import SocketIO, emit
-from psycopg2 import sql
-from viewChart.viewChart import get_db_connection_view, fetch_chart_data,filter_chart_data,fetch_ai_saved_chart_data
-import pandas as pd
-from flask import jsonify, request
-from functools import lru_cache
+# ==============================
+# Local Imports
+# ==============================
+import bar_chart as bc
+from ai_charts import analyze_data
+from audio import allowed_file, transcribe_audio_with_timestamps, save_file_to_db
+from config import ALLOWED_EXTENSIONS, DB_NAME, USER_NAME, PASSWORD, HOST, PORT
+from csv_upload import upload_csv_to_postgresql
+from dashboard_design import get_database_table_names
+from dashboard_save.dashboard_save import (
+    create_connection,
+    create_dashboard_table,
+    fetch_project_names,
+    get_dashboard_names,
+    get_dashboard_view_chart_data,
+    get_Edit_dashboard_names,
+    insert_combined_chart_details,
+)
+from excel_upload import upload_excel_to_postgresql
+from histogram_utils import generate_histogram_details, handle_column_data_types
+from json_upload import upload_json_to_postgresql
+from signup.signup import (
+    connect_db,
+    create_user_table,
+    encrypt_password,
+    fetch_company_login_data,
+    fetch_login_data,
+    fetch_usersdata,
+    insert_user_data,
+)
+from TransferData import fetch_data_with_columns, fetch_table_details, insert_dataframe_with_upsert
+from upload import is_table_used_in_charts
+from user_upload import (
+    get_db_connection,
+    handle_file_upload_registration,
+    handle_manual_registration,
+)
+from viewChart.viewChart import (
+    fetch_ai_saved_chart_data,
+    fetch_chart_data,
+    filter_chart_data,
+    get_db_connection_view,
+)
+from bar_chart import (
+    calculationFetch,
+    convert_calculation_to_sql,
+    drill_down,
+    edit_fetch_data,
+    fetch_column_name,
+    fetch_data,
+    fetch_data_for_duel,
+    fetch_data_for_duel_bar,
+    fetch_data_tree,
+    fetch_hierarchical_data,
+    fetchText_data,
+    get_column_names,
+    Hierarchial_drill_down,
+    perform_calculation,
+)
+from bar_chart import global_df,global_column_names
+
+# ==============================
+# Configurations
+# ==============================
 matplotlib.use('Agg')
 company_name_global = None
 logging.basicConfig()
 logging.getLogger('sqlalchemy.engine').setLevel(logging.INFO)
 
-from flask_mail import Mail, Message
+# ==============================
+# Flask App Initialization
+# ==============================
+app = Flask(
+    __name__,
+    static_url_path='/static',
+    static_folder='uploaded_logos'
+)
 
-app = Flask(__name__,static_url_path='/static',
-    static_folder='uploaded_logos')
-secret_key = os.urandom(24)
-app.secret_key = secret_key
+# Secret key for sessions
+app.secret_key = os.urandom(24)
+app.config['SECRET_KEY'] = b'y\xd8\x9e\xa6a\xe0\x8eK\x02L\x14@\x0f\x03\xab\x8e\xae\x1d\tB\xbc\xfbL\xcc'
+app.config['SESSION_TYPE'] = 'filesystem'  # Store sessions on the server
+
+# Enable CORS
 CORS(app, resources={r"/*": {"origins": "*"}})
 
+# Enable WebSockets
 socketio = SocketIO(app, cors_allowed_origins="*")
 
+# ==============================
+# Database & Upload Settings
+# ==============================
 db_name = DB_NAME
 username = USER_NAME
 password = PASSWORD
 host = HOST
 port = PORT
-UPLOAD_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'uploads', 'audio')
+
+UPLOAD_FOLDER = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), '..', 'uploads', 'audio'
+)
 UPLOAD_ROOT = 'uploaded_logos'
+BASE_DIR=os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'uploads', 'excel')
+BASE_CSV_DIR=os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'uploads', 'csv')
 os.makedirs(UPLOAD_ROOT, exist_ok=True)
-company_name=None
 
-app.config['SECRET_KEY'] =b'y\xd8\x9e\xa6a\xe0\x8eK\x02L\x14@\x0f\x03\xab\x8e\xae\x1d\tB\xbc\xfbL\xcc'
-app.config['SESSION_TYPE'] = 'filesystem'  # Store sessions on the server
+company_name = None
 
+# ==============================
+# Session Handling
+# ==============================
 Session(app)
-from flask import request, jsonify
-from apscheduler.schedulers.background import BackgroundScheduler
-from datetime import datetime, timedelta
-import pytz
 
+# ==============================
+# Scheduler Setup
+# ==============================
 scheduler = BackgroundScheduler()
 scheduler.start()
+
+
+
+# JWT Configuration
+JWT_SECRET_KEY = 'af65380dbf4a4d0bae8304442204678235e9bf7f5c0e482eab917f2ea9bceaeb' # Change this!
+JWT_ALGORITHM = 'HS256'
+JWT_ACCESS_TOKEN_EXPIRES = timedelta(hours=24)  # Access token expires in 24 hours
+JWT_REFRESH_TOKEN_EXPIRES = timedelta(days=30)  # Refresh token expires in 30 days
+
+# Load spaCy's small English model
+nlp = spacy.load("en_core_web_sm")
+
+NLP_UPLOAD_FOLDER = os.path.join(os.getcwd(), 'uploads/nlp_audio')
+os.makedirs(NLP_UPLOAD_FOLDER, exist_ok=True)
+
+CHART_TYPES = {"bar", "pie", "line", "scatter", "area"}
+COLUMNS_NAMES = bc.global_column_names
+
+
+
+
+# Authentication Decorators
+def jwt_required(f):
+    """Decorator to require valid JWT token"""
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        token = None
+        auth_header = request.headers.get('Authorization')
+        
+        if auth_header:
+            try:
+                token = auth_header.split(' ')[1]  # Bearer <token>
+            except IndexError:
+                return jsonify({'message': 'Invalid token format'}), 401
+        
+        if not token:
+            return jsonify({'message': 'Token is missing'}), 401
+        
+        payload = JWTManager.decode_token(token)
+        
+        if 'error' in payload:
+            return jsonify({'message': payload['error']}), 401
+        
+        if payload.get('type') != 'access':
+            return jsonify({'message': 'Invalid token type'}), 401
+        
+        # Add user info to request context
+        request.current_user = payload
+        return f(*args, **kwargs)
+    
+    return decorated_function
+
+def employee_required(f):
+    """Decorator to require employee privileges (admin or employee)"""
+    @wraps(f)
+    @jwt_required
+    def decorated_function(*args, **kwargs):
+        try:
+            user_type = request.current_user.get('user_type')
+            if user_type not in ['admin', 'employee']:
+                return jsonify({'message': 'Employee privileges required'}), 403
+            print(f"[AUTH SUCCESS] User '{request.current_user.get('username')}' "
+                  f"({user_type}) passed employee access check.")
+            return f(*args, **kwargs)
+        except Exception as e:
+            return jsonify({'message': 'Authorization check failed'}), 500
+    
+    return decorated_function
 
 def connect_to_db():
     try:
@@ -124,6 +283,15 @@ def create_table():
                 selectedFrequency VARCHAR
             )
         """)
+        cur.execute("SELECT MAX(id) FROM table_chart_save")
+        if max_id is None:
+            max_id = 1
+        else:
+            max_id = max_id + 1
+        cur.execute("SELECT setval(pg_get_serial_sequence('table_chart_save', 'id'), %s, false)", (max_id,))
+
+
+       
         # cur.execute("""
         #     DO $$
         #     BEGIN
@@ -182,44 +350,213 @@ def test_db():
     except Exception as e:
         return {"error": f"Database connection failed: {e}"}, 500
 
-
+# ===================================================================
+# UPLOAD SECTION START
+# ===================================================================
 
 @app.route('/uploadexcel', methods=['POST'])
+@employee_required
 def upload_file_excel():
-    create_table()
-    database_name = request.form.get('company_database') 
-    excel_file = request.files['file']
-    primary_key_column = request.form.get('primaryKeyColumnName')
-    selected_sheets = request.form.getlist('selectedSheets')  # New addition
-
-    print("database_name=============111111111111111111111111", database_name)
-    print("method=============", request.method)
-    print("files==============", request.files)
-    print("primary_key_column====================", primary_key_column) 
-    
-    print("selected_sheets ", selected_sheets)
-    excel_file_name = secure_filename(excel_file.filename)
-    os.makedirs('tmp', exist_ok=True)
-    temp_file_path = f'tmp/{excel_file_name}'
-    excel_file.save(temp_file_path)
-    
-    result=upload_excel_to_postgresql(database_name, username, password, temp_file_path, primary_key_column, host, port,selected_sheets)
-    if result == "Upload successful":
-        return jsonify({'message': 'File uploaded successfully','status':True}), 200
-    else:
-        return jsonify({'message': result,'status':False}), 500
+    try:
+        create_table()
+        
+        # Validate required form data
+        database_name = request.form.get('company_database')
+        primary_key_column = request.form.get('primaryKeyColumnName')
+        
+        if not database_name:
+            return jsonify({'message': 'Company database name is required', 'status': False}), 400
+        
+        if not primary_key_column:
+            return jsonify({'message': 'Primary key column name is required', 'status': False}), 400
+        
+        # Validate file upload
+        if 'file' not in request.files:
+            return jsonify({'message': 'No file uploaded', 'status': False}), 400
+        
+        excel_file = request.files['file']
+        
+        if excel_file.filename == '':
+            return jsonify({'message': 'No file selected', 'status': False}), 400
+        
+        # Validate file extension
+        allowed_extensions = {'.xlsx', '.xls'}
+        file_extension = os.path.splitext(excel_file.filename)[1].lower()
+        if file_extension not in allowed_extensions:
+            return jsonify({'message': 'Only Excel files (.xlsx, .xls) are allowed', 'status': False}), 400
+        
+        # Parse selected sheets
+        selected_sheets = request.form.getlist('selectedSheets')
+        if not selected_sheets:
+            # Try parsing as JSON string if not sent as list
+            selected_sheets_json = request.form.get('selectedSheets')
+            if selected_sheets_json:
+                try:
+                    import json
+                    selected_sheets = json.loads(selected_sheets_json)
+                except json.JSONDecodeError:
+                    return jsonify({'message': 'Invalid selectedSheets format', 'status': False}), 400
+        
+        print(f"Database name: {database_name}")
+        print(f"Primary key column: {primary_key_column}")
+        print(f"Selected sheets: {selected_sheets}")
+        print(f"User: {request.current_user.get('user_id', 'Unknown')}")
+        
+        # Save file temporarily
+        excel_file_name = secure_filename(excel_file.filename)
+        os.makedirs('tmp', exist_ok=True)
+        temp_file_path = f'tmp/{excel_file_name}'
+        excel_file.save(temp_file_path)
+        
+        try:
+            # Upload to PostgreSQL
+            result = upload_excel_to_postgresql(
+                database_name, 
+                username, 
+                password, 
+                temp_file_path, 
+                primary_key_column, 
+                host, 
+                port, 
+                selected_sheets
+            )
+            
+            if result == "Upload successful":
+                return jsonify({
+                    'message': 'File uploaded successfully',
+                    'status': True,
+                    'uploaded_by': request.current_user.get('user_id'),
+                    'file_name': excel_file_name
+                }), 200
+            else:
+                return jsonify({'message': result, 'status': False}), 500
+                
+        finally:
+            # Clean up temporary file
+            try:
+                if os.path.exists(temp_file_path):
+                    os.remove(temp_file_path)
+            except Exception as cleanup_error:
+                print(f"Warning: Could not delete temporary file {temp_file_path}: {cleanup_error}")
+        
+    except Exception as e:
+        print(f"Upload error: {str(e)}")
+        return jsonify({'message': 'Internal server error occurred', 'status': False}), 500
 
 @app.route('/uploadcsv', methods=['POST'])
+@employee_required
 def upload_file_csv():
-    excel_file = request.files['file']
-    database_name = request.form.get('company_database')
-    print("company_database====================",database_name)  
-    excel_file_name = secure_filename(excel_file.filename)
-    os.makedirs('tmp', exist_ok=True)
-    temp_file_path = f'tmp/{excel_file_name}'
-    excel_file.save(temp_file_path)
-    upload_csv_to_postgresql(database_name, username, password, temp_file_path, host, port)
-    return jsonify({'message': 'File uploaded successfully'})
+    try:
+        create_table()  # Ensure table structure exists
+        
+        # Validate required form data
+        database_name = request.form.get('company_database')
+        primary_key_column = request.form.get('primaryKeyColumnName')
+        update_permission = request.form.get('updatePermission')
+        
+        if not database_name:
+            return jsonify({'message': 'Company database name is required', 'status': False}), 400
+        
+        if not primary_key_column:
+            return jsonify({'message': 'Primary key column name is required', 'status': False}), 400
+        
+        if update_permission is None:
+            return jsonify({'message': 'Update permission is required', 'status': False}), 400
+        
+        # Convert update_permission to boolean
+        update_permission = update_permission.lower() in ['true', '1', 'yes']
+        
+        # Validate file upload
+        if 'file' not in request.files:
+            return jsonify({'message': 'No file uploaded', 'status': False}), 400
+        
+        csv_file = request.files['file']
+        
+        if csv_file.filename == '':
+            return jsonify({'message': 'No file selected', 'status': False}), 400
+        
+        # Validate file extension
+        allowed_extensions = {'.csv'}
+        file_extension = os.path.splitext(csv_file.filename)[1].lower()
+        if file_extension not in allowed_extensions:
+            return jsonify({'message': 'Only CSV files (.csv) are allowed', 'status': False}), 400
+        
+        print(f"Database name: {database_name}")
+        print(f"Primary key column: {primary_key_column}")
+        print(f"Update permission: {update_permission}")
+        print(f"User: {request.current_user.get('user_id', 'Unknown')}")
+        
+        # Save file temporarily
+        csv_file_name = secure_filename(csv_file.filename)
+        os.makedirs('tmp', exist_ok=True)
+        temp_file_path = f'tmp/{csv_file_name}'
+        csv_file.save(temp_file_path)
+        
+        try:
+            # Upload to PostgreSQL
+            result = upload_csv_to_postgresql(database_name, username, password, temp_file_path, host, port)
+            
+            if result == "Upload successful":
+                return jsonify({
+                    'message': 'CSV file uploaded successfully',
+                    'status': True,
+                    'uploaded_by': request.current_user.get('user_id'),
+                    'file_name': csv_file_name,
+                    'update_permission': update_permission
+                }), 200
+            else:
+                return jsonify({'message': result, 'status': False}), 500
+                
+        finally:
+            # Clean up temporary file
+            try:
+                if os.path.exists(temp_file_path):
+                    os.remove(temp_file_path)
+            except Exception as cleanup_error:
+                print(f"Warning: Could not delete temporary file {temp_file_path}: {cleanup_error}")
+        
+    except Exception as e:
+        print(f"CSV Upload error: {str(e)}")
+        return jsonify({'message': 'Internal server error occurred', 'status': False}), 500
+
+@app.route('/upload-json', methods=['POST'])
+@employee_required
+def upload_file_json():
+    try:
+        database_name = request.form.get('company_database')
+        primary_key_column = request.form.get('primaryKeyColumnName')
+        
+        # Check if file is present in the request
+        if 'file' not in request.files:
+            return jsonify({'message': 'No file part in the request'}), 400
+
+        json_file = request.files['file']
+        
+        # Check if a file is selected
+        if json_file.filename == '':
+            return jsonify({'message': 'No file selected for uploading'}), 400
+
+        print("primary_key_column:", primary_key_column)
+        print("json_file:", json_file.filename)
+        print("database_name:", database_name)
+        
+        # Save the file to a temporary directory
+        json_file_name = secure_filename(json_file.filename)
+        os.makedirs('tmp', exist_ok=True)
+        temp_file_path = f'tmp/{json_file_name}'
+        json_file.save(temp_file_path)
+
+        # Call the upload_json_to_postgresql function
+        result = upload_json_to_postgresql(database_name, username, password, temp_file_path, primary_key_column, host, port)
+        
+        if result == "Upload successful":
+            return jsonify({'message': 'File uploaded successfully'}), 200
+        else:
+            return jsonify({'message': result}), 500
+
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'message': f"Internal Server Error: {str(e)}"}), 500
 
 @app.route('/load-data', methods=['POST'])
 def load_data():
@@ -257,6 +594,7 @@ def ai_ml_filter_chart_data():
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/table_names')
+@employee_required
 def get_table_names():
     db_name = request.args.get('databaseName')
     # print("db name",db_name)
@@ -278,7 +616,6 @@ def get_columns(table_name):
     # print("column_names====================",column_names)
     return jsonify(column_names)
 
-# *--------------new..------------*
 @app.route('/api/columns', methods=['GET'])
 def get_chart_columns():
     chart_name = request.args.get('chart')
@@ -398,10 +735,10 @@ def get_column_values():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
     
-
 @app.route('/get_charts', methods=['GET'])
 def get_charts():
     chart_name = request.args.get('chart_name')
+    company_name=request.args.get('company_name')
 
     if not chart_name:
         return jsonify({"error": "Missing chart_name parameter"}), 400
@@ -426,11 +763,13 @@ def get_charts():
 
         # Step 2: Fetch chart names from new_dashboard_details using chart IDs
         cursor.execute("""
-            SELECT chart_name FROM table_chart_save WHERE id = ANY(%s)
-        """, (chart_ids_list,))
+            SELECT user_id, chart_name FROM table_chart_save WHERE id = ANY(%s) AND company_name=%s
+        """, (chart_ids_list,company_name))
+        
 
         charts = cursor.fetchall()
-        chart_names = [row[0] for row in charts]
+        chart_names = [row[1] for row in charts]
+        
 
         cursor.close()
         conn.close()
@@ -439,7 +778,6 @@ def get_charts():
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-
 
 def column_exists(cur, table_name, column_name):
     """
@@ -465,7 +803,8 @@ def update_filters():
     print("filename", filename)
     company_name = data.get("company_name")
     print("company_name", company_name)
-
+    user_id=data.get("user_id")
+    print("user_id", user_id)
     if not chart_name or not selected_filters or not filename or not company_name:
         return jsonify({"error": "Missing required fields"}), 400
 
@@ -483,10 +822,11 @@ def update_filters():
         print("selected_values", selected_values)
 
         cur.execute(
-            "SELECT id FROM table_chart_save WHERE chart_name = %s AND company_name = %s",
-            (chart_name, company_name),
+            "SELECT id FROM table_chart_save WHERE chart_name = %s AND company_name = %s AND  user_id =%s",
+            (chart_name, company_name,user_id),
         )
         chart_id_result = cur.fetchone()
+        print("chart_id_result",chart_id_result)
         if not chart_id_result:
             return jsonify({"error": f"Chart '{chart_name}' not found"}), 404
 
@@ -503,9 +843,10 @@ def update_filters():
             return jsonify({"error": f"No data found for file '{filename}'"}), 404
 
         chart_ids, existing_filters = result
+        print("id",chart_ids)
 
         chart_ids_list = [int(id.strip()) for id in chart_ids.strip("{}").split(",") if id.strip().isdigit()]
-        print("chart_ids", chart_ids_list)
+        print("chart_ids_list", chart_ids_list)
 
         try:
             if existing_filters:
@@ -611,9 +952,6 @@ def update_filters():
         if "conn" in locals() and conn:
             conn.close()
 
-
-# *--------------new---------------*
-
 @app.route('/join-tables', methods=['POST'])
 def join_tables():
     data = request.json
@@ -652,9 +990,6 @@ def join_tables():
 
     return jsonify({"message": f"View '{view_name}' created successfully"})
 
-
-from psycopg2 import sql
-import threading
 DB_CONFIG = {
     'user':USER_NAME,
     'password':PASSWORD,
@@ -700,8 +1035,6 @@ def create_dynamic_trigger(db_nameeee, table_name):
     except Exception as e:
         print(f"Error creating trigger: {e}")
 
-
-import json
 @socketio.on("connect")
 def handle_connect():
     """Handle client connection and start a unique listener for each session."""
@@ -735,7 +1068,7 @@ def handle_connect():
 
     print(f"Starting new listener for {sid}")
 
-    if chart_type == "singleValueChart":
+    if chart_type in ["singleValueChart","meterGauge"]:
         listener = threading.Thread(
             target=listen_to_single_value_db,
             args=(selected_table, x_axis, aggregate, database_name),
@@ -750,7 +1083,6 @@ def handle_connect():
 
     listener.start()
     active_listeners[sid] = listener
-
 
 def listen_to_db(sid, table_name, x_axis_columns, checked_option, y_axis_columns, aggregation, db_name, chart_type,calculationData):
     """Continuously listen for updates based on the session ID (sid)."""
@@ -855,9 +1187,8 @@ def listen_to_single_value_db(table_Name, x_axis, aggregate_py, databaseName):
     finally:
         cursor.close()
         connection.close()
+
 def fetch_data_for_ts_decomposition(table_name, x_axis_columns, filter_options, y_axis_column, aggregation, db_name, selectedUser, calculationData):
-    
-    
     if not selectedUser or selectedUser.lower() == 'null':
         connection_string = f"dbname={db_name} user={USER_NAME} password={PASSWORD} host={HOST}"
         connection = psycopg2.connect(connection_string)
@@ -1193,10 +1524,9 @@ def fetch_data_for_ts_decomposition(table_name, x_axis_columns, filter_options, 
 
     return temp_df[[x_axis_columns[0], y_axis_column[0]]] if x_axis_columns and y_axis_column else temp_df
 
-
 @app.route('/plot_chart', methods=['POST', 'GET'])
 def get_bar_chart_route(): 
-    import numpy as np  # Add this if not already imported at the top
+    
     
     # Safely access the global DataFrame
     df = bc.global_df
@@ -1432,7 +1762,7 @@ def get_bar_chart_route():
             return jsonify({"error": str(e)})
     
     # Single Value Chart
-    if chart_data == "singleValueChart":
+    if chart_data in ["singleValueChart","meterGauge"]:
         create_dynamic_trigger(db_nameeee, table_name)
         aggregate_py = {
             'count': 'count',
@@ -1453,7 +1783,7 @@ def get_bar_chart_route():
             return jsonify({"error": f"Error fetching single value data: {e}"}), 500
     
     # # Dual Bar Chart
-    if len(x_axis_columns) == 2 and chart_data == "duealbarChart":
+    if len(x_axis_columns) == 2 and chart_data in ["duealbarChart", "stackedbar"] :
         data = fetch_data_for_duel_bar(table_name, x_axis_columns, checked_option, y_axis_columns, aggregation, db_nameeee, selectedUser,calculationData)
         # print("data",data)
         # Apply data limiting if specified
@@ -1552,16 +1882,29 @@ def get_bar_chart_route():
             categories = []
             values = []
 
+            # for index, row in new_df.iterrows():
+            #     category = {col: row[col] for col in x_axis_columns}  # Hierarchy levels
+            #     categories.append(category)
+            #     values.append(row[y_axis_columns[0]] if y_axis_columns else 1)  # Use aggregated value
             for index, row in new_df.iterrows():
-                category = {col: row[col] for col in x_axis_columns}  # Hierarchy levels
+                category = [row[col] for col in x_axis_columns]  # Ordered list of hierarchy values
                 categories.append(category)
-                values.append(row[y_axis_columns[0]] if y_axis_columns else 1)  # Use aggregated value
+                values.append(row[y_axis_columns[0]] if y_axis_columns else 1)
 
+            print("x_axis_columns",x_axis_columns)
+            print("categories",categories)
+            # return jsonify({
+            #     "categories": categories,
+            #     "values": values,
+            #     "chartType": "treeHierarchy",
+            # })
             return jsonify({
                 "categories": categories,
                 "values": values,
+                "x_axis_columns": x_axis_columns,
                 "chartType": "treeHierarchy",
             })
+
 
         except Exception as e:
             print("Error preparing Tree Hierarchy data:", e)
@@ -1958,9 +2301,6 @@ def get_bar_chart_route():
     # Default response
     return jsonify({"message": "Chart data processed successfully."})
 
-
-
-
 def initial_value(aggregation):
     if aggregation in ['sum', 'average']:
         return 0
@@ -1993,7 +2333,6 @@ def update_category(categories, category_key, y_axis_value, aggregation):
             categories[category_key][2] += 1  # Count of values
         else:
             categories[category_key] = [float(y_axis_value), float(y_axis_value) ** 2, 1]  # Initialize list for sum, sum of squares, and count
-
 
 @app.route('/edit_plot_chart', methods=['POST', 'GET'])
 def get_edit_chart_route():
@@ -2134,7 +2473,7 @@ def get_edit_chart_route():
                     "canApplyLimiting": True
                 }
         return None
-    if chartType=="singleValueChart":
+    if chartType in ["singleValueChart","meterGauge"]:
         print("++++++++singleValueChart+++++++_________________singleValueChart_____________________singleValueChart_____________________singleValueChart_____________________________+++++++++++singleValueChart+++++++++++++++++++++++++++")
         create_dynamic_trigger(db_nameeee, table_name
                            )
@@ -2153,7 +2492,7 @@ def get_edit_chart_route():
                      "message": "Data received successfully!"})
     
     # if chart_data == "singleValueChart":
-    elif chartType == "duealbarChart":
+    elif chartType in ["duealbarChart", "stackedbar"]:
         datass = fetch_data_for_duel_bar(table_name, x_axis_columns, checked_option, y_axis_columns, aggregation, db_nameeee,selectedUser,calculationData)
         data = {
              "categories": [row[0] for row in datass],
@@ -2361,7 +2700,7 @@ def get_edit_chart_route():
             print("Error preparing Tree Hierarchy data:", e)
             return jsonify({"error": str(e)})
 
-    elif len(y_axis_columns) == 1 and chartType != "duealbarChart" and chartType != "timeSeriesDecomposition":
+    elif len(y_axis_columns) == 1 and chartType != "duealbarChart" and chartType !="stackedbar" and chartType != "timeSeriesDecomposition":
         data = fetch_data(table_name, x_axis_columns, checked_option, y_axis_columns, aggregation, db_nameeee,selectedUser,calculationData)
         # print("data====================", data)     
         # categories = {}  
@@ -2587,7 +2926,6 @@ def fetch_tree_data(db_name, table_name, x_axis_columns, y_axis_columns, checked
         print("Error fetching tree hierarchy data:", e)
         raise
 
-
 def edit_initial_value(aggregation):
     if aggregation in ['sum', 'average']:
         return 0
@@ -2656,18 +2994,12 @@ def handle_bar_click():
 
     return jsonify({"categories": labels, "values": y_axis_values, "aggregation": aggregation})
 
-from urllib.parse import parse_qs
 @app.route('/plot_chart/<selectedTable>/<columnName>', methods=['POST', 'GET'])
 def get_filter_options(selectedTable, columnName):
     table_name = selectedTable
     column_name = columnName
     db_name = request.args.get('databaseName')
     selectedUser = request.args.get('selectedUser','null')  # Default to 'local' if not specified
-    # calculation_expr = request.args.get('calculationData[calculation]')
-    # calc_column = request.args.get('calculationData[columnName]')
-    # db_table = request.args.get('calculationData[dbTableName]')
-    
-    # Parse all calculationData entries from request
     raw_query = request.query_string.decode()
     parsed_query = parse_qs(raw_query)
 
@@ -2695,7 +3027,6 @@ def get_filter_options(selectedTable, columnName):
     # print("column_data====================", column_data)
     return jsonify(column_data)
 
-
 @lru_cache(maxsize=128)
 def fetch_column_name_with_cache(table_name, column_name, db_name, selectedUser,calculation_expr,calc_column):
     print("Fetching from database...")
@@ -2705,10 +3036,6 @@ def fetch_column_name_with_cache(table_name, column_name, db_name, selectedUser,
 def clear_cache():
     fetch_column_name_with_cache.cache_clear()
     return jsonify({"message": "Cache cleared!"})
-
-
-
-
 
 @app.route('/save_data', methods=['POST'])
 def save_data():
@@ -2736,9 +3063,17 @@ def save_data():
         filter_options_json = json.dumps(data.get('filterOptions')) 
         chart_color_json = json.dumps(data.get('chartColor'))  # ✅ FIX: Convert to JSON
         calculation_data_json = json.dumps(data.get('calculationData'))
+
+        cur.execute("SELECT MAX(id) FROM table_chart_save")
+        last_chart_id = cur.fetchone()[0] or 0
+        new_chart_id = last_chart_id + 1
+
+        # new_chart_ids.append(new_chart_id)
+        print("new_chart_ids",new_chart_id)
         print("calculation_data_json",calculation_data_json)
         cur.execute("""
             INSERT INTO table_chart_save (
+                id,
                 User_id,
                 company_name,                
                 chart_name,
@@ -2760,9 +3095,10 @@ def save_data():
                 yFontSize,          
                 valueColor,headingColor,ClickedTool,Bgcolour,OptimizationData,calculationData,selectedFrequency
             )VALUES (
-                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,%s,%s,%s,%s,%s,%s
+                %s,%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,%s,%s,%s,%s,%s,%s
             )
         """, (
+            new_chart_id,
             data.get('user_id'),
             data.get('company_name'),       
             data.get('saveName'),  
@@ -2801,7 +3137,6 @@ def save_data():
     except Exception as e:
         print("Error:iiiiiiiiiiiii", e)
         return jsonify({'error': str(e)})
-    
     
 @app.route('/update_data', methods=['POST'])
 def update_data():
@@ -2876,8 +3211,6 @@ def update_data():
         print("Error:", e)
         return jsonify({'error': str(e)})
 
-
-
 def get_chart_names(user_id, database_name):
     # Step 1: Get employees reporting to the given user_id from the company database.
     conn_company = get_company_db_connection(database_name)
@@ -2929,7 +3262,8 @@ def get_chart_names(user_id, database_name):
     print("all_employee_ids",all_employee_ids)
     # Step 2: Fetch dashboard names for these employees from the datasource database.
     conn_datasource = get_db_connection("datasource")
-    dashboard_structure = {}
+    dashboard_structure = []
+
 
     if conn_datasource:
         try:
@@ -2937,20 +3271,29 @@ def get_chart_names(user_id, database_name):
                 # Create placeholders for the IN clause
                 placeholders = ', '.join(['%s'] * len(all_employee_ids))
                 print("placeholders",placeholders)
+                # query = f"""
+                #     SELECT user_id, chart_name FROM table_chart_save
+                #     WHERE user_id IN ({placeholders}) and company_name = %s
+                # """
                 query = f"""
-                    SELECT user_id, chart_name FROM table_chart_save
-                    WHERE user_id IN ({placeholders}) and company_name = %s
+                    SELECT user_id, chart_name 
+                    FROM table_chart_save
+                    WHERE user_id IN ({placeholders}) AND company_name = %s
+                    ORDER BY timestamp ASC
                 """
+
                 cursor.execute(query, tuple(all_employee_ids)+ (database_name,))
                 print("query",query)
                 charts = cursor.fetchall()
                 print("charts",charts)
                 
                 # Organize charts by user_id
+                # for uid, chart_name in charts:
+                #     if uid not in dashboard_structure:
+                #         dashboard_structure[uid] = []
+                #     dashboard_structure[uid].append(chart_name)
                 for uid, chart_name in charts:
-                    if uid not in dashboard_structure:
-                        dashboard_structure[uid] = []
-                    dashboard_structure[uid].append(chart_name)
+                    dashboard_structure.append((uid, chart_name))
         except psycopg2.Error as e:
             print(f"Error fetching dashboard details: {e}")
         finally:
@@ -2958,10 +3301,74 @@ def get_chart_names(user_id, database_name):
 
     return dashboard_structure
 
+def get_chart_names_Edit(user_id, database_name):
+     
+    if not isinstance(user_id,list):
+        user_id=[user_id]
+    # Step 2: Fetch dashboard names for these employees from the datasource database.
+    conn_datasource = get_db_connection("datasource")
+    dashboard_structure = []
+   
 
+    if conn_datasource:
+        try:
+            with conn_datasource.cursor() as cursor:
+                # Create placeholders for the IN clause
+                placeholders = ', '.join(['%s'] * len(user_id))
+                print("placeholders",placeholders)
+                #
+                query = f"""
+                    SELECT user_id, chart_name 
+                    FROM table_chart_save
+                    WHERE user_id IN ({placeholders}) AND company_name = %s
+                    ORDER BY timestamp ASC
+                """
 
+                cursor.execute(query, tuple(user_id)+ (database_name,))
+                print("query",query)
+                charts = cursor.fetchall()
+                print("charts",charts)
+                
+                
+                for uid, chart_name in charts:
+                    dashboard_structure.append((uid, chart_name))
+        except psycopg2.Error as e:
+            print(f"Error fetching dashboard details: {e}")
+        finally:
+            conn_datasource.close()
 
+    return dashboard_structure
+
+@app.route('/total_rows_Edit', methods=['GET'])
+def chart_names_Edit():
+    user_id = request.args.get('user_id')
+    database_name = request.args.get('company')  # Getting the database_name
+
+    print("user_id====================", user_id)
+    print("database_name====================", database_name)
+
+    # Validate the user_id
+    try:
+        user_id = int(user_id)  # Convert to integer
+    except ValueError:
+        return jsonify({'error': 'Invalid user_id. Must be an integer.'})
+
+    # Check if the database_name is valid (you can extend this validation if needed)
+    if not database_name:
+        return jsonify({'error': 'Invalid or missing database_name.'})
+
+    # Pass the user_id and database_name to the get_chart_names function
+    names = get_chart_names_Edit(user_id, database_name)
+
+    print("names====================", names)
+
+    if names is not None:
+        return jsonify({'chart_names': names})
+    else:
+        return jsonify({'error': 'Failed to fetch chart names'})
+    
 @app.route('/total_rows', methods=['GET'])
+@employee_required
 def chart_names():
     user_id = request.args.get('user_id')
     database_name = request.args.get('company')  # Getting the database_name
@@ -2989,13 +3396,13 @@ def chart_names():
     else:
         return jsonify({'error': 'Failed to fetch chart names'})
 
-def get_chart_data(chart_name,company_name):
-    print("chart_id====================......................................................",chart_name,company_name)
+def get_chart_data(chart_name,company_name,user_id):
+    print("chart_id====================......................................................",chart_name,company_name,user_id)
     conn = connect_to_db()
     if conn:
         try:
             cursor = conn.cursor()
-            cursor.execute("SELECT id, selected_table, x_axis, y_axis, aggregate, chart_type, chart_color, chart_heading, drilldown_chart_color, filter_options, database_name ,selecteduser, xFontSize,fontStyle,categoryColor, yFontSize,valueColor,headingColor,clickedtool,Bgcolour,calculationData,optimizationdata,selectedfrequency FROM table_chart_save WHERE chart_name = %s AND company_name = %s " , (chart_name, company_name ))
+            cursor.execute("SELECT id, selected_table, x_axis, y_axis, aggregate, chart_type, chart_color, chart_heading, drilldown_chart_color, filter_options, database_name ,selecteduser, xFontSize,fontStyle,categoryColor, yFontSize,valueColor,headingColor,clickedtool,Bgcolour,calculationData,optimizationdata,selectedfrequency FROM table_chart_save WHERE chart_name = %s AND company_name = %s AND user_id =%s " , (chart_name, company_name,user_id ))
             data = cursor.fetchone()
             print("data",data)
             if data is None:
@@ -3015,18 +3422,19 @@ def get_chart_data(chart_name,company_name):
 
 @app.route('/chart_data/<chart_name>/<company_name>', methods=['GET'])
 def chart_data(chart_name,company_name):
-    data = get_chart_data(chart_name,company_name)
+    # user_id = request.args.get('user_id')
+    user_id, chart_name = chart_name.split(",", 1)  # Split only once
+    data = get_chart_data(chart_name,company_name,user_id)
+    
     print("chart datas------------------------------------------------------------------------------------------------------------------",data)
     if data is not None:
         return jsonify(data)
     else:
         return jsonify({'error': 'Failed to fetch data for Chart {}'.format(chart_name)})
 
-BASE_DIR=os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'uploads', 'excel')
 @app.route('/list-excel-files', methods=['GET'])
 def list_files():
     directory_structure = {}
-
     for root, dirs, files in os.walk(BASE_DIR):
         dir_path = os.path.relpath(root, BASE_DIR)
         if dir_path == '.':
@@ -3034,7 +3442,6 @@ def list_files():
         directory_structure[dir_path] = {'dirs': dirs, 'files': files}
     return jsonify(directory_structure)
 
-BASE_CSV_DIR=os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'uploads', 'csv')
 @app.route('/list-csv-files', methods=['GET'])
 def list_csv_files():
     directory_structure = {}
@@ -3047,8 +3454,8 @@ def list_csv_files():
     
     return jsonify(directory_structure)
 
-
 @app.route('/save_all_chart_details', methods=['POST'])
+@employee_required
 def save_all_chart_details():
     data = request.get_json()
     print("data====================", data)
@@ -3061,6 +3468,7 @@ def save_all_chart_details():
     print("user_id====================", user_id)
     dashboardfilterXaxis = data['dashboardfilterXaxis']
     dashboardClickedCategory = data['selectedCategory']
+    project_name = data.get('projectName') 
     print("company_name====================", dashboardClickedCategory)
     file_name = data['fileName']
     company_name=data['company_name']
@@ -3104,6 +3512,7 @@ def save_all_chart_details():
         'user_id': user_id, 
         'file_name': file_name,
         'company_name': company_name,
+        'project_name': project_name,
         'chart_ids': [],
         'positions': [],
         'sizes':[],
@@ -3130,10 +3539,14 @@ def save_all_chart_details():
         chart_aggregate = list(chart.keys())[4]
         # chartcolor = chart.get('areaColor', '#0000')  # fallback if key missing
         chartcolor = chart.get('areaColor', chart.get('19', '#0000'))
-        opacity = chart.get('opacity', chart.get('23', 1))
+        opacity = chart.get('opacity', chart.get('24', 1))
         processed_chartcolor = chartcolor  # Initialize
         print(f"opacity for chart : {opacity}")
         print("area_color====================", chartcolor)
+        # Ensure it's a string for regex check
+        if not isinstance(chartcolor, str):
+            chartcolor = str(chartcolor) if chartcolor is not None else ''
+
 
         # Check for the specific '{#color1,#color2,...}' format
         match = re.match(r'^\{(#[0-9a-fA-F]{6}(?:,#[0-9a-fA-F]{6})*)\}$', chartcolor)
@@ -3250,8 +3663,6 @@ def upload_file():
     else:
         return jsonify({'error': 'Invalid file type'}), 400
 
-
-from bar_chart import global_df,global_column_names
 @app.route('/api/calculation', methods=['POST'])
 def handle_calculation():
     data = request.json
@@ -3288,13 +3699,6 @@ def handle_calculation():
 def signup():
     # data = request.json
     # print("data",data)
-    # userName = data.get('userName')
-    # password = data.get('password')
-    # retypePassword = data.get('retypePassword')
-    # organizationName = data.get('organizationName')
-    
-    # email = data.get('email')
-    # logo = request.files.get('logo')
     userName = request.form.get('userName')
     password = request.form.get('password')
     retypePassword = request.form.get('retypePassword')
@@ -3327,6 +3731,119 @@ def get_userdata():
     usersdata = fetch_usersdata()
     return jsonify(usersdata)
 
+class JWTManager:
+    @staticmethod
+    def generate_tokens(user_data, user_type='user'):
+        """Generate both access and refresh tokens"""
+        now = datetime.utcnow()
+        
+        # Access Token Payload
+        access_payload = {
+            'user_id': user_data.get('user_id') or user_data.get('employee_id'),
+            'user_type': user_type,  # 'admin', 'user', 'employee'
+            'email': user_data.get('email'),
+            'permissions': user_data.get('permissions'),
+            'company': user_data.get('company'),
+            'role_id': user_data.get('role_id'),
+            'exp': now + JWT_ACCESS_TOKEN_EXPIRES,
+            'iat': now,
+            'type': 'access'
+        }
+        
+        # Refresh Token Payload
+        refresh_payload = {
+            'user_id': user_data.get('user_id') or user_data.get('employee_id'),
+            'user_type': user_type,
+            'exp': now + JWT_REFRESH_TOKEN_EXPIRES,
+            'iat': now,
+            'type': 'refresh',
+            'jti': str(uuid.uuid4())  # Unique token ID for revocation
+        }
+        
+        access_token = jwt.encode(access_payload, JWT_SECRET_KEY, algorithm=JWT_ALGORITHM)
+        refresh_token = jwt.encode(refresh_payload, JWT_SECRET_KEY, algorithm=JWT_ALGORITHM)
+        
+        return {
+            'access_token': access_token,
+            'refresh_token': refresh_token,
+            'expires_in': JWT_ACCESS_TOKEN_EXPIRES.total_seconds()
+        }
+    
+    @staticmethod
+    def decode_token(token):
+        """Decode and validate JWT token"""
+        try:
+            payload = jwt.decode(token, JWT_SECRET_KEY, algorithms=[JWT_ALGORITHM])
+            return payload
+        except jwt.ExpiredSignatureError:
+            return {'error': 'Token has expired'}
+        except jwt.InvalidTokenError:
+            return {'error': 'Invalid token'}
+    
+    @staticmethod
+    def refresh_access_token(refresh_token):
+        """Generate new access token using refresh token"""
+        payload = JWTManager.decode_token(refresh_token)
+        
+        if 'error' in payload:
+            return None
+        
+        if payload.get('type') != 'refresh':
+            return None
+        
+        # Here you would typically check if refresh token is revoked in database
+        # For now, we'll assume it's valid
+        
+        # Get user data again (you might want to fetch fresh data from database)
+        user_data = {
+            'user_id': payload.get('user_id'),
+            'email': payload.get('email'),
+            'user_type': payload.get('user_type')
+        }
+        
+        return JWTManager.generate_tokens(user_data, payload.get('user_type'))
+
+def admin_required(f):
+    """Decorator to require admin privileges"""
+    @wraps(f)
+    @jwt_required
+    def decorated_function(*args, **kwargs):
+        if request.current_user.get('user_type') != 'admin':
+            return jsonify({'message': 'Admin privileges required'}), 403
+        return f(*args, **kwargs)
+    
+    return decorated_function
+
+def permission_required(required_permissions):
+    """Decorator to check specific permissions"""
+    def decorator(f):
+        @wraps(f)
+        @jwt_required
+        def decorated_function(*args, **kwargs):
+            user_permissions = request.current_user.get('permissions', [])
+            
+            # Convert permissions to list if it's a string
+            if isinstance(user_permissions, str):
+                import json
+                try:
+                    user_permissions = json.loads(user_permissions)
+                except:
+                    user_permissions = []
+            
+            # Check if user has required permissions
+            if isinstance(required_permissions, str):
+                required_perms = [required_permissions]
+            else:
+                required_perms = required_permissions
+            
+            if not any(perm in user_permissions for perm in required_perms):
+                return jsonify({'message': 'Insufficient permissions'}), 403
+            
+            return f(*args, **kwargs)
+        return decorated_function
+    return decorator
+
+# Updated Login Route
 @app.route('/api/login', methods=['POST'])
 def login():
     global company_name_global
@@ -3334,47 +3851,200 @@ def login():
     email = data.get('email')
     password = data.get('password')
     company = data.get('company')
+    
+    if not email or not password:
+        return jsonify({'message': 'Email and password are required'}), 400
+    
     if company is not None:
         company_name_global = company
 
-    print("company_name====================",company)
-    print("email====================",email)
-    print("password================",password)
+    print("company_name====================", company)
+    print("email====================", email)
 
+    # Super Admin Login
+    if email == 'superadmin@gmail.com' and password == 'superAdmin':
+        user_data = {
+            'user_id': 'superadmin',
+            'email': email,
+            'user_type': 'admin',
+            'permissions': ['all'],
+            'company': None,
+            'role_id': None
+        }
+        
+        tokens = JWTManager.generate_tokens(user_data, 'admin')
+        print("Admin Token------",tokens)
+        
+        return jsonify({
+            'message': 'Login successful',
+            'user_type': 'admin',
+            'access_token': tokens['access_token'],
+            'refresh_token': tokens['refresh_token'],
+            'expires_in': tokens['expires_in'],
+            'user_data': {
+                'email': email,
+                'user_type': 'admin'
+            }
+        }), 200
+    
+    # Regular User/Employee Login
     usersdata = None
     employeedata = None
+    
     if company is None:
         usersdata = fetch_login_data(email, password)
-        print("usersdata",usersdata)
+        print("usersdata", usersdata)
+        
+        if usersdata:
+            user_data = {
+                'user_id': usersdata.get('user_id') or usersdata.get('id'),
+                'email': email,
+                'user_type': 'user',
+                'permissions': usersdata.get('permissions', []),
+                'company': None,
+                'role_id': usersdata.get('role_id')
+            }
+            
+            tokens = JWTManager.generate_tokens(user_data, 'user')
+            print("Cleent user Token------",tokens)
+            
+            return jsonify({
+                'message': 'Login successful',
+                'user_type': 'user',
+                'access_token': tokens['access_token'],
+                'refresh_token': tokens['refresh_token'],
+                'expires_in': tokens['expires_in'],
+                'user_data': usersdata
+            }), 200
     else:
         employeedata = fetch_company_login_data(email, password, company)
-        print("employeedata====================",employeedata)
+        print("employeedata====================", employeedata)
+        
+        if employeedata:
+            user_info = employeedata['user']
+            user_data = {
+                'employee_id': user_info[0],  # employee_id
+                'user_id': user_info[0],
+                'email': user_info[3],  # email
+                'user_type': 'employee',
+                'permissions': employeedata.get('permissions', []),
+                'company': company,
+                'role_id': user_info[2]  # role_id
+            }
+            
+            tokens = JWTManager.generate_tokens(user_data, 'employee')
+            print("Employee Token------------------",tokens)
+            
+            return jsonify({
+                'message': 'Login successful',
+                'user_type': 'employee',
+                'access_token': tokens['access_token'],
+                'refresh_token': tokens['refresh_token'],
+                'expires_in': tokens['expires_in'],
+                'user_data': employeedata
+            }), 200
     
-    if email == 'superadmin@gmail.com' and password == 'superAdmin':
-        session_id = str(uuid.uuid4())  # Unique session ID
-        session['session_id'] = session_id
-        session['user_role'] = 'admin'
-        return jsonify({'message': 'Login successful to admin page', 'session_id': session_id}), 200
-    elif usersdata:
-        session_id = str(uuid.uuid4())
-        session['session_id'] = session_id
-        session['user_id'] = usersdata # Assuming usersdata contains a user ID
-        return jsonify({'message': 'Login successful to user page', 'session_id': session_id, 'data': usersdata}), 200
-    elif employeedata:
-        session_id = str(uuid.uuid4())
-        session['session_id'] = session_id
-        session['employee_id'] = employeedata # Assuming employeedata contains employee ID
-        return jsonify({'message': 'Login successful to user employee page', 'session_id': session_id, 'data': employeedata}), 200
-    else:
-        return jsonify({'message': 'Invalid credentials'}), 401
+    return jsonify({'message': 'Invalid credentials'}), 401
 
+# Token Refresh Route
+@app.route('/api/refresh', methods=['POST'])
+def refresh_token():
+    data = request.get_json()
+    refresh_token = data.get('refresh_token')
+    
+    if not refresh_token:
+        return jsonify({'message': 'Refresh token is required'}), 400
+    
+    new_tokens = JWTManager.refresh_access_token(refresh_token)
+    
+    if not new_tokens:
+        return jsonify({'message': 'Invalid refresh token'}), 401
+    
+    return jsonify({
+        'message': 'Token refreshed successfully',
+        'access_token': new_tokens['access_token'],
+        'refresh_token': new_tokens['refresh_token'],
+        'expires_in': new_tokens['expires_in']
+    }), 200
+
+# Logout Route (Token Revocation)
+@app.route('/api/logout', methods=['POST'])
+@jwt_required
+def logout():
+    # In a production environment, you would add the token to a blacklist
+    # stored in Redis or database with expiration time
+    # For now, we'll just return success
+    
+    return jsonify({'message': 'Logged out successfully'}), 200
+
+# Protected Route Examples
+@app.route('/api/profile', methods=['GET'])
+@jwt_required
+def get_profile():
+    user = request.current_user
+    return jsonify({
+        'user_id': user.get('user_id'),
+        'email': user.get('email'),
+        'user_type': user.get('user_type'),
+        'permissions': user.get('permissions'),
+        'company': user.get('company')
+    }), 200
+
+@app.route('/api/admin/users', methods=['GET'])
+@admin_required
+def get_all_userss():
+    # Admin only route
+    return jsonify({'message': 'Admin access granted', 'users': []}), 200
+
+@app.route('/api/employee/users', methods=['GET'])
+@employee_required
+def get_empployees():
+    try:
+        conn = get_db_connection()  # Your DB connection function
+        cursor = conn.cursor()
+
+        # Fetch all employees with all columns
+        cursor.execute("SELECT * FROM employees")
+        rows = cursor.fetchall()
+
+        # Get column names from cursor.description
+        col_names = [desc[0] for desc in cursor.description]
+
+        # Convert to list of dicts
+        employees = [dict(zip(col_names, row)) for row in rows]
+
+        cursor.close()
+        conn.close()
+
+        return jsonify({
+            'message': 'Employee access granted',
+            'users': employees
+        }), 200
+
+    except Exception as e:
+        return jsonify({
+            'message': 'Error fetching employees',
+            'error': str(e)
+        }), 500
+
+@app.route('/api/data/sensitive', methods=['GET'])
+@permission_required(['read_sensitive_data'])
+def get_sensitive_data():
+    # Route that requires specific permission
+    return jsonify({'message': 'Sensitive data access granted'}), 200
 
 @app.route('/api/singlevalue_text_chart', methods=['POST'])
 def receive_single_value_chart_data():
     data = request.get_json()
     print("data====================",data)
     chart_id=data.get('chart_id')
-    x_axis = data.get('text_y_xis')[0]
+    # x_axis = data.get('text_y_xis')[0]
+    x_axis_list = data.get('text_y_xis') or []
+
+    if not x_axis_list:
+        return jsonify({"error": "x-axis field is required and cannot be empty"}), 400
+
+    x_axis = x_axis_list[0]
     databaseName = data.get('text_y_database')
     table_Name = data.get('text_y_table')
     selectedUser=data.get("selectedUser")
@@ -3531,193 +4201,6 @@ def handle_clicked_category():
         print(chart_data_list)
     return jsonify({"message": "Category clicked successfully!",
                     "chart_data_list": chart_data_list})
-
-# import numpy as np
-# def apply_calculation_to_df(df, calculation_data, x_axis=None, y_axis=None):
-#     import pandas as pd
-#     import numpy as np
-#     import re
-#     from functools import reduce
-
-#     if not (calculation_data and calculation_data.get('calculation') and calculation_data.get('columnName')):
-#         return df, x_axis, y_axis
-
-#     calc_formula = calculation_data['calculation']
-#     new_col_name = calculation_data['columnName']
-#     replace_col_name = calculation_data.get('replaceColumn', new_col_name)
-
-#     def replace_column(match):
-#         col_name = match.group(1)
-#         if col_name in df.columns:
-#             return f"df['{col_name}']"
-#         else:
-#             raise ValueError(f"Column {col_name} not found in DataFrame.")
-
-#     # Check where new column name is used
-#     if new_col_name in (y_axis or []):
-#         print("new_col_namey", new_col_name)
-#     if new_col_name in (x_axis or []):
-#         print("new_col_nameX", new_col_name)
-
-#     try:
-#         formula_lower = calc_formula.strip().lower()
-
-
-#         if formula_lower.startswith("if"):
-#             match = re.match(r"if\s*\((.+?)\)\s*then\s*'?(.*?)'?\s*else\s*'?(.*?)'?$", calc_formula.strip(), re.IGNORECASE)
-#             if not match:
-#                 raise ValueError("Invalid IF format")
-#             condition_expr, then_val, else_val = match.groups()
-#             condition_expr_python = re.sub(r'\[(.*?)\]', replace_column, condition_expr)
-#             df[new_col_name] = np.where(eval(condition_expr_python), then_val.strip("'\""), else_val.strip("'\""))
-
-#         elif formula_lower.startswith("switch"):
-#             switch_match = re.match(r"switch\s*\(\s*\[([^\]]+)\](.*?)\)", calc_formula, re.IGNORECASE)
-#             if not switch_match:
-#                 raise ValueError("Invalid SWITCH format")
-#             col_name, rest = switch_match.groups()
-#             if col_name not in df.columns:
-#                 raise ValueError(f"Column '{col_name}' not found")
-#             cases = re.findall(r'"(.*?)"\s*,\s*"(.*?)"', rest)
-#             default_match = re.search(r'default\s*,\s*["\']?(.*?)["\']?$', rest, re.IGNORECASE)
-#             default_val = default_match.group(1) if default_match else None
-#             df[new_col_name] = df[col_name].map(dict(cases)).fillna(default_val)
-
-#         elif formula_lower.startswith("iferror"):
-#             match = re.match(r"iferror\s*\((.+?)\s*,\s*(.+?)\)", calc_formula, re.IGNORECASE)
-#             if not match:
-#                 raise ValueError("Invalid IFERROR format")
-#             expr, fallback = match.groups()
-#             expr_python = re.sub(r'\[(.*?)\]', replace_column, expr)
-#             try:
-#                 df[new_col_name] = eval(expr_python)
-#                 df[new_col_name] = df[new_col_name].fillna(fallback)
-#             except:
-#                 df[new_col_name] = fallback
-
-#         elif formula_lower.startswith("calculate"):
-#             match = re.match(r"calculate\s*\(\s*(sum|avg|count|max|min)\s*\(\s*\[([^\]]+)\]\)\s*,\s*\[([^\]]+)\]\s*=\s*['\"](.*?)['\"]\s*\)", calc_formula, re.IGNORECASE)
-#             if not match:
-#                 raise ValueError("Invalid CALCULATE format")
-#             agg, value_col, filter_col, filter_val = match.groups()
-#             df_filtered = df[df[filter_col] == filter_val]
-#             result_val = {
-#                 "sum": df_filtered[value_col].astype(float).sum(),
-#                 "avg": df_filtered[value_col].astype(float).mean(),
-#                 "count": df_filtered[value_col].count(),
-#                 "max": df_filtered[value_col].astype(float).max(),
-#                 "min": df_filtered[value_col].astype(float).min(),
-#             }[agg]
-#             df[new_col_name] = result_val
-
-#         elif formula_lower.startswith(("maxx", "minx")):
-#             match = re.match(r"(maxx|minx)\s*\(\s*\[([^\]]+)\]\)", calc_formula, re.IGNORECASE)
-#             func, col = match.groups()
-#             df[new_col_name] = df[col].max() if func.lower() == "maxx" else df[col].min()
-
-#         elif formula_lower.startswith("abs"):
-#             col = re.match(r"abs\s*\(\s*\[([^\]]+)\]\)", calc_formula, re.IGNORECASE).group(1)
-#             df[new_col_name] = df[col].abs()
-
-#         elif formula_lower.startswith("len"):
-#             col = re.match(r"len\s*\(\s*(?:\[([^\]]+)\]|\"([^\"]+)\")\s*\)", calc_formula, re.IGNORECASE).groups()
-#             df[new_col_name] = df[col[0] or col[1]].astype(str).str.len()
-
-#         elif formula_lower.startswith("lower"):
-#             col = re.match(r"lower\s*\(\s*\[([^\]]+)\]\)", calc_formula, re.IGNORECASE).group(1)
-#             df[new_col_name] = df[col].astype(str).str.lower()
-
-#         elif formula_lower.startswith("upper"):
-#             col = re.match(r"upper\s*\(\s*\[([^\]]+)\]\)", calc_formula, re.IGNORECASE).group(1)
-#             df[new_col_name] = df[col].astype(str).str.upper()
-
-#         elif formula_lower.startswith("concat"):
-#             parts = re.split(r",(?![^\[]*\])", re.match(r"concat\s*\((.+)\)", calc_formula, re.IGNORECASE).group(1))
-#             concat_parts = []
-#             for part in parts:
-#                 part = part.strip()
-#                 if part.startswith("[") and part.endswith("]"):
-#                     col = part[1:-1]
-#                     concat_parts.append(df[col].astype(str))
-#                 else:
-#                     concat_parts.append(part.strip('"').strip("'"))
-#             df[new_col_name] = reduce(lambda x, y: x + y, [p if isinstance(p, pd.Series) else pd.Series([p]*len(df)) for p in concat_parts])
-
-#         elif re.match(r"(year|month|day)\s*\(\s*\[([^\]]+)\]\)", calc_formula, re.IGNORECASE):
-#             func, col = re.match(r"(year|month|day)\s*\(\s*\[([^\]]+)\]\)", calc_formula, re.IGNORECASE).groups()
-#             df[col] = pd.to_datetime(df[col], errors="coerce")
-#             df[new_col_name] = getattr(df[col].dt, func.lower())
-
-#         elif formula_lower.startswith("isnull"):
-#             col, fallback = re.match(r"isnull\s*\(\s*\[([^\]]+)\]\s*,\s*['\"]?(.*?)['\"]?\s*\)", calc_formula, re.IGNORECASE).groups()
-#             df[new_col_name] = df[col].fillna(fallback)
-
-#         elif re.match(r"(?:\[([^\]]+)\]|\"([^\"]+)\")\s+in\s*\((.*?)\)", calc_formula, re.IGNORECASE):
-#             match = re.match(r"(?:\[([^\]]+)\]|\"([^\"]+)\")\s+in\s*\((.*?)\)", calc_formula, re.IGNORECASE)
-#             col = match.group(1) or match.group(2)
-#             values = [v.strip().strip('"').strip("'") for v in match.group(3).split(",")]
-#             df[new_col_name] = df[col].isin(values)
-
-#         elif formula_lower.startswith("datediff"):
-#             end_col, start_col = re.match(r"datediff\s*\(\s*\[([^\]]+)\]\s*,\s*\[([^\]]+)\]\)", calc_formula, re.IGNORECASE).groups()
-#             df[end_col] = pd.to_datetime(df[end_col], errors="coerce")
-#             df[start_col] = pd.to_datetime(df[start_col], errors="coerce")
-#             df[new_col_name] = (df[end_col] - df[start_col]).dt.days
-
-#         elif formula_lower.startswith("today()"):
-#             df[new_col_name] = pd.Timestamp.today().normalize()
-
-#         elif formula_lower.startswith("now()"):
-#             df[new_col_name] = pd.Timestamp.now()
-
-#         elif formula_lower.startswith("dateadd"):
-#             col, interval, unit = re.match(r"dateadd\s*\(\s*\[([^\]]+)\]\s*,\s*(-?\d+)\s*,\s*['\"](day|month|year)['\"]\)", calc_formula, re.IGNORECASE).groups()
-#             interval = int(interval)
-#             df[col] = pd.to_datetime(df[col], errors="coerce")
-#             if unit == "day":
-#                 df[new_col_name] = df[col] + pd.to_timedelta(interval, unit="d")
-#             elif unit == "month":
-#                 df[new_col_name] = df[col] + pd.DateOffset(months=interval)
-#             elif unit == "year":
-#                 df[new_col_name] = df[col] + pd.DateOffset(years=interval)
-
-#         elif formula_lower.startswith("formatdate"):
-#             col, fmt = re.match(r"formatdate\s*\(\s*\[([^\]]+)\]\s*,\s*['\"](.+?)['\"]\)", calc_formula, re.IGNORECASE).groups()
-#             df[col] = pd.to_datetime(df[col], errors="coerce")
-#             fmt_mapped = fmt.replace("YYYY", "%Y").replace("MM", "%m").replace("DD", "%d")
-#             df[new_col_name] = df[col].dt.strftime(fmt_mapped)
-
-#         elif formula_lower.startswith("replace"):
-#             col, old, new = re.match(r"replace\s*\(\s*\[([^\]]+)\]\s*,\s*['\"](.*?)['\"]\s*,\s*['\"](.*?)['\"]\)", calc_formula, re.IGNORECASE).groups()
-#             df[new_col_name] = df[col].astype(str).str.replace(old, new, regex=False)
-
-#         elif formula_lower.startswith("trim"):
-#             col = re.match(r"trim\s*\(\s*\[([^\]]+)\]\)", calc_formula, re.IGNORECASE).group(1)
-#             df[new_col_name] = df[col].astype(str).str.strip()
-
-#         else:
-#             calc_formula_python = re.sub(r'\[(.*?)\]', replace_column, calc_formula)
-#             df[new_col_name] = eval(calc_formula_python)
-
-#         print(f"✅ New column '{new_col_name}' created.")
-
-#         # Replace in axes
-#         if y_axis:
-#             y_axis = [new_col_name if col == replace_col_name else col for col in y_axis]
-#         if x_axis:
-#             x_axis = [new_col_name if col == replace_col_name else col for col in x_axis]
-
-#         return df, x_axis, y_axis
-
-#     except Exception as e:
-#         print("Error while applying calculation:", str(e))
-#         raise
-
-
-import numpy as np
-import pandas as pd
-import re
-from functools import reduce
 
 def apply_calculation_to_df(df, calculation_data_list, x_axis=None, y_axis=None):
     if not calculation_data_list:
@@ -3894,8 +4377,7 @@ def apply_calculation_to_df(df, calculation_data_list, x_axis=None, y_axis=None)
     return df, x_axis, y_axis
 
 @app.route('/api/send-chart-details', methods=['POST'])
-def receive_chart_details():
-  
+def receive_chart_details():  
     data = request.get_json()
     print("Received data:", data)
     print("Keys:", data.keys())
@@ -3909,8 +4391,6 @@ def receive_chart_details():
     chart_type = data.get('chart_type')
     chart_heading = data.get('chart_heading')
     optimizeData= data.get('optimizeData')
-
-    
     try:
         filter_options_str = data.get('filter_options').replace('null', 'null') #this line is not needed.
         filter_options = json.loads(data.get('filter_options')) #use json.loads instead of ast.literal_eval.
@@ -3977,7 +4457,7 @@ def receive_chart_details():
         
         
         # Logic for 'singleValueChart'
-        if chart_type == 'singleValueChart':
+        if chart_type in ["singleValueChart","meterGauge"]:
             try:
                 df[y_axis[0]] = pd.to_numeric(df[y_axis[0]], errors='coerce')
                 single_value = df[y_axis[0]].agg(aggregate_py)
@@ -4109,9 +4589,9 @@ def receive_chart_details():
         # if chart_type != 'treeHierarchy':
         if chart_type != 'treeHierarchy' and chart_type != 'tablechart':
 
-            if chart_type == "duealbarChart" :
+            if chart_type in ["duealbarChart", "stackedbar"]:
                     datass = fetch_data_for_duel_bar(tableName, x_axis, filter_options, y_axis, aggregate, databaseName,selectedUser,calculation_data)
-                   
+                    print("Duel/Stacked bar")
                     return jsonify({
                                 "message": "Chart details received successfully!",
                                 "categories": [row[0] for row in datass],
@@ -4237,6 +4717,39 @@ def receive_chart_details():
                 chosen_grouped_df = grouped_df_valid
                 categories = chosen_grouped_df[x_axis[0]].tolist()
                 values = chosen_grouped_df["count"].tolist()
+                category_value_pairs = list(zip(categories, values))
+                optimized_categories = []
+                optimized_values = []
+
+                if optimizeData == "top10":
+                            # Sort by values in descending order and take top 10
+                    sorted_pairs = sorted(category_value_pairs, key=lambda x: x[1], reverse=True)
+                    optimized_pairs = sorted_pairs[:10]
+                            
+                elif optimizeData == "bottom10":
+                            # Sort by values in ascending order and take bottom 10
+                    sorted_pairs = sorted(category_value_pairs, key=lambda x: x[1])
+                    optimized_pairs = sorted_pairs[:10]
+                            
+                elif optimizeData == "both10":
+                            # Get bottom 5
+                    sorted_asc = sorted(category_value_pairs, key=lambda x: x[1])
+                    bottom5_pairs = sorted_asc[:5]
+                            
+                            # Get top 5
+                    sorted_desc = sorted(category_value_pairs, key=lambda x: x[1], reverse=True)
+                    top5_pairs = sorted_desc[:5]
+                            
+                            # Combine bottom 5 and top 5
+                    optimized_pairs = bottom5_pairs + top5_pairs
+                            
+                else:
+                            # Default: return all filtered data
+                    optimized_pairs = category_value_pairs
+
+                        # Separate back into categories and values
+                optimized_categories = [pair[0] for pair in optimized_pairs]
+                optimized_values = [pair[1] for pair in optimized_pairs]
                 
                 print("Final categories====================", categories)
                 print("Final values====================", values)
@@ -4244,8 +4757,8 @@ def receive_chart_details():
                 connection.close()
                 return jsonify({
                     "message": "Chart details received successfully!",
-                    "categories": categories,
-                    "values": values,
+                    "categories": optimized_categories,
+                    "values": optimized_values,
                     "chart_type": chart_type,
                     "chart_heading": chart_heading,
                     "x_axis": x_axis,
@@ -4547,7 +5060,7 @@ def receive_chart_details():
         print("Error: ", e)
         return jsonify({"message": "Error processing request", "error": str(e)}), 500
 
-def get_dashboard_data(dashboard_name, company_name):
+def get_dashboard_data(dashboard_name, company_name,user_id):
     conn = connect_to_db()
     if conn:
         try:
@@ -4555,9 +5068,11 @@ def get_dashboard_data(dashboard_name, company_name):
             query = """
                 SELECT *
                 FROM table_dashboard
-                WHERE file_name = %s AND company_name = %s
+                WHERE file_name = %s AND company_name = %s AND user_id = %s
             """
-            cursor.execute(query, (dashboard_name, company_name))
+            print("query",query)
+            print("user_id",user_id)
+            cursor.execute(query, (dashboard_name, company_name,user_id))
             data = cursor.fetchone()
             
             if data is None:
@@ -4574,10 +5089,11 @@ def get_dashboard_data(dashboard_name, company_name):
     else:
         return None
 
-
 @app.route('/Dashboard_data/<dashboard_name>/<company_name>', methods=['GET'])
 def dashboard_data(dashboard_name,company_name):
-    data = get_dashboard_data(dashboard_name,company_name)
+    user_id, dashboard_name = dashboard_name.split(",", 1)  # Split only once
+    # user_id = request.args.get('user_id')
+    data = get_dashboard_data(dashboard_name,company_name,user_id)
     # print("chart datas------------------------------------------------------------------------------------------------------------------",data) 
     if data is not None:
         chart_ids = data[4]
@@ -4588,6 +5104,10 @@ def dashboard_data(dashboard_name,company_name):
         opacity=data[17]
         image_ids=data[18]
         chart_type=data[7]
+        fontStyleLocal =data[20]
+        fontColor =data[22]
+        fontSize =data[21]
+        
         print("chart_ids====================",chart_ids)    
         print("chart_areacolour====================",areacolour)   
         print("image_ids",image_ids)
@@ -4639,13 +5159,18 @@ def dashboard_data(dashboard_name,company_name):
                             'disableDragging': img_data[7]
                         })
             cursor.close()
-            
+            print("fontStyleLocal",fontStyleLocal)
+            print("fontColor",fontColor)
+            print("fontSize",fontSize)
         # return jsonify(data,chart_datas)
         return jsonify({
             "data": data,
             "chart_datas": chart_datas,
             "positions": positions,
-            "image_data_list":image_data_list
+            "image_data_list":image_data_list,
+            "fontStyleLocal":fontStyleLocal,
+            "fontColor":fontColor,
+            "fontSize":fontSize
         })
     else:
         return jsonify({'error': 'Failed to fetch data for Chart {}'.format(dashboard_name)})
@@ -4653,6 +5178,7 @@ def dashboard_data(dashboard_name,company_name):
 @app.route('/saved_dashboard_total_rows', methods=['GET'])
 def saved_dashboard_names():
     database_name = request.args.get('company')  # Getting the database_name
+    project=request.args.get("project_name")
     print(f"Received user_id:",database_name)
     user_id = request.args.get('user_id')  # Retrieve user_id from query parameters
 
@@ -4660,14 +5186,29 @@ def saved_dashboard_names():
     if not user_id:
         return jsonify({'error': 'User ID is required'}), 400
 
-    names = get_dashboard_names(user_id,database_name)
+    names = get_dashboard_names(user_id,database_name,project)
     
     print("names====================", names)   
     if names is not None:
         return jsonify({'chart_names': names})
     else:
         return jsonify({'error': 'Failed to fetch chart names'})
-    
+
+@app.route('/project_names', methods=['GET'])
+@employee_required
+def get_project_names_route():
+    database_name = request.args.get('company')
+    user_id = request.args.get('user_id')
+
+    if not user_id or not database_name:
+        return jsonify({'error': 'User ID and company are required'}), 400
+
+    project_names = fetch_project_names(user_id, database_name)
+
+    if project_names is not None:
+        return jsonify({'project_names': project_names})
+    else:
+        return jsonify({'error': 'Failed to fetch project names'}), 500
     
 @app.route('/saved_Editdashboard_total_rows', methods=['GET'])
 def saved_Editdashboard_names():
@@ -4687,7 +5228,6 @@ def saved_Editdashboard_names():
     else:
         return jsonify({'error': 'Failed to fetch chart names'})
     
-
 @app.route('/api/usersignup', methods=['POST'])
 def usersignup():
     data = request.json
@@ -4715,10 +5255,6 @@ def get_db_connection(dbname="datasource"):
         password=password,
         host=HOST,
         port="5432"
-        # user=USER_NAME,
-        # password=PASSWORD,
-        # host=HOST,
-        # port=PORT
     )
     return conn
 
@@ -4735,12 +5271,10 @@ def get_companies():
     return jsonify(company_list)
 
 @app.route('/api/roles', methods=['GET'])
-def get_roles():
-    
+def get_roles(): 
     company_name = request.args.get('companyName')
     if not company_name:
         return jsonify({'message': 'Missing companyName'}), 400
-
     try:
         conn = get_company_db_connection(company_name)
         cur = conn.cursor()
@@ -4759,8 +5293,6 @@ def get_roles():
 def get_hello_data():
     dataframe = bc.global_df
     print("dataframe........................", dataframe)
-    
-    # Convert datetime columns to string to avoid NaT issues
     for col in dataframe.select_dtypes(include=['datetime64[ns]']).columns:
         dataframe[col] = dataframe[col].dt.strftime('%Y-%m-%d %H:%M:%S').fillna('null')
     
@@ -4802,10 +5334,6 @@ def ai_boxPlotChart():
         # "data_frame": dataframe_dict,
         "histogram_details": details
     })
-
-
-
-# ////////-----------------15-10-2024-----------gayathri------//////////
 
 @app.route('/api/fetch_categories', methods=['GET'])
 def fetch_categories():
@@ -4878,22 +5406,6 @@ def get_all_users():
             cursor.close()
         if conn:
             conn.close()
-
-# def get_company_db_connection(company_name):
-
-#     # This is where you define the connection string
-#     conn = psycopg2.connect(
-#         dbname=company_name,  # Ensure this is the correct company database
-#         # user="postgres",
-#         # password="Gayu@123",
-#         # host="localhost",
-#         # port="5432"
-#         user=USER_NAME,
-#         password=PASSWORD,
-#         host=HOST,
-#         port=PORT
-#     )
-#     return conn 
 
 @app.route('/api/fetch_user_data', methods=['POST'])
 def fetch_user_data():
@@ -5055,7 +5567,6 @@ def get_predictions():
     # prediction_data = load_and_predict(x_axis, y_axis)
     return jsonify(prediction_data)  # Return data as JSON
 
-
 @app.route('/Hierarchial-backend-endpoint', methods=['POST', 'GET'])
 def handle_hierarchical_bar_click():
     global global_df
@@ -5102,25 +5613,12 @@ def handle_hierarchical_bar_click():
             print("An error occurred in handle_hierarchical_bar_click:", str(e))
             return jsonify({"error": "An internal error occurred.", "message": str(e)}), 500
 
-import whisper
-import spacy
-import traceback
-
-# Load spaCy's small English model
-nlp = spacy.load("en_core_web_sm")
-
-NLP_UPLOAD_FOLDER = os.path.join(os.getcwd(), 'uploads/nlp_audio')
-os.makedirs(NLP_UPLOAD_FOLDER, exist_ok=True)
-
-CHART_TYPES = {"bar", "pie", "line", "scatter", "area"}
-COLUMNS_NAMES = bc.global_column_names
 def normalize_text(text):
     """Normalize text by converting to lowercase and replacing underscores/hyphens with spaces."""
     # print(text)
 
 
     return text.lower().replace("_", " ").replace("-", " ")
-
 
 def extract_chart_details_spacy(text, COLUMN_NAME_MAP):
     doc = nlp(text.lower())
@@ -5218,51 +5716,6 @@ def nlp_upload_audio():
         "extracted_data": extracted_data
     })
 
-
-
-@app.route('/upload-json', methods=['POST'])
-def upload_file_json():
-    try:
-        database_name = request.form.get('company_database')
-        primary_key_column = request.form.get('primaryKeyColumnName')
-        
-        # Check if file is present in the request
-        if 'file' not in request.files:
-            return jsonify({'message': 'No file part in the request'}), 400
-
-        json_file = request.files['file']
-        
-        # Check if a file is selected
-        if json_file.filename == '':
-            return jsonify({'message': 'No file selected for uploading'}), 400
-
-        print("primary_key_column:", primary_key_column)
-        print("json_file:", json_file.filename)
-        print("database_name:", database_name)
-        
-        # Save the file to a temporary directory
-        json_file_name = secure_filename(json_file.filename)
-        os.makedirs('tmp', exist_ok=True)
-        temp_file_path = f'tmp/{json_file_name}'
-        json_file.save(temp_file_path)
-
-        # Call the upload_json_to_postgresql function
-        result = upload_json_to_postgresql(database_name, username, password, temp_file_path, primary_key_column, host, port)
-        
-        if result == "Upload successful":
-            return jsonify({'message': 'File uploaded successfully'}), 200
-        else:
-            return jsonify({'message': result}), 500
-
-    except Exception as e:
-        traceback.print_exc()
-        return jsonify({'message': f"Internal Server Error: {str(e)}"}), 500
-
-
-#*----------------------------Gayathri(12/15/24)--------------------------*
-
-from psycopg2.extras import RealDictCursor
-
 @app.route('/api/charts/<string:chart_name>', methods=['DELETE'])
 def delete_chart(chart_name):
     conn = get_db_connection()
@@ -5271,7 +5724,7 @@ def delete_chart(chart_name):
     
     try:
         cur = conn.cursor(cursor_factory=RealDictCursor)
-        
+        user_id, chart_name = chart_name.split(",", 1)  # Split only once
         # Delete the chart from the table
         cur.execute("DELETE FROM table_chart_save WHERE chart_name = %s", (chart_name,))
         rows_deleted = cur.rowcount
@@ -5290,10 +5743,16 @@ def delete_chart(chart_name):
     except Exception as e:
         print("Error while deleting chart:", e)
         return jsonify({"error": "Failed to delete chart"}), 500
+
 @app.route('/delete-chart', methods=['DELETE'])
 def delete_dashboard_name():
-    chart_name = request.json.get('chart_name')  # Get the chart_name from JSON body
-    
+    chart_name = request.args.get('chart_name')  # Get the chart_name from JSON body
+    user_id = request.args.get('user_id')  # Use query param for GET
+
+    company_name=request.args.get('company_name')
+    print("company_name",company_name)
+    print("chart_name",chart_name)
+    print("user_id",user_id)
     if not chart_name:
         return jsonify({"error": "Chart name is required"}), 400
     
@@ -5303,7 +5762,7 @@ def delete_dashboard_name():
     
     try:
         cur = conn.cursor(cursor_factory=RealDictCursor)
-        cur.execute("DELETE FROM table_dashboard WHERE file_name = %s", (chart_name,))
+        cur.execute("DELETE FROM table_dashboard WHERE file_name = %s AND user_id = %s AND company_name=%s", (chart_name,user_id,company_name))
         rows_deleted = cur.rowcount
         conn.commit()
         cur.close()
@@ -5318,49 +5777,66 @@ def delete_dashboard_name():
         print("Error while deleting chart:", e)
         return jsonify({"error": f"Error: {str(e)}"}), 500
 
-@app.route('/api/is-chart-in-dashboard', methods=['GET'])
-def is_chart_in_dashboard():
-    chart_name = request.args.get('chart_name')
-    company_name=request.args.get('company_name')
-    
-    if not chart_name:
-        return jsonify({"error": "Chart name is required"}), 400
+@app.route('/api/are-charts-in-dashboard', methods=['POST'])
+@employee_required
+def are_charts_in_dashboard():
+    data = request.get_json()
+    chart_names_row = data.get('chart_names', [])
+    chart_names=[name if  isinstance(name,str) else name[1] for name in chart_names_row]
+    company_name = data.get('company_name')
+
+    if not chart_names or not company_name:
+        return jsonify({"error": "chart_names and company_name are required"}), 400
 
     conn = get_db_connection()
     if conn is None:
-        return jsonify({"error": "Failed to connect to the database"}), 500
+        return jsonify({"error": "Failed to connect to database"}), 500
 
     try:
-        cur = conn.cursor(cursor_factory=RealDictCursor)
-        # Fetch data using subquery for chart_id
-        cur.execute("""
-            SELECT * 
-FROM table_dashboard 
-WHERE 
-    (SELECT id FROM table_chart_save WHERE chart_name = %s AND company_name= %s)::INTEGER 
-    = ANY(string_to_array(trim(BOTH '{}' FROM chart_ids), ',')::INTEGER[])
+        cur = conn.cursor()
 
-        """, (chart_name,company_name))
+        # Step 1: Get all chart_ids that match the provided names and company
+        cur.execute("""
+            SELECT id, chart_name FROM table_chart_save 
+            WHERE chart_name = ANY(%s) AND company_name = %s
+        """, (chart_names, company_name))
         
-        chart_in_dashboard = cur.fetchone()
+        chart_id_map = {str(row[0]): row[1] for row in cur.fetchall()} # {chart_id: chart_name} for reverse lookup
+        found_chart_ids = list(chart_id_map.keys())
+
+        # If no charts were found, none can be in a dashboard
+        if not found_chart_ids:
+            cur.close()
+            conn.close()
+            return jsonify({name: False for name in chart_names}), 200
+
+        # Step 2: Query dashboards to see which chart_ids are present
+        # Use a more efficient query to check for existence
+        cur.execute("""
+            SELECT unnest(string_to_array(chart_ids, ',')) 
+            FROM table_dashboard
+            WHERE string_to_array(chart_ids, ',') && %s
+        """, (found_chart_ids,))
+        
+        in_use_chart_ids = {row[0] for row in cur.fetchall()}
+
         cur.close()
         conn.close()
 
-        if chart_in_dashboard:
-            return jsonify({
-                "isInDashboard": True,
-                "message": f"Chart '{chart_name}' is being used in a dashboard."
-            }), 200
-        else:
-            return jsonify({
-                "isInDashboard": False,
-                "message": f"Chart '{chart_name}' is not being used in a dashboard."
-            }), 200
+        # Step 3: Build the final result dictionary
+        result = {}
+        for chart_name in chart_names:
+            # Check if the chart has a corresponding ID and if that ID is in the in_use_chart_ids set
+            chart_id_for_name = next((id for id, name in chart_id_map.items() if name == chart_name), None)
+            is_in_use = chart_id_for_name is not None and chart_id_for_name in in_use_chart_ids
+            result[chart_name] = is_in_use
+
+        return jsonify(result), 200
 
     except Exception as e:
-        print("Error checking chart usage:", e)
-        return jsonify({"error": "Failed to check if chart is used"}), 500
-
+        print("Error checking chart usage in bulk:", e)
+        return jsonify({"error": "Server error"}), 500
+    
 @app.route('/api/table-columns/<table_name>', methods=['GET'])
 def api_get_table_columns(table_name):
     try:
@@ -5376,7 +5852,6 @@ def api_get_table_columns(table_name):
         return jsonify(columns), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-
 
 @app.route('/api/employees', methods=['GET'])
 def get_employees():
@@ -5418,7 +5893,6 @@ def get_employees():
     except Exception as e:
         print("Error fetching employees:", e)
         return jsonify({"error": "An error occurred while fetching employees"}), 500
-
     
 @app.route('/api/checkTableUsage', methods=['GET'])
 def check_table_usage():
@@ -5466,9 +5940,6 @@ def get_table_data_excel():
         # Log the error for better debugging
         print(f"Error: {e}")
         return jsonify({'error': str(e)}), 500
-
-
-# COLUMN CONDITION @
 
 from load import (
     get_table_data_with_cache,
@@ -5807,6 +6278,7 @@ def create_view_apidb():
     """API endpoint to create a database view"""
     try:
         data = request.get_json()
+        print("data------------------",data)
         company_name = data.get('databaseName')
         view_config = data.get('viewConfig')
         selectedUser=request.args.get('selectedUser')
@@ -6422,7 +6894,9 @@ def check_save_name():
     data = request.get_json()
     save_name = data.get('saveName')
     company_name = data.get('company_name')  # Get user_id from request
+    user_id=data.get('user_id')
     print("company_name",company_name)
+    print("save_name",save_name)
     if not save_name or not company_name:
         return jsonify({'error': 'Save name and user_id are required'}), 400
 
@@ -6431,10 +6905,10 @@ def check_save_name():
         cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
 
         # Query to check if saveName exists for the given user_id
-        query = "SELECT COUNT(*) FROM table_chart_save WHERE chart_name = %s AND company_name = %s"
+        query = "SELECT COUNT(*) FROM table_chart_save WHERE chart_name = %s AND company_name = %s AND user_id=%s"
         print("query",query)
         try:
-            cursor.execute(query, (save_name, company_name))
+            cursor.execute(query, (save_name, company_name,user_id))
             exists = cursor.fetchone()[0] > 0
         except psycopg2.errors.UndefinedTable:
             print("Table 'table_chart_save' does not exist.")
@@ -6451,6 +6925,8 @@ def check_save_name():
 
 @app.route('/check_filename/<fileName>/<company_name>', methods=['GET'])
 def check_filename(fileName, company_name):
+    user_id = request.args.get('user_id')  # Use query param for GET
+
     try:
         conn = get_db_connection()
         cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
@@ -6460,9 +6936,9 @@ def check_filename(fileName, company_name):
         query = """
             SELECT COUNT(*) 
             FROM table_dashboard 
-            WHERE file_name = %s AND company_name = %s
+            WHERE file_name = %s AND company_name = %s AND user_id= %s
         """
-        cursor.execute(query, (fileName, company_name))
+        cursor.execute(query, (fileName, company_name,user_id))
         exists = cursor.fetchone()[0] > 0
 
         cursor.close()
@@ -6728,13 +7204,29 @@ def save_dashboard():
     data = request.json
     user_id = data['user_id']
     # dashboard_name = data['dashboard_name']
-    dashboard_name = data['dashboard_name'].strip()
+    # dashboard_name = data['dashboard_name'].strip()
+    dashboard_name_data = data.get("dashboard_name")
+
+    if isinstance(dashboard_name_data, list):
+            # Expect [id, name]
+        if len(dashboard_name_data) == 2:
+            user_id, dashboard_name = dashboard_name_data
+        else:
+            return jsonify({"message": "Invalid dashboard_name format"}), 400
+    elif isinstance(dashboard_name_data, str):
+        user_id, dashboard_name = dashboard_name_data.split(",", 1)
+    else:
+        return jsonify({"message": "dashboard_name must be string or list"}), 400
 
     chart_details = data['chart_details']
     DashboardHeading = data.get('DashboardHeading', '').strip()
     position = data['position']  # Get position from the new structure
     droppableBgColor=data['droppableBgColor']
     imagePositions=data['imagePositions']
+    fontStyleState = data.get('fontStyleLocal', '')
+    fontSize = data.get('fontSize', '')
+    fontColor = data.get('fontColor', '')
+
     # Bgcolour=data['bgcolor']
     print("user_id:", user_id)
     print("dashboard_name:", dashboard_name)
@@ -6780,7 +7272,7 @@ def save_dashboard():
         # **Step 1: Clear existing chart details while keeping other columns intact**
         update_query = """
             UPDATE table_dashboard
-            SET chart_ids = NULL, heading = NULL, position = NULL, chart_size = NULL, chart_type = NULL, chart_xaxis = NULL, chart_yaxis = NULL, chart_aggregate = NULL,filterdata=NULL,droppableBgColor=NULL,opacity=NULL,chartcolor=NULL
+            SET chart_ids = NULL, heading = NULL, position = NULL, chart_size = NULL, chart_type = NULL, chart_xaxis = NULL, chart_yaxis = NULL, chart_aggregate = NULL,filterdata=NULL,droppableBgColor=NULL,opacity=NULL,chartcolor=NULL,font_style_state=NULL,font_size=NULL,font_color=NULL        
             WHERE user_id = %s AND file_name = %s;
         """
         cur.execute(update_query, (user_id, dashboard_name))
@@ -6827,13 +7319,13 @@ def save_dashboard():
             print("Existing dashboards in DB:")
             for row in all_dashboards:
                 print(f"user_id: {row[0]}, file_name: '{row[1]}'")
-
+            print("font_style_state",fontStyleState)
             update_chart_query = """
                 UPDATE table_dashboard
-                SET chart_ids = %s, heading = %s, position = %s::jsonb, chart_size = %s::jsonb, chart_aggregate = %s::jsonb, chart_xaxis = %s::jsonb, chart_yaxis = %s::jsonb,chart_type = %s::jsonb,filterdata = %s,droppableBgColor=%s, opacity = %s::jsonb,chartcolor = %s::jsonb
-                WHERE user_id = %s AND file_name = %s;
+                SET chart_ids = %s, heading = %s, position = %s::jsonb, chart_size = %s::jsonb, chart_aggregate = %s::jsonb, chart_xaxis = %s::jsonb, chart_yaxis = %s::jsonb,chart_type = %s::jsonb,filterdata = %s,droppableBgColor=%s, opacity = %s::jsonb,chartcolor = %s::jsonb,font_style_state = %s,
+                font_size = %s,font_color = %s WHERE user_id = %s AND file_name = %s;
             """
-            cur.execute(update_chart_query, (chart_ids_str, DashboardHeading, positions, chart_sizes, aggregations, xaxes, yaxes, chart_type, filter_options,droppableBgColor,opacities,bgcolors, user_id, dashboard_name))
+            cur.execute(update_chart_query, (chart_ids_str, DashboardHeading, positions, chart_sizes, aggregations, xaxes, yaxes, chart_type, filter_options,droppableBgColor,opacities,bgcolors,fontStyleState, fontSize, fontColor, user_id, dashboard_name))
             conn.commit()
             
             print("update_chart_query ",update_chart_query)
@@ -7034,14 +7526,6 @@ def connect_and_fetch_dbtables():
     
 
 
-from flask import Flask, request, jsonify
-from flask_apscheduler import APScheduler
-from datetime import datetime, timedelta
-import os
-from sendgrid import SendGridAPIClient
-from sendgrid.helpers.mail import Mail
-
-
 # from apscheduler.schedulers.background import BackgroundScheduler
 
 # scheduler = BackgroundScheduler()
@@ -7050,12 +7534,142 @@ from sendgrid.helpers.mail import Mail
 
 # Initialize scheduler
 app.config['SCHEDULER_API_ENABLED'] = True
+
+
+
+# scheduler.scheduler.jobstores = {
+#     'default': SQLAlchemyJobStore(
+#         url=f'postgresql://{USER_NAME}:{PASSWORD}@{HOST}:{PORT}/{DB_NAME}'
+#     )
+# }
+# app.config['SCHEDULER_JOBSTORES'] = {
+#     'default': SQLAlchemyJobStore(
+#         url=f'postgresql://{USER_NAME}:{PASSWORD}@{HOST}:{PORT}/{DB_NAME}'
+#     )
+# }
+
+
+encoded_password = urllib.parse.quote_plus(PASSWORD)
+
+app.config['SCHEDULER_JOBSTORES'] = {
+    'default': SQLAlchemyJobStore(
+        url=f'postgresql://{USER_NAME}:{encoded_password}@{HOST}:{PORT}/{DB_NAME}'
+    )
+}
+
+app.config['SCHEDULER_JOB_DEFAULTS'] = {
+    'coalesce': False,
+    'max_instances': 3,
+    'misfire_grace_time': 60
+}
 scheduler = APScheduler()
 scheduler.init_app(app)
 scheduler.start()
-app.config['SCHEDULER_API_ENABLED'] = True
+def update_last_transfer_status(source_table, dest_table, status, message):
+    try:
+        conn = psycopg2.connect(
+            dbname=DB_NAME,
+            user=USER_NAME,
+            password=PASSWORD,
+            host=HOST,
+            port=PORT
+        )
+        cur = conn.cursor()
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS last_transfer_status (
+                id SERIAL PRIMARY KEY,
+                source_table VARCHAR NOT NULL,
+                destination_table VARCHAR NOT NULL,
+                last_transfer_time TIMESTAMP,
+                status VARCHAR,
+                message TEXT,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE (source_table, destination_table)
+            );
+        """)
+        conn.commit()
+
+        upsert_query = """
+            INSERT INTO last_transfer_status (
+                source_table, destination_table, last_transfer_time, status, message
+            )
+            VALUES (%s, %s, %s, %s, %s)
+            ON CONFLICT (source_table, destination_table)
+            DO UPDATE SET
+                last_transfer_time = EXCLUDED.last_transfer_time,
+                status = EXCLUDED.status,
+                message = EXCLUDED.message,
+                updated_at = CURRENT_TIMESTAMP;
+        """
+        cur.execute(upsert_query, (
+            source_table, dest_table, datetime.utcnow(), status, message
+        ))
+        conn.commit()
+        cur.close()
+        conn.close()
+    except Exception as e:
+        print(f"❌ Failed to update last transfer status: {str(e)}")
 
 
+def create_log_table_if_not_exists():
+    try:
+        conn = get_db_connection()
+        # conn = psycopg2.connect(**LOG_DB_CONFIG)
+        cur = conn.cursor()
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS data_transfer_logs (
+                id SERIAL PRIMARY KEY,
+                source_table VARCHAR,
+                destination_table VARCHAR,
+                schedule_type VARCHAR,
+                run_time TIMESTAMP,
+                status VARCHAR,
+                message TEXT,
+                record_count INTEGER,
+                data_size_mb FLOAT,
+                user_email VARCHAR,
+                job_id VARCHAR,
+                time_taken_seconds FLOAT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                inserted_count INTEGER DEFAULT 0,
+                updated_count INTEGER DEFAULT 0,
+                skipped_count INTEGER DEFAULT 0
+            );
+        """)
+        conn.commit()
+        cur.close()
+        conn.close()
+        print("✅ 'data_transfer_logs' table ensured.")
+    except Exception as e:
+        print(f"❌ Failed to create table: {e}")
+
+def log_data_transfer(source_table, dest_table, schedule_type, run_time,
+                      status, message, record_count, data_size_mb, email, job_id,time_taken_seconds, inserted_count=0, updated_count=0, skipped_count=0):
+    try:
+        conn = psycopg2.connect(
+            dbname=DB_NAME,  # Update this
+            user=USER_NAME,
+            password=PASSWORD,
+            host=HOST,
+            port=PORT
+        )
+        cur = conn.cursor()
+        insert_query = """
+            INSERT INTO data_transfer_logs (
+                source_table, destination_table, schedule_type, run_time,
+                status, message, record_count, data_size_mb, user_email, job_id,time_taken_seconds, inserted_count, updated_count, skipped_count
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s,%s,%s, %s, %s)
+        """
+        cur.execute(insert_query, (
+            source_table, dest_table, schedule_type, run_time,
+            status, message, record_count, data_size_mb, email, job_id,time_taken_seconds, inserted_count, updated_count, skipped_count
+        ))
+        conn.commit()
+        cur.close()
+        conn.close()
+    except Exception as e:
+        print(f"❌ Failed to log data transfer: {str(e)}")
 def send_notification_email(recipient, subject, body):
     try:
         print("Using SendGrid API to send email...")
@@ -7073,11 +7687,79 @@ def send_notification_email(recipient, subject, body):
     except Exception as e:
         print("SendGrid error:", e)
 
+# def job_logic(cols=None, source_config=None, destination_config=None,
+#               source_table_name=None, dest_table_name=None,
+#               update_existing_table=False, create_view_if_exists=False, email=None):
+#     print(f"[{datetime.now()}] Job triggered with columns: {cols}")
+#     try:
+#         source_df, fetch_error = fetch_data_with_columns(source_config, source_table_name, cols)
+#         if fetch_error:
+#             msg = f"Failed to fetch data: {fetch_error}"
+#             print(msg)
+#             if email:
+#                 send_notification_email(email, "Data Transfer Failed", msg)
+#             return {"success": False, "error": msg}
+
+#         if source_df is None or source_df.empty:
+#             msg = f"No data found in table '{source_table_name}'"
+#             print(msg)
+#             if email:
+#                 send_notification_email(email, "Data Transfer Skipped", msg)
+#             return {"success": True, "message": msg}
+
+#         insert_success, insert_error, view_created, view_name = insert_dataframe_with_upsert(
+#             destination_config, dest_table_name, source_df, source_table_name, cols, create_view_if_exists
+#         )
+
+#         if not insert_success:
+#             msg = f"Failed to insert data: {insert_error}"
+#             print(msg)
+#             if email:
+#                 send_notification_email(email, "Data Transfer Failed", msg)
+#             return {"success": False, "error": msg}
+
+#         records_count = len(source_df)
+#         data_size = source_df.memory_usage(deep=True).sum() / (1024 * 1024)
+#         transfer_time = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
+#         view_info = f"\nA view named '{view_name}' was created." if view_name else ""
+
+#         email_body = f"""\nSubject: 3A Vision Data Transfer Completed
+
+# Hello {email},
+
+# Data transfer from '{source_config.get('dbName')}' to '{destination_config.get('dbName')}' completed.
+
+# Details:
+# Table: {source_table_name}
+# Records: {records_count}
+# Size: {data_size:.2f} MB
+# Time: {transfer_time}
+# {view_info}
+
+# Regards,
+# 3A Vision Team
+# """
+#         if email:
+#             send_notification_email(email, "3A Vision Data Transfer Completed", email_body)
+
+#         return {"success": True, "message": f"Data transferred from '{source_table_name}' to '{dest_table_name}'."}
+
+#     except Exception as e:
+#         error_msg = f"Unexpected error: {str(e)}"
+#         print(traceback.format_exc())
+#         if email:
+#             send_notification_email(email, "Data Transfer Failed", error_msg)
+#         return {"success": False, "error": error_msg}
 def job_logic(cols=None, source_config=None, destination_config=None,
               source_table_name=None, dest_table_name=None,
-              update_existing_table=False, create_view_if_exists=False, email=None):
-    print(f"[{datetime.now()}] Job triggered with columns: {cols}")
+              update_existing_table=False, create_view_if_exists=False,
+              email=None, schedule_type=None, job_id=None):
+    start_time = datetime.utcnow()
+    print(f"[{datetime.now()}] Job triggered for table: {source_table_name}")
+    create_log_table_if_not_exists()
+
     try:
+        # Placeholder for your actual data fetch logic
         source_df, fetch_error = fetch_data_with_columns(source_config, source_table_name, cols)
         if fetch_error:
             msg = f"Failed to fetch data: {fetch_error}"
@@ -7086,56 +7768,181 @@ def job_logic(cols=None, source_config=None, destination_config=None,
                 send_notification_email(email, "Data Transfer Failed", msg)
             return {"success": False, "error": msg}
 
-        if source_df is None or source_df.empty:
-            msg = f"No data found in table '{source_table_name}'"
-            print(msg)
+        if source_df is None:
+            msg = f"No data found in '{source_table_name}'"
             if email:
                 send_notification_email(email, "Data Transfer Skipped", msg)
+            log_data_transfer(source_table_name, dest_table_name, schedule_type,
+                              datetime.utcnow(), "Skipped", msg, 0, 0.0, email, job_id, 0.0,inserted_count=0, updated_count=0, skipped_count=0)
+            update_last_transfer_status(source_table_name, dest_table_name, "Skipped", msg)
             return {"success": True, "message": msg}
 
-        insert_success, insert_error, view_created, view_name = insert_dataframe_with_upsert(
+        # Placeholder for insert logic
+        insert_success = True  # Replace with actual insert result
+        insert_error = None
+        view_name = None
+        insert_success, insert_error, view_created, view_name ,inserted_count, updated_count = insert_dataframe_with_upsert(
             destination_config, dest_table_name, source_df, source_table_name, cols, create_view_if_exists
         )
-
+        skipped_count = len(source_df) - inserted_count - updated_count
         if not insert_success:
-            msg = f"Failed to insert data: {insert_error}"
-            print(msg)
+            msg = f"Insert failed: {insert_error}"
             if email:
                 send_notification_email(email, "Data Transfer Failed", msg)
+            log_data_transfer(source_table_name, dest_table_name, schedule_type,
+                              datetime.utcnow(), "Failed", msg, 0, 0.0, email, job_id, 0.0,inserted_count, updated_count, skipped_count)
+            update_last_transfer_status(source_table_name, dest_table_name, "Failed", msg)
             return {"success": False, "error": msg}
 
         records_count = len(source_df)
         data_size = source_df.memory_usage(deep=True).sum() / (1024 * 1024)
-        transfer_time = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
-        view_info = f"\nA view named '{view_name}' was created." if view_name else ""
 
-        email_body = f"""\nSubject: 3A Vision Data Transfer Completed
+        msg = f"Transferred {records_count} records from {source_table_name} to {dest_table_name}."
+
+        email_body = f"""
+Subject: 3A Vision Data Transfer Completed
 
 Hello {email},
 
-Data transfer from '{source_config.get('dbName')}' to '{destination_config.get('dbName')}' completed.
+✅ Data transfer from '{source_config.get('dbName')}' to '{destination_config.get('dbName')}' completed.
 
 Details:
 Table: {source_table_name}
 Records: {records_count}
 Size: {data_size:.2f} MB
-Time: {transfer_time}
-{view_info}
+Time: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')}
 
 Regards,
 3A Vision Team
 """
         if email:
             send_notification_email(email, "3A Vision Data Transfer Completed", email_body)
-
-        return {"success": True, "message": f"Data transferred from '{source_table_name}' to '{dest_table_name}'."}
+        end_time = datetime.utcnow()
+        time_taken_seconds = (end_time - start_time).total_seconds()
+        log_data_transfer(source_table_name, dest_table_name, schedule_type,
+                          datetime.utcnow(), "Success", msg, records_count, data_size, email, job_id,time_taken_seconds,inserted_count, updated_count, skipped_count)
+        update_last_transfer_status(source_table_name, dest_table_name, "Success", msg)
+        return {"success": True, "message": msg}
 
     except Exception as e:
         error_msg = f"Unexpected error: {str(e)}"
         print(traceback.format_exc())
         if email:
             send_notification_email(email, "Data Transfer Failed", error_msg)
+        log_data_transfer(source_table_name, dest_table_name, schedule_type,
+                          datetime.utcnow(), "Failed", error_msg, 0, 0.0, email, job_id,0.0,inserted_count=0, updated_count=0, skipped_count=0)
         return {"success": False, "error": error_msg}
+
+# @app.route('/api/transfer_data', methods=['POST'])
+# def transfer_and_verify_data():
+#     data = request.get_json()
+#     source_config = data.get('source')
+#     destination_config = data.get('destination')
+#     source_table_name = data.get('sourceTable')
+#     dest_table_name = data.get('destinationTable')
+#     selected_columns = data.get('selectedColumns')
+#     schedule_type = data.get('scheduleType')
+#     schedule_time = data.get('scheduleTime')
+#     update_existing_table = data.get('updateExistingTable', False)
+#     create_view_if_exists = data.get('createViewIfExists', False)
+#     email = data.get('email')
+
+#     if not dest_table_name:
+#         timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+#         dest_table_name = f"{source_table_name}_copy_{timestamp}"
+
+#     if not source_config or not destination_config or not source_table_name or not dest_table_name:
+#         return jsonify({"success": False, "error": "Missing configuration or table names"}), 400
+
+#     if not schedule_type or schedule_type == '':
+#         result = job_logic(selected_columns)
+#         return jsonify(result)
+
+#     # Scheduled job
+#     job_id = f"{source_table_name}_to_{dest_table_name}_{datetime.utcnow().strftime('%Y%m%d%H%M%S')}"
+#     try:
+#         schedule_hour, schedule_minute = map(int, schedule_time.split(':')) if schedule_time else (0, 0)
+#         now = datetime.now()
+#         # job_kwargs = {"cols": selected_columns}
+#         job_kwargs = {
+#     "cols": selected_columns,
+#     "source_config": source_config,
+#     "destination_config": destination_config,
+#     "source_table_name": source_table_name,
+#     "dest_table_name": dest_table_name,
+#     "update_existing_table": update_existing_table,
+#     "create_view_if_exists": create_view_if_exists,
+#     "email": email
+# }
+
+#         print("job_kwargs",job_kwargs)
+
+#         if schedule_type == 'once':
+#             run_time = now.replace(hour=schedule_hour, minute=schedule_minute, second=0, microsecond=0)
+#             if run_time < now:
+#                 run_time += timedelta(days=1)
+#             scheduler.add_job(func=job_logic, trigger='date', run_date=run_time, id=job_id, kwargs=job_kwargs)
+#         elif schedule_type == 'hourly':
+#             scheduler.add_job(
+#     func=job_logic,
+#     trigger='interval',
+#     hours=1,
+#     id=job_id,
+#     kwargs=job_kwargs,
+#     replace_existing=True,
+#     misfire_grace_time=3600,
+#     next_run_time=datetime.now()
+# )
+
+
+#             # scheduler.add_job(func=job_logic, trigger='interval', hours=1, id=job_id, kwargs=job_kwargs)
+#         elif schedule_type == 'daily':
+#             scheduler.add_job(func=job_logic, trigger='cron', hour=schedule_hour, minute=schedule_minute, id=job_id, kwargs=job_kwargs,next_run_time=datetime.now())
+#         else:
+#             return jsonify({"success": False, "error": f"Invalid schedule type: {schedule_type}"}), 400
+
+#         # return jsonify({"success": True, "message": f"Job scheduled successfully ({schedule_type})", "job_id": job_id})
+#         # Print all scheduled jobs in terminal
+#         print("\n📋 Scheduled Jobs List:")
+#         for job in scheduler.get_jobs():
+#             print(job)
+#             print(f"- ID: {job.id}")
+#             print(f"  Next Run Time: {job.next_run_time}")
+#             print(f"  Trigger: {job.trigger}")
+#             print(f"  Function: {job.func_ref}")
+#             print(f"  Args: {job.args}")
+#             print(f"  Kwargs: {job.kwargs}")
+#             print("-" * 50)
+#         if email:
+#             schedule_msg = f"""\
+#             Subject: 3A Vision Data Transfer Scheduled
+
+#             Hello {email},
+
+#             Your data transfer job has been successfully scheduled.
+
+#             Details:
+#             Source Table: {source_table_name}
+#             Destination Table: {dest_table_name}
+#             Schedule Type: {schedule_type}
+#             Scheduled Time: {schedule_time if schedule_time else 'N/A'}
+#             Job ID: {job_id}
+
+#             Regards,
+#             3A Vision Team
+#             """
+#             send_notification_email(email, "3A Vision Data Transfer Scheduled", schedule_msg)
+
+#             return jsonify({"success": True, "message": f"Job scheduled successfully ({schedule_type})", "job_id": job_id})
+
+#         # return jsonify({"success": True, "message": f"Job scheduled successfully ({schedule_type})", "job_id": job_id})
+
+#     except Exception as e:
+#         error_msg = f"Failed to schedule job: {str(e)}"
+#         print(error_msg)
+#         if email:
+#             send_notification_email(email, "Data Transfer Scheduling Failed", error_msg)
+#         return jsonify({"success": False, "error": error_msg}), 500
 @app.route('/api/transfer_data', methods=['POST'])
 def transfer_and_verify_data():
     data = request.get_json()
@@ -7149,36 +7956,84 @@ def transfer_and_verify_data():
     update_existing_table = data.get('updateExistingTable', False)
     create_view_if_exists = data.get('createViewIfExists', False)
     email = data.get('email')
+    print("dest_table_name",dest_table_name)
 
-    if not dest_table_name:
-        timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
-        dest_table_name = f"{source_table_name}_copy_{timestamp}"
+    # if not dest_table_name:
 
-    if not source_config or not destination_config or not source_table_name or not dest_table_name:
+    #     dest_table_name = f"{source_table_name}_copy_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}"
+
+    if not source_config or not destination_config or not source_table_name:
         return jsonify({"success": False, "error": "Missing configuration or table names"}), 400
+        # if not source_config or not destination_config or not source_table_name:
+        # return jsonify({"success": False, "error": "Missing configuration or table names"}), 400
 
+    # If destination table name is not provided, determine it dynamically
+    if not dest_table_name:
+        try:
+            conn = psycopg2.connect(
+            dbname=destination_config['dbName'],
+            user=destination_config['dbUsername'],
+            password=destination_config['dbPassword'],
+            host=destination_config['provider'] or 'localhost',
+            port=destination_config['port'] or '5432'
+            )
+            dest_cursor = conn.cursor()
+            # Connect to destination DB
+            # dest_conn = psycopg2.connect(
+            #     host=destination_config["host"],
+            #     port=destination_config["port"],
+            #     user=destination_config["user"],
+            #     password=destination_config["password"],
+            #     database=destination_config["database"]
+            # )
+            # dest_cursor = dest_conn.cursor()
+
+            # Check if source table exists in destination DB
+            dest_cursor.execute("""
+                SELECT EXISTS (
+                    SELECT 1
+                    FROM information_schema.tables
+                    WHERE table_schema = 'public' AND table_name = %s
+                );
+            """, (source_table_name,))
+            table_exists = dest_cursor.fetchone()[0]
+
+            if table_exists:
+                # If exists, create a copy name
+                dest_table_name = f"{source_table_name}_copy_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}"
+            else:
+                # If not exists, keep the same as source
+                dest_table_name = source_table_name
+
+            dest_cursor.close()
+            conn.close()
+        except Exception as e:
+            return jsonify({"success": False, "error": f"Error checking destination table: {str(e)}"}), 500
+
+    print("Final destination table name:", dest_table_name)
+    
+
+    job_id = f"{source_table_name}_to_{dest_table_name}_{datetime.utcnow().strftime('%Y%m%d%H%M%S')}"
+    job_kwargs = {
+        "cols": selected_columns,
+        "source_config": source_config,
+        "destination_config": destination_config,
+        "source_table_name": source_table_name,
+        "dest_table_name": dest_table_name,
+        "update_existing_table": update_existing_table,
+        "create_view_if_exists": create_view_if_exists,
+        "email": email,
+        "schedule_type": schedule_type or "instant",
+        "job_id": job_id
+    }
+    print("job_kwargs",job_kwargs)
     if not schedule_type or schedule_type == '':
-        result = job_logic(selected_columns)
+        result = job_logic(**job_kwargs)
         return jsonify(result)
 
-    # Scheduled job
-    job_id = f"{source_table_name}_to_{dest_table_name}_{datetime.utcnow().strftime('%Y%m%d%H%M%S')}"
     try:
         schedule_hour, schedule_minute = map(int, schedule_time.split(':')) if schedule_time else (0, 0)
         now = datetime.now()
-        # job_kwargs = {"cols": selected_columns}
-        job_kwargs = {
-    "cols": selected_columns,
-    "source_config": source_config,
-    "destination_config": destination_config,
-    "source_table_name": source_table_name,
-    "dest_table_name": dest_table_name,
-    "update_existing_table": update_existing_table,
-    "create_view_if_exists": create_view_if_exists,
-    "email": email
-}
-
-        print("job_kwargs",job_kwargs)
 
         if schedule_type == 'once':
             run_time = now.replace(hour=schedule_hour, minute=schedule_minute, second=0, microsecond=0)
@@ -7186,27 +8041,14 @@ def transfer_and_verify_data():
                 run_time += timedelta(days=1)
             scheduler.add_job(func=job_logic, trigger='date', run_date=run_time, id=job_id, kwargs=job_kwargs)
         elif schedule_type == 'hourly':
-            scheduler.add_job(
-    func=job_logic,
-    trigger='interval',
-    hours=1,
-    id=job_id,
-    kwargs=job_kwargs,
-    replace_existing=True,
-    misfire_grace_time=3600,
-    next_run_time=datetime.now()
-)
-
-
-            # scheduler.add_job(func=job_logic, trigger='interval', hours=1, id=job_id, kwargs=job_kwargs)
+            scheduler.add_job(func=job_logic, trigger='interval', hours=1, id=job_id, kwargs=job_kwargs, next_run_time=now)
         elif schedule_type == 'daily':
-            scheduler.add_job(func=job_logic, trigger='cron', hour=schedule_hour, minute=schedule_minute, id=job_id, kwargs=job_kwargs,next_run_time=datetime.now())
+            scheduler.add_job(func=job_logic, trigger='cron', hour=schedule_hour, minute=schedule_minute, id=job_id, kwargs=job_kwargs, next_run_time=now)
         else:
             return jsonify({"success": False, "error": f"Invalid schedule type: {schedule_type}"}), 400
-
-        # return jsonify({"success": True, "message": f"Job scheduled successfully ({schedule_type})", "job_id": job_id})
-        # Print all scheduled jobs in terminal
         print("\n📋 Scheduled Jobs List:")
+        print(scheduler.get_jobs())
+
         for job in scheduler.get_jobs():
             print(job)
             print(f"- ID: {job.id}")
@@ -7217,35 +8059,33 @@ def transfer_and_verify_data():
             print(f"  Kwargs: {job.kwargs}")
             print("-" * 50)
         if email:
-            schedule_msg = f"""\
-            Subject: 3A Vision Data Transfer Scheduled
+            msg = f"""
+Subject: 3A Vision Data Transfer Scheduled
 
-            Hello {email},
+Hello {email},
 
-            Your data transfer job has been successfully scheduled.
+Your data transfer job has been successfully scheduled.
 
-            Details:
-            Source Table: {source_table_name}
-            Destination Table: {dest_table_name}
-            Schedule Type: {schedule_type}
-            Scheduled Time: {schedule_time if schedule_time else 'N/A'}
-            Job ID: {job_id}
+Details:
+Source Table: {source_table_name}
+Destination Table: {dest_table_name}
+Schedule Type: {schedule_type}
+Scheduled Time: {schedule_time if schedule_time else 'N/A'}
+Job ID: {job_id}
 
-            Regards,
-            3A Vision Team
-            """
-            send_notification_email(email, "3A Vision Data Transfer Scheduled", schedule_msg)
+Regards,
+3A Vision Team
+"""
+            send_notification_email(email, "3A Vision Data Transfer Scheduled", msg)
 
-            return jsonify({"success": True, "message": f"Job scheduled successfully ({schedule_type})", "job_id": job_id})
-
-        # return jsonify({"success": True, "message": f"Job scheduled successfully ({schedule_type})", "job_id": job_id})
+        return jsonify({"success": True, "message": "Job scheduled successfully", "job_id": job_id})
 
     except Exception as e:
         error_msg = f"Failed to schedule job: {str(e)}"
-        print(error_msg)
         if email:
             send_notification_email(email, "Data Transfer Scheduling Failed", error_msg)
         return jsonify({"success": False, "error": error_msg}), 500
+
 
     
 # from flask import Flask, request, jsonify
@@ -7622,6 +8462,7 @@ def get_role_permissions(role_code,company):
     try:
         conn = get_company_db_connection(company)
         cur = conn.cursor()
+        print("cur",cur)
 
         cur.execute("""
             SELECT can_datasource, can_view, can_edit, can_design, can_load, can_update, can_edit_profile
@@ -7630,6 +8471,7 @@ def get_role_permissions(role_code,company):
         """, (role_code,))
         
         row = cur.fetchone()
+        print("row",row)
         if not row:
             return jsonify({'error': 'Role not found'}), 404
 
@@ -7711,6 +8553,323 @@ def delete_table():
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
         
+
+
+# @app.route('/api/get_all_users', methods=['GET'])
+# def get_all_user_id():
+#     company_name = request.args.get('company_name')
+
+#     if not company_name:
+#         return jsonify({'message': 'company_name is required'}), 400
+
+#     # Connect to the specific company's database
+#     conn = get_company_db_connection(company_name)
+#     if not conn:
+#         print(f"Failed to connect to company database for {company_name}.")
+#         return jsonify({'message': 'Failed to connect to company database'}), 500
+
+#     try:
+#         cursor = conn.cursor()
+#         cursor.execute("SELECT employee_id, employee_name FROM employee_list")
+#         rows = cursor.fetchall()
+#         cursor.close()
+
+#         # Convert the result to a list of dictionaries
+#         users = [{'employee_id': row[0], 'employee_name': row[1]} for row in rows]
+
+#         return jsonify(users), 200
+
+#     except Exception as e:
+#         print(f"Error fetching users: {e}")
+#         return jsonify({'message': 'Error fetching users'}), 500
+
+#     finally:
+#         conn.close()
+
+
+@app.route('/api/get_all_users', methods=['GET'])
+def get_all_user_id():
+    company_name = request.args.get('company_name')
+    user_id = request.args.get('user_id')
+
+    if not company_name or not user_id:
+        return jsonify({'message': 'company_name and user_id are required'}), 400
+
+    # Connect to the specific company's database
+    conn = get_company_db_connection(company_name)
+    if not conn:
+        print(f"Failed to connect to company database for {company_name}.")
+        return jsonify({'message': 'Failed to connect to company database'}), 500
+
+    try:
+        cursor = conn.cursor()
+
+        # Get the reporting_id for this user
+        cursor.execute("""
+            SELECT reporting_id
+            FROM employee_list
+            WHERE employee_id = %s
+        """, (user_id,))
+        reporting_row = cursor.fetchone()
+        reporting_id = reporting_row[0] if reporting_row else None
+        print("reporting_id",reporting_id)
+
+        # Fetch all employees excluding current user and their reporting manager
+        if reporting_id:
+            cursor.execute("""
+                SELECT employee_id, employee_name
+                FROM employee_list
+                WHERE employee_id != %s
+                  AND employee_id != %s
+            """, (user_id, reporting_id))
+        else:
+            cursor.execute("""
+                SELECT employee_id, employee_name
+                FROM employee_list
+                WHERE employee_id != %s
+            """, (user_id,))
+
+        rows = cursor.fetchall()
+        cursor.close()
+
+        # Convert to a list of dictionaries
+        users = [{'employee_id': row[0], 'employee_name': row[1]} for row in rows]
+
+        return jsonify(users), 200
+
+    except Exception as e:
+        print(f"Error fetching users: {e}")
+        return jsonify({'message': 'Error fetching users'}), 500
+
+    finally:
+        conn.close()
+
+def safe_json(value):
+    if isinstance(value, (dict, list)):
+        return json.dumps(value)
+    return value
+
+@app.route('/api/share_dashboard', methods=['POST'])
+def share_dashboard():
+    conn = None 
+    try:
+        data = request.get_json()
+        print("Received Data:", data)
+        # user_id, dashboard_name = dashboard_name.split(",", 1)  # Split only once
+        # Support both field names
+        dashboard_name_data = data.get("dashboard_name")
+
+        if isinstance(dashboard_name_data, list):
+            # Expect [id, name]
+            if len(dashboard_name_data) == 2:
+                user_id, dashboard_name = dashboard_name_data
+            else:
+                return jsonify({"message": "Invalid dashboard_name format"}), 400
+        elif isinstance(dashboard_name_data, str):
+            user_id, dashboard_name = dashboard_name_data.split(",", 1)
+        else:
+            return jsonify({"message": "dashboard_name must be string or list"}), 400
+
+        to_user_id = data.get("to_user_id") or data.get("to_username")
+        # dashboard_name = data.get("dashboard_name")
+        from_user = data.get("from_user")  # original user ID (who is sharing)
+        company_name = data.get("company_name")
+        print("user_id",user_id)
+        print("dashboard_name",dashboard_name)
+        if not all([to_user_id, dashboard_name, from_user, company_name]):
+            print("Missing one or more required fields.")
+            return jsonify({"message": "Missing required fields"}), 400
+
+        conn = get_db_connection()
+        if not conn:
+            print("Database connection failed.")
+            return jsonify({"message": "Failed to connect to database"}), 500
+
+        cursor = conn.cursor(cursor_factory=RealDictCursor)
+
+        # Step 1: Get original dashboard
+        cursor.execute("""
+            SELECT * FROM table_dashboard 
+            WHERE user_id = %s AND file_name = %s AND company_name = %s
+        """, (user_id, dashboard_name, company_name))
+        original_dashboard = cursor.fetchone()
+
+        if not original_dashboard:
+            print("Original dashboard not found.")
+            return jsonify({"message": "Original dashboard not found"}), 404
+
+        print("Fetched original dashboard:", original_dashboard)
+        raw_ids = original_dashboard['chart_ids']
+        original_chart_ids = [int(id.strip()) for id in raw_ids.strip('{}').split(',') if id.strip()]
+
+        # original_chart_ids = eval(original_dashboard['chart_ids'])  # assuming stored as list
+        if not isinstance(original_chart_ids, list):
+            print("chart_ids is not a list.")
+            return jsonify({"message": "chart_ids should be a list"}), 400
+
+        print("Original chart IDs:", original_chart_ids)
+
+        new_chart_ids = []
+
+        # Step 2: Copy each chart from table_chart_save
+        # for old_chart_id in original_chart_ids:
+        #     cursor.execute("""
+        #         SELECT * FROM table_chart_save 
+        #         WHERE id = %s 
+        #     """, (old_chart_id, user_id))
+        #     old_chart = cursor.fetchone()
+        for old_chart_id in original_chart_ids:
+            cursor.execute("""
+                SELECT * FROM table_chart_save 
+                WHERE id = %s
+            """, (old_chart_id,))
+            old_chart = cursor.fetchone()
+
+            if not old_chart:
+                print(f"Chart not found for ID: {old_chart_id}")
+                continue
+
+            # Ensure unique chart_id
+            cursor.execute("SELECT MAX(id) FROM table_chart_save")
+            last_chart_id = cursor.fetchone()['max'] or 0
+            new_chart_id = last_chart_id + 1
+            new_chart_ids.append(new_chart_id)
+            print("new_chart_ids",new_chart_ids)
+            cursor.execute("""
+                INSERT INTO table_chart_save (
+                    id, user_id, company_name, chart_name, timestamp, database_name,
+                    selected_table, x_axis, y_axis, aggregate, chart_type, chart_color, chart_heading,
+                    drilldown_chart_color, filter_options, ai_chart_data, selectedUser,
+                    xFontSize, fontStyle, categoryColor, yFontSize, valueColor, headingColor,
+                    ClickedTool, Bgcolour, OptimizationData, calculationData, selectedFrequency
+                ) VALUES (
+                    %s, %s, %s, %s, CURRENT_TIMESTAMP, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                )
+            """, (
+                new_chart_id,
+                to_user_id,
+                old_chart["company_name"],
+                old_chart["chart_name"],
+                old_chart["database_name"],
+                old_chart["selected_table"],
+                old_chart["x_axis"],
+                old_chart["y_axis"],
+                old_chart["aggregate"],
+                old_chart["chart_type"],
+                old_chart["chart_color"],
+                old_chart["chart_heading"],
+                old_chart["drilldown_chart_color"],
+                json.dumps(old_chart["filter_options"]) if isinstance(old_chart["filter_options"], dict) else old_chart["filter_options"],
+                json.dumps(old_chart["ai_chart_data"]) if isinstance(old_chart["ai_chart_data"], dict) else old_chart["ai_chart_data"],
+                old_chart.get("selectedUser"),
+                old_chart.get("xFontSize"),
+                old_chart.get("fontStyle"),
+                old_chart.get("categoryColor"),
+                old_chart.get("yFontSize"),
+                old_chart.get("valueColor"),
+                old_chart.get("headingColor"),
+                old_chart.get("ClickedTool"),
+                old_chart.get("Bgcolour"),
+                json.dumps(old_chart.get("OptimizationData")) if isinstance(old_chart.get("OptimizationData"), dict) else old_chart.get("OptimizationData"),
+                json.dumps(old_chart.get("calculationData")) if isinstance(old_chart.get("calculationData"), dict) else old_chart.get("calculationData"),
+                old_chart.get("selectedFrequency")
+
+            ))
+            print(f"Copied chart {old_chart_id} to new chart {new_chart_id}")
+
+        print("All new chart IDs:", new_chart_ids)
+
+        # Step 3: Copy dashboard and insert under new user
+        # new_dashboard_id = str(uuid.uuid4())
+        # Ensure unique dashboard_id
+               
+        cursor.execute("SELECT MAX(id) FROM table_dashboard")
+        last_dashboard_id = cursor.fetchone()['max'] or 0
+        new_dashboard_id = last_dashboard_id + 1
+
+        # Get the original dashboard values
+        original_dashboard_values = {
+            "company_name": original_dashboard.get("company_name"),
+            "file_name": original_dashboard.get("file_name"),
+            "position": safe_json(original_dashboard.get("position")),
+            "chart_size": safe_json(original_dashboard.get("chart_size")),
+            "chart_type": safe_json(original_dashboard.get("chart_type")),
+            "chart_xaxis": safe_json(original_dashboard.get("chart_xaxis")),
+            "chart_yaxis": safe_json(original_dashboard.get("chart_yaxis")),
+            "chart_aggregate": safe_json(original_dashboard.get("chart_aggregate")),
+            "filterdata": safe_json(original_dashboard.get("filterdata")),
+            "clicked_category": original_dashboard.get("clicked_category"),
+            "heading": original_dashboard.get("heading"),
+            "dashboard_name": original_dashboard.get("dashboard_name"),
+            "chartcolor": safe_json(original_dashboard.get("chartcolor")),
+            "droppablebgcolor": original_dashboard.get("droppablebgcolor"),
+            "opacity": safe_json(original_dashboard.get("opacity")),
+            "image_ids": safe_json(original_dashboard.get("image_ids", [])),
+            "project_name": original_dashboard.get("project_name"),
+            "font_style_state": original_dashboard.get("font_style_state"),
+            "font_size": original_dashboard.get("font_size"),
+            "font_color": original_dashboard.get("font_color"),
+        }
+
+
+        # The chart_ids field needs special handling for PostgreSQL array format
+        chart_ids_str = f"{{{','.join(map(str, new_chart_ids))}}}"
+
+
+        cursor.execute("""
+            INSERT INTO table_dashboard (
+                id, user_id, company_name, file_name, chart_ids, position, chart_size,
+                chart_type, chart_xaxis, chart_yaxis, chart_aggregate, filterdata,
+                clicked_category, heading, dashboard_name, chartcolor,
+                droppablebgcolor, opacity, image_ids, project_name,
+                font_style_state, font_size, font_color
+            ) VALUES (
+                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                %s, %s, %s, %s, %s, %s, %s
+            )
+        """, (
+            new_dashboard_id,
+            to_user_id,
+            original_dashboard_values["company_name"],
+            original_dashboard_values["file_name"],
+            chart_ids_str,
+            original_dashboard_values["position"],
+            original_dashboard_values["chart_size"],
+            original_dashboard_values["chart_type"],
+            original_dashboard_values["chart_xaxis"],
+            original_dashboard_values["chart_yaxis"],
+            original_dashboard_values["chart_aggregate"],
+            original_dashboard_values["filterdata"],
+            original_dashboard_values["clicked_category"],
+            original_dashboard_values["heading"],
+            original_dashboard_values["dashboard_name"],
+            original_dashboard_values["chartcolor"],
+            original_dashboard_values["droppablebgcolor"],
+            original_dashboard_values["opacity"],
+            original_dashboard_values["image_ids"],
+            original_dashboard_values["project_name"],
+            original_dashboard_values["font_style_state"],
+            original_dashboard_values["font_size"],
+            original_dashboard_values["font_color"]
+        ))
+
+
+
+        print("Dashboard copied with new ID:", new_dashboard_id)
+
+        conn.commit()
+        return jsonify({"message": "Dashboard shared successfully!"}), 200
+
+    except Exception as e:
+        print(f"Error in share_dashboard: {e}")
+        return jsonify({"message": "Error sharing dashboard"}), 500
+
+    finally:
+        if conn:
+            conn.close()
+
+
 # @app.route('/static/<path:filename>')
 # def serve_static(filename):
 #     return send_file(os.path.join('static', filename))

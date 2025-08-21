@@ -16,34 +16,60 @@
 
 
 
-# Ignore Python virtual environments
-/venv
-/myenv
+
+
+
+
+
+
+# Virtual environments
+/venv/
+/myenv/
+/env/
+venv/
+myenv/
+env/
 
 # Flask session files
-/flask_session
+/flask_session/
+flask_session/
 
-# Python bytecode files
+# Python cache files
 __pycache__/
-/**/__pycache__/
-/*.py[cod]
 *.py[cod]
+*.pyo
+*.pyd
+.Python
 
-# Ignore temporary files and folders
-/tmp
-/uploads
+# Temporary files
+/tmp/
+tmp/
 
-# Config and script files you may not want in version control
+# Upload directories
+/uploads/
+uploads/
+
+# Configuration files (if they contain sensitive data)
 /config.py
+config.py
+
+# Dashboard save cache
+dashboard_save/__pycache__/
+
+# Plot files (if these are generated)
 /line_plot.py
 /scatter_plot.py
 /pie_chart.py
 
-# Bytecode files in dashboard_save directory
-dashboard_save/__pycache__/
-
-# Ignore system or IDE-specific files (optional best practices)
-*.log
-*.swp
-.DS_Store
+# VS Code settings (optional)
 .vscode/
+*.vscode
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db

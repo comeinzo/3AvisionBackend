@@ -44,7 +44,8 @@ def get_column_names(db_name, username, password, table_name, selected_user, hos
     cursor = None
     try:
         # Establish database connection based on connection_type
-        if connection_type == 'local' or connection_type == 'null': # 'null' for compatibility if frontend sends it
+        # if connection_type == 'local' or connection_type == 'null' or connection_type =='none': # 'null' for compatibility if frontend sends it
+        if not connection_type or connection_type.lower() in ('local', 'null', 'none'):
             conn = psycopg2.connect(
                 dbname=db_name,
                 user=username,
@@ -169,6 +170,7 @@ def fetch_external_db_connection(db_name,selectedUser):
             LIMIT 1;
         """
         print("query",query)
+        print("selectedUser",selectedUser)
         cursor.execute(query, (selectedUser,))
         connection_details = cursor.fetchone()
         print('connection',connection_details)
@@ -731,150 +733,6 @@ def fetch_data(table_name, x_axis_columns, filter_options, y_axis_column, aggreg
 
 
 
-# def fetch_data_tree(table_name, x_axis_columns, filter_options, y_axis_column, aggregation, db_name, selectedUser):
-#     global global_df
-#     print("Tree ")
-#     print("table_name:", table_name)
-#     print("x_axis_columns:", x_axis_columns)
-#     print("y_axis_column:", y_axis_column)
-#     print("aggregation:", aggregation)
-#     print("filter_options:", filter_options)
-#     print("global_df",global_df)
-
-#     try:
-#         if isinstance(filter_options, str):
-#             try:
-#                 filter_options = json.loads(filter_options)
-#             except json.JSONDecodeError:
-#                 raise ValueError("filter_options must be a valid JSON object")
-
-#         if not isinstance(filter_options, dict):
-#             raise ValueError("filter_options should be a dictionary")
-
-#         if global_df is None or global_df.empty:
-
-
-#             print("Fetching data from the database...")
-#             if not selectedUser or selectedUser.lower() == 'null':
-#                 print("Using default database connection...")
-#                 connection_string = f"dbname={db_name} user={USER_NAME} password={PASSWORD} host={HOST}"
-#                 connection = psycopg2.connect(connection_string)
-#             else:
-#                 connection_details = fetch_external_db_connection(db_name, selectedUser)
-#                 if not connection_details:
-#                     raise Exception("Unable to fetch external database connection details.")
-
-#                 db_details = {
-#                     "host": connection_details[3],
-#                     "database": connection_details[7],
-#                     "user": connection_details[4],
-#                     "password": connection_details[5],
-#                     "port": int(connection_details[6])
-#                 }
-#                 connection = psycopg2.connect(
-#                     dbname=db_details['database'],
-#                     user=db_details['user'],
-#                     password=db_details['password'],
-#                     host=db_details['host'],
-#                     port=db_details['port'],
-#                 )
-
-#             # cur = connection.cursor()
-#             # query = f"SELECT * FROM {table_name}"
-#             # cur.execute(query)
-#             # data = cur.fetchall()
-#             # colnames = [desc[0] for desc in cur.description]
-#             # cur.close()
-#             # connection.close()
-#             # Load full data from the table (not just schema)
-#             cur = connection.cursor()
-#             query = f'SELECT * FROM "{table_name}"'  # wrap table name in quotes for case safety
-#             print("query",query)
-#             cur.execute(query)
-#             data = cur.fetchall()
-#             colnames = [desc[0] for desc in cur.description]
-#             global_df = pd.DataFrame(data, columns=colnames)
-#             cur.close()
-#             connection.close()
-#             print(f"Fetched {len(global_df)} rows from table {table_name}")
-
-
-#             # global_df = pd.DataFrame(data, columns=colnames)
-#         print("*********************************************************************************", global_df)
-
-#         # Create a copy of the necessary data for processing
-#         temp_df = global_df.copy()
-#         print("temp_df",temp_df)
-#         # Apply filters
-#         # for col, filters in filter_options.items():
-#         #     if col in temp_df.columns:
-#         #         temp_df[col] = temp_df[col].astype(str)
-#         #         temp_df = temp_df[temp_df[col].isin(filters)]
-#         for col, filters in filter_options.items():
-#             if col in temp_df.columns:
-#                 temp_df[col] = temp_df[col].astype(str)  # Ensure column values are strings
-#                 filter_options[col] = list(map(str, filters))  # Convert filter values to strings
-#                 temp_df = temp_df[temp_df[col].isin(filter_options[col])]
-
-
-#         # Convert x_axis_columns values to strings
-#         for col in x_axis_columns:
-#             if col in temp_df.columns:
-#                 temp_df[col] = temp_df[col].astype(str)
-
-#         # Prepare options for filtering
-#         options = []
-#         for col in x_axis_columns:
-#             if col in filter_options:
-#                 options.extend(filter_options[col])
-#         options = list(map(str, options))
-
-#         # Filter DataFrame
-#         filtered_df = temp_df[temp_df[x_axis_columns[0]].isin(options)]
-
-#         # **Apply Aggregation**
-#         if y_axis_column and aggregation and y_axis_column[0] in filtered_df.columns:
-#             if aggregation.lower() == "sum":
-#                 filtered_df = filtered_df.groupby(x_axis_columns, as_index=False)[y_axis_column[0]].sum()
-#             elif aggregation.lower() == "avg":
-#                 filtered_df = filtered_df.groupby(x_axis_columns, as_index=False)[y_axis_column[0]].mean()
-#             elif aggregation.lower() == "min":
-#                 filtered_df = filtered_df.groupby(x_axis_columns, as_index=False)[y_axis_column[0]].min()
-#             elif aggregation.lower() == "max":
-#                 filtered_df = filtered_df.groupby(x_axis_columns, as_index=False)[y_axis_column[0]].max()
-#             elif aggregation.lower() == "count":
-#                 filtered_df = filtered_df.groupby(x_axis_columns, as_index=False)[y_axis_column[0]].count()
-#             else:
-#                 raise ValueError("Unsupported aggregation type. Use 'sum', 'avg', 'min', 'max', or 'count'.")
-
-#         print("filtered_df:", filtered_df)
-
-#         # Prepare categories and values for response
-#         categories = []
-#         values = []
-
-#         for index, row in filtered_df.iterrows():
-#             category = {col: row[col] for col in x_axis_columns}
-#             categories.append(category)
-
-#             if y_axis_column:
-#                 values.append(row[y_axis_column[0]])
-#             else:
-#                 values.append(1)
-
-#         result = {
-#             "categories": categories,
-#             "values": values,
-#             "chartType": "treeHierarchy",
-#             "dataframe": filtered_df.to_dict(orient='records')
-#         }
-
-#         print("result:", result)
-#         return result
-
-#     except Exception as e:
-#         print("Error preparing Tree Hierarchy data:", e)
-#         return {"error": str(e)}
 
 def fetch_data_tree(table_name, x_axis_columns, filter_options, y_axis_column, aggregation, db_name, selectedUser,calculationData):
     import pandas as pd
@@ -2109,43 +1967,6 @@ def fetch_column_name(table_name, x_axis_columns, db_name,calculation_expr,calc_
     except Exception as e:
         raise Exception(f"Error fetching distinct column values from {table_name}: {str(e)}")
 
-
-# def calculationFetch():
-#     global global_df 
-#     try:
-#         return global_df
-#     except Exception as e:
-#         print(f"Error connecting to the database or reading data: {e}")
-#         return None
-# def calculationFetch(db_name, dbTableName='book13', selectedUser=None):
-#     global global_df
-
-#     try:
-#         # If global_df exists and is not empty, return it
-#         if 'global_df' in globals() and global_df is not None and not global_df.empty:
-#             return global_df
-
-#         # Otherwise, fetch from the database
-#         connection = fetch_external_db_connection(db_name,selectedUser)
-#         cursor = connection.cursor()
-
-#         query = sql.SQL("SELECT * FROM {table}").format(table=sql.Identifier(dbTableName))
-#         cursor.execute(query)
-#         results = cursor.fetchall()
-#         column_names = [desc[0] for desc in cursor.description]
-#         df = pd.DataFrame(results, columns=column_names)
-
-#         cursor.close()
-#         connection.close()
-
-#         # Set it to global_df so it can be reused later
-#         global_df = df
-
-#         return df
-
-#     except Exception as e:
-#         print(f"Error fetching data: {e}")
-#         return None
 def calculationFetch(db_name, dbTableName='book13', selectedUser=None):
     global global_df
 
@@ -2355,26 +2176,6 @@ def perform_calculation(dataframe, columnName, calculation):
         dataframe[columnName] = dataframe[col].astype(str).str.upper()
         global_df = dataframe
         return dataframe
-
-    # concat_match = re.match(r'concat\s*\((.+)\)', calculation, re.IGNORECASE)
-    # if concat_match:
-    #     inner = concat_match.group(1)
-    #     parts = [p.strip() for p in re.split(r',(?![^\[]*\])', inner)]
-    #     result = ''
-    #     for p in parts:
-    #         if p.startswith('[') and p.endswith(']'):
-    #             col = p[1:-1]
-    #             if col not in dataframe.columns:
-    #                 raise ValueError(f"Missing column: {col}")
-    #             if result == '':
-    #                 result = dataframe[col].astype(str)
-    #             else:
-    #                 result += dataframe[col].astype(str)
-    #         else:
-    #             result += p.strip('"').strip("'")
-    #     dataframe[columnName] = result
-    #     global_df = dataframe
-    #     return dataframe
     concat_match = re.match(r'concat\s*\((.+)\)', calculation, re.IGNORECASE)
     if concat_match:
         inner = concat_match.group(1)
@@ -2705,65 +2506,6 @@ def fetchText_data(databaseName, table_Name, x_axis, aggregate_py,selectedUser):
 
 
 
-
-# def Hierarchial_drill_down(clicked_category, x_axis_columns, y_axis_column, depth, aggregation):
-#     global global_df
-#     if global_df is None:
-#         print("DataFrame not initialized. Please call fetch_hierarchical_data first.")
-#         return {"error": "Data not initialized."}
-
-#     print(f"Drill-Down Start: Current Depth: {depth}, Clicked Category: {clicked_category}")
-
-#     # Get the current column for this depth level
-#     current_column = x_axis_columns[depth]
-#     print("current_column",current_column)
-#     # Filter the DataFrame based on the clicked category at the current depth level
-#     filtered_df = global_df[global_df[current_column] == clicked_category]
-
-#     # Handle case where the filtered DataFrame is empty
-#     if filtered_df.empty:
-#         print(f"No data found for category '{clicked_category}' at depth {depth}.")
-#         return {"error": f"No data found for '{clicked_category}' at depth {depth}."}
-
-#     # If we are at the last level of the hierarchy
-#     if depth == len(x_axis_columns) - 1:
-#         print(f"At the last level: {current_column}")
-#         return {
-#             "categories": filtered_df[current_column].tolist(),
-#             "values": filtered_df[y_axis_column[0]].tolist()
-#         }
-
-#     # Move to the next depth level if not at the last level
-#     next_level_column = x_axis_columns[depth + 1]
-
-#     # Aggregate the data for the next level based on the aggregation method from frontend
-#     if aggregation == 'count':
-#         aggregated_df = filtered_df.groupby(next_level_column).size().reset_index(name='count')
-#     elif aggregation == 'sum':
-#         aggregated_df = filtered_df.groupby(next_level_column)[y_axis_column[0]].sum().reset_index()
-#     elif aggregation == 'mean':
-#         aggregated_df = filtered_df.groupby(next_level_column)[y_axis_column[0]].mean().reset_index()
-#     else:
-#         return {"error": "Unsupported aggregation method."}
-
-#     print(f"Next level DataFrame at depth {depth + 1} for column {next_level_column}:")
-#     print(aggregated_df.head())  # Log the aggregated data
-
-#     # Handle case where aggregated DataFrame is empty
-#     if aggregated_df.empty:
-#         print(f"No data available at depth {depth + 1} for column {next_level_column}. Returning current level data.")
-#         return {
-#             "categories": filtered_df[current_column].tolist(),
-#             "values": filtered_df[y_axis_column[0]].tolist()
-#         }
-
-#     # Prepare the result with the next level's categories and values
-#     result = {
-#         "categories": aggregated_df[next_level_column].tolist(),
-#         "values": aggregated_df['count'].tolist() if aggregation == 'count' else aggregated_df[y_axis_column[0]].tolist(),
-#         "next_level_column": next_level_column
-#     }
-#     return result
 def Hierarchial_drill_down(clicked_category, x_axis_columns, y_axis_column, depth, aggregation):
     global global_df
     if global_df is None:
