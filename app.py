@@ -288,7 +288,9 @@ def create_table():
                 Bgcolour VARCHAR,
                 OptimizationData VARCHAR,
                 calculationData JSONB,
-                selectedFrequency VARCHAR
+                selectedFrequency VARCHAR,
+                xAxisTitle VARCHAR(220),
+                yAxisTitle VARCHAR(220);
             )
         """)
         cur.execute("SELECT MAX(id) FROM table_chart_save")
@@ -3052,7 +3054,7 @@ def save_data():
     save_name= data['saveName']
     company_name=data['company_name']   
 
-    print("data====================", data) 
+    # print("data====================", data) 
     
     print("company_name====================",company_name)  
     print("user_id====================",user_id)
@@ -3071,6 +3073,9 @@ def save_data():
         filter_options_json = json.dumps(data.get('filterOptions')) 
         chart_color_json = json.dumps(data.get('chartColor'))  # ✅ FIX: Convert to JSON
         calculation_data_json = json.dumps(data.get('calculationData'))
+        xAxisTitle = json.dumps(data.get('xAxisTitle'))  # '{"x1": "region", "x2": "product"}'
+        yAxisTitle = json.dumps(data.get('yAxisTitle'))  # '{"y1": ["unit_cost"]}'
+
 
         cur.execute("SELECT MAX(id) FROM table_chart_save")
         last_chart_id = cur.fetchone()[0] or 0
@@ -3101,9 +3106,9 @@ def save_data():
                 fontStyle,          
                 categoryColor,      
                 yFontSize,          
-                valueColor,headingColor,ClickedTool,Bgcolour,OptimizationData,calculationData,selectedFrequency
+                valueColor,headingColor,ClickedTool,Bgcolour,OptimizationData,calculationData,selectedFrequency,xAxisTitle,yAxisTitle
             )VALUES (
-                %s,%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,%s,%s,%s,%s,%s,%s
+                %s,%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,%s,%s,%s,%s,%s,%s,%s,%s
             )
         """, (
             new_chart_id,
@@ -3133,7 +3138,9 @@ def save_data():
             data.get('areaColor'),
             data.get('optimizationOption'),
             calculation_data_json,
-            data.get('selectedFrequency')
+            data.get('selectedFrequency'),
+            xAxisTitle,
+            yAxisTitle
 
         ))
         
@@ -3165,6 +3172,9 @@ def update_data():
         chart_heading_json = json.dumps(data.get('chart_heading'))
         chart_color_json = json.dumps(data.get('chartColor'))  # ✅ FIX: Convert to JSON
         filter_options_json = json.dumps(data.get('filterOptions')) 
+        xAxisTitle = json.dumps(data.get('xAxisTitle'))  # '{"x1": "region", "x2": "product"}'
+        yAxisTitle = json.dumps(data.get('yAxisTitle'))  # '{"y1": ["unit_cost"]}'
+
         
         
         # Update data in the table
@@ -3187,7 +3197,8 @@ def update_data():
                 yFontSize= %s,          
                 valueColor= %s,
                 headingColor=%s,
-                ClickedTool=%s,Bgcolour=%s
+                ClickedTool=%s,Bgcolour=%s,xAxisTitle=%s,
+                yAxisTitle =%s
             WHERE
                 id = %s
         """, (
@@ -3214,8 +3225,9 @@ def update_data():
             data.get('headingColor'),
             data.get('ClickedTool') ,
             data.get('areaColor'),
-            data.get('chartId'),
-            
+            xAxisTitle,
+            yAxisTitle, 
+            data.get('chartId')
            
         ))
         
@@ -3420,7 +3432,7 @@ def get_chart_data(chart_name,company_name,user_id):
     if conn:
         try:
             cursor = conn.cursor()
-            cursor.execute("SELECT id, selected_table, x_axis, y_axis, aggregate, chart_type, chart_color, chart_heading, drilldown_chart_color, filter_options, database_name ,selecteduser, xFontSize,fontStyle,categoryColor, yFontSize,valueColor,headingColor,clickedtool,Bgcolour,calculationData,optimizationdata,selectedfrequency FROM table_chart_save WHERE chart_name = %s AND company_name = %s AND user_id =%s " , (chart_name, company_name,user_id ))
+            cursor.execute("SELECT id, selected_table, x_axis, y_axis, aggregate, chart_type, chart_color, chart_heading, drilldown_chart_color, filter_options, database_name ,selecteduser, xFontSize,fontStyle,categoryColor, yFontSize,valueColor,headingColor,clickedtool,Bgcolour,calculationData,optimizationdata,selectedfrequency,xAxisTitle, yAxisTitle FROM table_chart_save WHERE chart_name = %s AND company_name = %s AND user_id =%s " , (chart_name, company_name,user_id ))
             data = cursor.fetchone()
             print("data",data)
             if data is None:
@@ -8876,10 +8888,10 @@ def share_dashboard():
                     selected_table, x_axis, y_axis, aggregate, chart_type, chart_color, chart_heading,
                     drilldown_chart_color, filter_options, ai_chart_data, selectedUser,
                     xFontSize, fontStyle, categoryColor, yFontSize, valueColor, headingColor,
-                    ClickedTool, Bgcolour, OptimizationData, calculationData, selectedFrequency
+                    ClickedTool, Bgcolour, OptimizationData, calculationData, selectedFrequency,xAxisTitle, yAxisTitle
                 ) VALUES (
                     %s, %s, %s, %s, CURRENT_TIMESTAMP, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,%s
                 )
             """, (
                 new_chart_id,
@@ -8908,7 +8920,11 @@ def share_dashboard():
                 old_chart.get("Bgcolour"),
                 json.dumps(old_chart.get("OptimizationData")) if isinstance(old_chart.get("OptimizationData"), dict) else old_chart.get("OptimizationData"),
                 json.dumps(old_chart.get("calculationData")) if isinstance(old_chart.get("calculationData"), dict) else old_chart.get("calculationData"),
-                old_chart.get("selectedFrequency")
+                old_chart.get("selectedFrequency"),
+                json.dumps(old_chart.get("xAxisTitle")) if isinstance(old_chart.get("xAxisTitle"), dict) else old_chart.get("xAxisTitle"),
+                json.dumps(old_chart.get("yAxisTitle")) if isinstance(old_chart.get("yAxisTitle"), dict) else old_chart.get("yAxisTitle")
+                
+               
 
             ))
             print(f"Copied chart {old_chart_id} to new chart {new_chart_id}")

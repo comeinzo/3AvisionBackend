@@ -800,7 +800,7 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
             print("chart_data_list",chart_data_list)
             for chart_id in sorted_chart_ids:
                 cursor = conn.cursor()
-                cursor.execute("SELECT id, database_name, selected_table, x_axis, y_axis, aggregate, chart_type, filter_options, chart_heading, chart_color, selectedUser,xfontsize,fontstyle,categorycolor,valuecolor,yfontsize,headingColor,ClickedTool,Bgcolour,OptimizationData,calculationdata,selectedFrequency,chart_name,user_id FROM table_chart_save WHERE id = %s", (chart_id,))
+                cursor.execute("SELECT id, database_name, selected_table, x_axis, y_axis, aggregate, chart_type, filter_options, chart_heading, chart_color, selectedUser,xfontsize,fontstyle,categorycolor,valuecolor,yfontsize,headingColor,ClickedTool,Bgcolour,OptimizationData,calculationdata,selectedFrequency,chart_name,user_id,xAxisTitle, yAxisTitle  FROM table_chart_save WHERE id = %s", (chart_id,))
 #                 cursor.execute("""
 #     SELECT id, database_name, selected_table, x_axis, y_axis, aggregate, chart_type,
 #            filter_options, chart_heading, chart_color, selectedUser, xfontsize,
@@ -841,6 +841,8 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                     selectedFrequency=chart_data[21]
                     chart_name=chart_data[22]
                     user_id=chart_data[23]
+                    xAxisTitle=chart_data[24]
+                    yAxisTitle =chart_data[25]
                     
                     print("Chart OptimizationData:", OptimizationData)
                     print("final_opacity",final_opacity)
@@ -922,6 +924,8 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                                         "opacity":final_opacity,
                                         "chart_name":chart_name,
                                         "user_id": user_id,
+                                        
+                                        
 
                                     
                                     })
@@ -1502,7 +1506,9 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                             "opacity": final_opacity,
                             "calculationData": calculationData,
                             "chart_name": (user_id, chart_name),
-                            "user_id": user_id      
+                            "user_id": user_id,
+                            "xAxisTitle": xAxisTitle,
+                            "yAxisTitle" :yAxisTitle   
                         })
                         continue 
 
@@ -1688,7 +1694,9 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                                     "opacity":final_opacity,
                                     "calculationData":calculationData,
                                     "chart_name": (user_id, chart_name),
-                                    "user_id": user_id     
+                                    "user_id": user_id,
+                                    "xAxisTitle": xAxisTitle,
+                                    "yAxisTitle" :yAxisTitle        
                             })
                     elif chart_type == "Butterfly":
                             print("Butterfly Chart")
@@ -1738,7 +1746,9 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                                     "opacity":final_opacity,
                                     "calculationData":calculationData,
                                     "chart_name": (user_id, chart_name),
-                                    "user_id": user_id     
+                                    "user_id": user_id,
+                                    "xAxisTitle": xAxisTitle,
+                                    "yAxisTitle" :yAxisTitle        
                             })
                     elif chart_type in ["duealbarChart", "stackedbar"]:
                         print("duealbarChart")
@@ -1793,7 +1803,9 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                                 "opacity":final_opacity,
                                 "calculationData":calculationData ,
                                 "chart_name": (user_id, chart_name),
-                                "user_id": user_id    
+                                "user_id": user_id,
+                                "xAxisTitle": xAxisTitle,
+                                "yAxisTitle" :yAxisTitle       
                         })
 
                     elif chart_type == "sampleAitestChart":
@@ -1899,7 +1911,9 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                             "calculationData":calculationData,
                             "chart_name": (user_id, chart_name),
 
-                            "user_id": user_id      
+                            "user_id": user_id,  
+                            "xAxisTitle": xAxisTitle,
+                            "yAxisTitle" :yAxisTitle       
                         })
 
 
