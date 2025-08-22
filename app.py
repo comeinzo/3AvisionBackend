@@ -7384,7 +7384,7 @@ def save_dashboard():
             update_chart_query = """
                 UPDATE table_dashboard
                 SET chart_ids = %s, heading = %s, position = %s::jsonb, chart_size = %s::jsonb, chart_aggregate = %s::jsonb, chart_xaxis = %s::jsonb, chart_yaxis = %s::jsonb,chart_type = %s::jsonb,filterdata = %s,droppableBgColor=%s, opacity = %s::jsonb,chartcolor = %s::jsonb,font_style_state = %s,
-                font_size = %s,font_color = %s,,wallpaper_id = %s WHERE user_id = %s AND file_name = %s;
+                font_size = %s,font_color = %s,wallpaper_id = %s WHERE user_id = %s AND file_name = %s;
             """
             cur.execute(update_chart_query, (chart_ids_str, DashboardHeading, positions, chart_sizes, aggregations, xaxes, yaxes, chart_type, filter_options,droppableBgColor,opacities,bgcolors,fontStyleState, fontSize, fontColor,wallpaper_id, user_id, dashboard_name))
             conn.commit()
