@@ -1,3 +1,5 @@
+# Gayathri
+
 # ==============================
 # Standard Library Imports
 # ==============================
@@ -7716,7 +7718,15 @@ def create_log_table_if_not_exists():
         print("✅ 'data_transfer_logs' table ensured.")
     except Exception as e:
         print(f"❌ Failed to create table: {e}")
-
+def to_native(val):
+    """Convert NumPy datatypes to Python-native types."""
+    if isinstance(val, (np.integer,)):
+        return int(val)
+    if isinstance(val, (np.floating,)):
+        return float(val)
+    if isinstance(val, (np.bool_,)):
+        return bool(val)
+    return val
 def log_data_transfer(source_table, dest_table, schedule_type, run_time,
                       status, message, record_count, data_size_mb, email, job_id,time_taken_seconds, inserted_count=0, updated_count=0, skipped_count=0):
     try:
@@ -7735,21 +7745,48 @@ def log_data_transfer(source_table, dest_table, schedule_type, run_time,
             )
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s,%s,%s, %s, %s)
         """
-        cur.execute(insert_query, (
+        # cur.execute(insert_query, (
+        #     source_table, dest_table, schedule_type, run_time,
+        #     status, message, record_count, data_size_mb, email, job_id,time_taken_seconds, inserted_count, updated_count, skipped_count
+        # ))
+        values = (
             source_table, dest_table, schedule_type, run_time,
-            status, message, record_count, data_size_mb, email, job_id,time_taken_seconds, inserted_count, updated_count, skipped_count
-        ))
+            status, message, record_count, data_size_mb,
+            email, job_id, time_taken_seconds,
+            inserted_count, updated_count, skipped_count
+        )
+
+        cur.execute(insert_query, tuple(to_native(v) for v in values))
+
         conn.commit()
         cur.close()
         conn.close()
     except Exception as e:
         print(f"❌ Failed to log data transfer: {str(e)}")
+# def send_notification_email(recipient, subject, body):
+#     try:
+#         print("Using Hotmail SMTP to send email...")
+
+#         # Create email
+#         msg = MIMEText(body, "plain")
+#         # msg = MIMEText(body, "plain", "utf-8") 
+#         msg["Subject"] = subject
+#         msg["From"] = HOTMAIL_USER
+#         msg["To"] = recipient
+
+#         with smtplib.SMTP("smtp.hostinger.com", 587) as server:
+#             server.starttls()
+#             server.login(HOTMAIL_USER, HOTMAIL_PASS)
+#             server.sendmail(HOTMAIL_USER, recipient, msg.as_string())
+
+#         print("Email sent successfully")
+#     except Exception as e:
+#         print("Hotmail SMTP error:", e)
 def send_notification_email(recipient, subject, body):
     try:
         print("Using Hotmail SMTP to send email...")
 
-        # Create email
-        msg = MIMEText(body, "plain")
+        msg = MIMEText(body, "plain", "utf-8")  # enforce UTF-8
         msg["Subject"] = subject
         msg["From"] = HOTMAIL_USER
         msg["To"] = recipient
@@ -7757,11 +7794,13 @@ def send_notification_email(recipient, subject, body):
         with smtplib.SMTP("smtp.hostinger.com", 587) as server:
             server.starttls()
             server.login(HOTMAIL_USER, HOTMAIL_PASS)
-            server.sendmail(HOTMAIL_USER, recipient, msg.as_string())
+            # ✅ encode to UTF-8 before sending
+            server.sendmail(HOTMAIL_USER, recipient, msg.as_string().encode("utf-8"))
 
-        print("Email sent successfully")
+        print("✅ Email sent successfully")
     except Exception as e:
         print("Hotmail SMTP error:", e)
+
 
     # try:
     #     print("Using SendGrid API to send email...")
