@@ -33,7 +33,7 @@ import sweetviz as sv
 from functools import reduce
 from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
 from apscheduler.schedulers.background import BackgroundScheduler
-from flask import Flask, jsonify, request, session, send_file, current_app
+from flask import Flask, jsonify, request,url_for, session, send_file, current_app
 from flask_cors import CORS
 from flask_mail import Mail, Message
 from flask_session import Session  # Flask-Session for server-side session handling
@@ -49,6 +49,8 @@ from werkzeug.utils import secure_filename
 from urllib.parse import parse_qs
 from psycopg2.extras import RealDictCursor
 
+import smtplib
+from email.mime.text import MIMEText
 # ==============================
 # Local Imports
 # ==============================
@@ -161,7 +163,12 @@ company_name = None
 # Session Handling
 # ==============================
 Session(app)
-
+# ==============================
+# Email Setup
+# ==============================
+SECRET_KEY = "454eb22721821f6b5d116b5165acf7fe6023f9439bf5ab18f401630cac4316c1"
+HOTMAIL_USER = "gayathrimohan@comienzosoftware.com"
+HOTMAIL_PASS = "Gaya@8sep" 
 # ==============================
 # Scheduler Setup
 # ==============================
@@ -184,7 +191,6 @@ os.makedirs(NLP_UPLOAD_FOLDER, exist_ok=True)
 
 CHART_TYPES = {"bar", "pie", "line", "scatter", "area"}
 COLUMNS_NAMES = bc.global_column_names
-
 
 
 
@@ -3142,6 +3148,14 @@ def save_data():
 def update_data():
     data = request.json
     print("Received data for update:", data)
+    def clean_int(value):
+        try:
+            if value is None or value == "" or str(value).lower() == "null":
+                return None
+            return int(value)
+        except Exception:
+            return None
+
     
     try:
         conn = connect_to_db()
@@ -3188,10 +3202,12 @@ def update_data():
             filter_options_json,
 
             # Assuming there's an 'id' field in the data
-            data.get('xFontSize'),
+            # data.get('xFontSize'),
+            clean_int(data.get('xFontSize')),
             data.get('fontStyle'),
             data.get('categoryColor'),
-            data.get('yFontSize'),
+            # data.get('yFontSize'),
+            clean_int(data.get('yFontSize')),
             data.get('valueColor'),
             data.get('headingColor'),
             data.get('ClickedTool') ,
@@ -5107,6 +5123,7 @@ def dashboard_data(dashboard_name,company_name):
         fontStyleLocal =data[20]
         fontColor =data[22]
         fontSize =data[21]
+        wallpaper_id=data[23]
         
         print("chart_ids====================",chart_ids)    
         print("chart_areacolour====================",areacolour)   
@@ -5159,6 +5176,16 @@ def dashboard_data(dashboard_name,company_name):
                             'disableDragging': img_data[7]
                         })
             cursor.close()
+            if wallpaper_id:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT src FROM dashboard_wallpapers WHERE wallpaper_id = %s
+                """, (wallpaper_id,))
+                result = cursor.fetchone()
+                if result:
+                    wallpaper_src = result[0]
+                cursor.close()
+            conn.close()
             print("fontStyleLocal",fontStyleLocal)
             print("fontColor",fontColor)
             print("fontSize",fontSize)
@@ -5170,10 +5197,13 @@ def dashboard_data(dashboard_name,company_name):
             "image_data_list":image_data_list,
             "fontStyleLocal":fontStyleLocal,
             "fontColor":fontColor,
-            "fontSize":fontSize
+            "fontSize":fontSize,
+            "wallpaper_src": wallpaper_src 
         })
     else:
         return jsonify({'error': 'Failed to fetch data for Chart {}'.format(dashboard_name)})
+    
+    
 
 @app.route('/saved_dashboard_total_rows', methods=['GET'])
 def saved_dashboard_names():
@@ -7198,7 +7228,16 @@ def update_chart_position():
     finally:
         cur.close()
         conn.close()
-
+def dashboard_wallpapers_table(conn):
+    cur = conn.cursor()
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS dashboard_wallpapers (
+            wallpaper_id SERIAL PRIMARY KEY,
+            src TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    conn.commit()
 @app.route('/api/saveDashboard', methods=['POST'])
 def save_dashboard():
     data = request.json
@@ -7226,6 +7265,7 @@ def save_dashboard():
     fontStyleState = data.get('fontStyleLocal', '')
     fontSize = data.get('fontSize', '')
     fontColor = data.get('fontColor', '')
+    wallpaper=data.get("wallpaper")
 
     # Bgcolour=data['bgcolor']
     print("user_id:", user_id)
@@ -7239,6 +7279,7 @@ def save_dashboard():
 
     try:
         conn = get_db_connection()
+        dashboard_wallpapers_table(conn)
         cur = conn.cursor()
         # Step: Delete old image records not in current imagePositions list
         cur.execute("""
@@ -7268,11 +7309,30 @@ def save_dashboard():
             )
             conn.commit()
             print("Old images removed successfully")
+        wallpaper_id = None
+        if wallpaper:
+            # If wallpaper is a dict with 'src'
+            if isinstance(wallpaper, dict) and 'src' in wallpaper:
+                wallpaper_src = wallpaper['src']
+            # If wallpaper is already a string
+            elif isinstance(wallpaper, str):
+                wallpaper_src = wallpaper
+            else:
+                return jsonify({"message": "Invalid wallpaper format"}), 400
+
+            cur.execute("""
+                INSERT INTO dashboard_wallpapers (src)
+                VALUES (%s)
+                RETURNING wallpaper_id;
+            """, (wallpaper_src,))
+            wallpaper_id = cur.fetchone()[0]
+            conn.commit()
+            print("Saved wallpaper with ID:", wallpaper_id)
 
         # **Step 1: Clear existing chart details while keeping other columns intact**
         update_query = """
             UPDATE table_dashboard
-            SET chart_ids = NULL, heading = NULL, position = NULL, chart_size = NULL, chart_type = NULL, chart_xaxis = NULL, chart_yaxis = NULL, chart_aggregate = NULL,filterdata=NULL,droppableBgColor=NULL,opacity=NULL,chartcolor=NULL,font_style_state=NULL,font_size=NULL,font_color=NULL        
+            SET chart_ids = NULL, heading = NULL, position = NULL, chart_size = NULL, chart_type = NULL, chart_xaxis = NULL, chart_yaxis = NULL, chart_aggregate = NULL,filterdata=NULL,droppableBgColor=NULL,opacity=NULL,chartcolor=NULL,font_style_state=NULL,font_size=NULL,font_color=NULL,wallpaper_id=NULL            
             WHERE user_id = %s AND file_name = %s;
         """
         cur.execute(update_query, (user_id, dashboard_name))
@@ -7323,10 +7383,23 @@ def save_dashboard():
             update_chart_query = """
                 UPDATE table_dashboard
                 SET chart_ids = %s, heading = %s, position = %s::jsonb, chart_size = %s::jsonb, chart_aggregate = %s::jsonb, chart_xaxis = %s::jsonb, chart_yaxis = %s::jsonb,chart_type = %s::jsonb,filterdata = %s,droppableBgColor=%s, opacity = %s::jsonb,chartcolor = %s::jsonb,font_style_state = %s,
-                font_size = %s,font_color = %s WHERE user_id = %s AND file_name = %s;
+                font_size = %s,font_color = %s,,wallpaper_id = %s WHERE user_id = %s AND file_name = %s;
             """
-            cur.execute(update_chart_query, (chart_ids_str, DashboardHeading, positions, chart_sizes, aggregations, xaxes, yaxes, chart_type, filter_options,droppableBgColor,opacities,bgcolors,fontStyleState, fontSize, fontColor, user_id, dashboard_name))
+            cur.execute(update_chart_query, (chart_ids_str, DashboardHeading, positions, chart_sizes, aggregations, xaxes, yaxes, chart_type, filter_options,droppableBgColor,opacities,bgcolors,fontStyleState, fontSize, fontColor,wallpaper_id, user_id, dashboard_name))
             conn.commit()
+            
+            for chart in chart_details:
+                chart_id = chart.get("chart_id")
+                chart_type = chart.get("chart_type")
+                if chart_id and chart_type:
+                    cur.execute("""
+                        UPDATE table_chart_save
+                        SET chart_type = %s
+                        WHERE id = %s;
+                    """, (chart_type, chart_id))
+            conn.commit()
+
+            print("Updated chart_type in table_chart_save successfully!")
             
             print("update_chart_query ",update_chart_query)
             print("Inserted new chart details successfully!")
@@ -7672,20 +7745,38 @@ def log_data_transfer(source_table, dest_table, schedule_type, run_time,
         print(f"❌ Failed to log data transfer: {str(e)}")
 def send_notification_email(recipient, subject, body):
     try:
-        print("Using SendGrid API to send email...")
-        message = Mail(
-            from_email=FROM_EMAIL,
-            to_emails=recipient,
-            subject=subject,
-            plain_text_content=body
-        )
-        sg = SendGridAPIClient(SENDGRID_API_KEY)
-        print("message", message)
+        print("Using Hotmail SMTP to send email...")
 
-        response = sg.send(message)
-        print(f"SendGrid response: {response.status_code}")
+        # Create email
+        msg = MIMEText(body, "plain")
+        msg["Subject"] = subject
+        msg["From"] = HOTMAIL_USER
+        msg["To"] = recipient
+
+        with smtplib.SMTP("smtp.hostinger.com", 587) as server:
+            server.starttls()
+            server.login(HOTMAIL_USER, HOTMAIL_PASS)
+            server.sendmail(HOTMAIL_USER, recipient, msg.as_string())
+
+        print("Email sent successfully")
     except Exception as e:
-        print("SendGrid error:", e)
+        print("Hotmail SMTP error:", e)
+
+    # try:
+    #     print("Using SendGrid API to send email...")
+    #     message = Mail(
+    #         from_email=FROM_EMAIL,
+    #         to_emails=recipient,
+    #         subject=subject,
+    #         plain_text_content=body
+    #     )
+    #     sg = SendGridAPIClient(SENDGRID_API_KEY)
+    #     print("message", message)
+
+    #     response = sg.send(message)
+    #     print(f"SendGrid response: {response.status_code}")
+    # except Exception as e:
+    #     print("SendGrid error:", e)
 
 # def job_logic(cols=None, source_config=None, destination_config=None,
 #               source_table_name=None, dest_table_name=None,
@@ -8869,7 +8960,154 @@ def share_dashboard():
         if conn:
             conn.close()
 
+def send_reset_email(recipient, subject, body):
+    try:
+        print("Using Hostinger SMTP to send email...")
 
+        msg = MIMEText(body, "plain")
+        msg["Subject"] = subject
+        msg["From"] = HOTMAIL_USER
+        msg["To"] = recipient
+
+        with smtplib.SMTP("smtp.hostinger.com", 587) as server:
+            server.starttls()
+            server.login(HOTMAIL_USER, HOTMAIL_PASS)
+            server.sendmail(HOTMAIL_USER, recipient, msg.as_string())
+
+        print("Email sent successfully")
+    except Exception as e:
+        print("SMTP error:", e)
+
+# ---------------- CREATE RESET TABLE ----------------
+def ensure_password_reset_table(conn):
+    cur = conn.cursor()
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS password_resets (
+            email VARCHAR(255),
+            company VARCHAR(255),
+            token TEXT,
+            used BOOLEAN DEFAULT FALSE,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    conn.commit()
+from datetime import datetime, timedelta
+
+# ---------------- REQUEST RESET ----------------
+@app.route('/api/request_password_reset', methods=['POST'])
+def request_password_reset():
+    try:
+        data = request.json
+        company_name = data.get("company")
+        email = data.get("email")
+        reset_type = data.get("type")  # employee / company
+
+        if not company_name:
+            return jsonify({"message": "Company name required"}), 400
+
+        conn = get_db_connection()
+        ensure_password_reset_table(conn)  # ✅ ensure table exists
+        cur = conn.cursor()
+
+        if reset_type == "employee":
+            conn1 = get_company_db_connection(company_name)
+            cur1 = conn1.cursor()
+            cur1.execute("SELECT * FROM employee_list WHERE email = %s", (email,))
+            user = cur1.fetchone()
+            conn1.close()
+            if not user:
+                return jsonify({"message": "Employee not found"}), 404
+        else:
+            cur.execute("SELECT * FROM organizationdatatest WHERE organizationname = %s", (company_name,))
+            user = cur.fetchone()
+            if not user:
+                return jsonify({"message": "Company not found"}), 404
+
+        # ✅ Generate token valid for 5 minutes
+        token = jwt.encode({
+            "email": email,
+            "company": company_name,
+            "type": reset_type,
+            "exp": datetime.utcnow() + timedelta(minutes=5)
+        }, SECRET_KEY, algorithm="HS256")
+
+
+        reset_url = f"http://localhost:3000/reset-password?token={token}"
+
+        # ✅ Store token in DB
+        cur.execute(
+            "INSERT INTO password_resets (email, company, token, used) VALUES (%s, %s, %s, %s)",
+            (email, company_name, token, False)
+        )
+        conn.commit()
+
+        # ✅ Send email
+        send_reset_email(
+            recipient=email,
+            subject="Password Reset Request",
+            body=f"Click the link to reset your password (valid 5 min, one-time use): {reset_url}"
+        )
+
+        conn.close()
+        return jsonify({"message": "Password reset link sent"}), 200
+
+    except Exception as e:
+        print("Error:", e)
+        return jsonify({"message": "Internal server error"}), 500
+
+# ---------------- RESET PASSWORD ----------------
+@app.route('/api/reset_password', methods=['POST'])
+def reset_password():
+    try:
+        data = request.json
+        token = data.get("token")
+        new_password = data.get("new_password")
+
+        if not token or not new_password:
+            return jsonify({"message": "Token and new password required"}), 400
+
+        decoded = jwt.decode(token, SECRET_KEY, algorithms=["HS256"])
+        email = decoded.get("email")
+        company = decoded.get("company")
+        reset_type = decoded.get("type")
+
+        conn = get_db_connection()
+        ensure_password_reset_table(conn)  # ✅ ensure table exists
+        cur = conn.cursor()
+
+        # ✅ Check token validity
+        cur.execute("SELECT used FROM password_resets WHERE token = %s", (token,))
+        row = cur.fetchone()
+        if not row:
+            return jsonify({"message": "Invalid reset token"}), 400
+        if row[0]:
+            return jsonify({"message": "Reset link already used"}), 400
+
+        # ✅ Hash new password
+        hashed_pw = bcrypt.hashpw(new_password.encode('utf-8'), bcrypt.gensalt())
+
+        if reset_type == "employee":
+            conn1 = get_company_db_connection(company)
+            cur1 = conn1.cursor()
+            cur1.execute("UPDATE employee_list SET password = %s WHERE email = %s", (hashed_pw, email))
+            conn1.commit()
+            conn1.close()
+        else:
+            cur.execute("UPDATE organizationdatatest SET password = %s WHERE organizationname = %s",
+                        (hashed_pw, company))
+
+        # ✅ Mark token as used
+        cur.execute("UPDATE password_resets SET used = TRUE WHERE token = %s", (token,))
+        conn.commit()
+        conn.close()
+
+        return jsonify({"message": "Password reset successful"}), 200
+
+    except jwt.ExpiredSignatureError:
+        return jsonify({"message": "Reset link expired"}), 400
+    except Exception as e:
+        print("Error in reset_password:", str(e))
+        return jsonify({"message": "Invalid or expired token"}), 400
 # @app.route('/static/<path:filename>')
 # def serve_static(filename):
 #     return send_file(os.path.join('static', filename))
