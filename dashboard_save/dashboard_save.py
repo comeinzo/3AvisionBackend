@@ -28,6 +28,14 @@ def create_connection():
     except Exception as e:
         print(f"Error creating connection to the database: {e}")
         return None
+def add_wallpaper_column(conn):
+    alter_table_query = """
+    ALTER TABLE table_dashboard
+    ADD COLUMN IF NOT EXISTS wallpaper_id TEXT;
+    """
+    with conn.cursor() as cur:
+        cur.execute(alter_table_query)
+        conn.commit()
 
 # Function to create the table if it doesn't exist
 def create_dashboard_table(conn):
@@ -56,8 +64,8 @@ def create_dashboard_table(conn):
         project_name VARCHAR(255),
         font_style_state VARCHAR(255),
         font_size VARCHAR(255),
-        font_color VARCHAR(255),
-        wallpaper_id TEXT
+        font_color VARCHAR(255)
+        
 
     );
     """
