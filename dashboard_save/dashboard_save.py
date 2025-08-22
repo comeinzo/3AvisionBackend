@@ -56,7 +56,8 @@ def create_dashboard_table(conn):
         project_name VARCHAR(255),
         font_style_state VARCHAR(255),
         font_size VARCHAR(255),
-        font_color VARCHAR(255)
+        font_color VARCHAR(255),
+        wallpaper_id TEXT
 
     );
     """
@@ -812,7 +813,8 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                     x_axis = chart_data[3]
                     y_axis = chart_data[4]  # Assuming y_axis is a list
                     aggregate = chart_data[5]
-                    chart_type = chart_type_value .get(chart_id)
+                    chart_type = chart_data[6]
+                    # chart_type = chart_type_value .get(chart_id)
                     chart_heading = chart_data[8]
                     chart_color = chart_data[9]  # Assuming chart_color is a list
                     selected_user = chart_data[10]  # Extract the selectedUser field
