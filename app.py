@@ -5176,6 +5176,7 @@ def dashboard_data(dashboard_name,company_name):
                             'disableDragging': img_data[7]
                         })
             cursor.close()
+            wallpaper_src = None 
             if wallpaper_id:
                 cursor = conn.cursor()
                 cursor.execute("""
