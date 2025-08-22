@@ -69,7 +69,7 @@ from dashboard_save.dashboard_save import (
     get_dashboard_names,
     get_dashboard_view_chart_data,
     get_Edit_dashboard_names,
-    insert_combined_chart_details,
+    insert_combined_chart_details,add_wallpaper_column
 )
 from excel_upload import upload_excel_to_postgresql
 from histogram_utils import generate_histogram_details, handle_column_data_types
@@ -3496,6 +3496,7 @@ def save_all_chart_details():
     if conn is None:
         return jsonify({'message': 'Database connection failed'}), 500
     create_dashboard_table(conn)
+    add_wallpaper_column(conn)
 
     image_ids = []
     for img in image_positions:
@@ -5780,8 +5781,10 @@ def delete_chart(chart_name):
 
 @app.route('/delete-chart', methods=['DELETE'])
 def delete_dashboard_name():
-    chart_name = request.args.get('chart_name')  # Get the chart_name from JSON body
-    user_id = request.args.get('user_id')  # Use query param for GET
+    # chart_name = request.args.get('chart_name')  # Get the chart_name from JSON body
+    chart_name = request.args.getlist('chart_name[]')  
+    user_id, chart_name = chart_name # Split only once
+    # user_id = request.args.get('user_id')  # Use query param for GET
 
     company_name=request.args.get('company_name')
     print("company_name",company_name)
