@@ -1,5 +1,20 @@
 # Gayathri
 
+
+
+# from flask import Flask, request, jsonify
+# from werkzeug.utils import secure_filename
+# import os
+# import PyPDF2
+# import fitz  # PyMuPDF for better PDF handling
+# import re
+# import psycopg2
+# from datetime import datetime
+# import traceback
+
+# app = Flask(__name__)
+
+
 # ==============================
 # Standard Library Imports
 # ==============================
@@ -9155,6 +9170,551 @@ def reset_password():
 def serve_static(filename):
     # send_file will automatically look within the configured static_folder
     return send_file(os.path.join(app.static_folder, filename))
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# # Configuration
+# UPLOAD_FOLDER = 'tmp/pdf_uploads'
+# ALLOWED_EXTENSIONS = {'pdf'}
+# app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
+
+# # Ensure upload folder exists
+# os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+
+# def allowed_file(filename):
+#     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
+
+# def extract_pdf_data(pdf_path, form_type):
+#     """
+#     Extract form data from PDF using multiple methods
+#     """
+#     extracted_data = {}
+    
+#     try:
+#         # Method 1: Try to extract form fields (for fillable PDFs)
+#         extracted_data.update(extract_form_fields(pdf_path))
+        
+#         # Method 2: Extract text and parse using patterns
+#         text_data = extract_text_patterns(pdf_path, form_type)
+#         extracted_data.update(text_data)
+        
+#         return extracted_data
+#     except Exception as e:
+#         print(f"PDF extraction error: {e}")
+#         return {}
+
+# def extract_form_fields(pdf_path):
+#     """
+#     Extract data from fillable PDF form fields
+#     """
+#     form_data = {}
+    
+#     try:
+#         with open(pdf_path, 'rb') as file:
+#             pdf_reader = PyPDF2.PdfReader(file)
+            
+#             # Check if PDF has form fields
+#             if "/AcroForm" in pdf_reader.trailer["/Root"]:
+#                 for page in pdf_reader.pages:
+#                     if "/Annots" in page:
+#                         for annotation in page["/Annots"]:
+#                             annotation_obj = annotation.get_object()
+#                             if annotation_obj.get("/Subtype") == "/Widget":
+#                                 field_name = annotation_obj.get("/T")
+#                                 field_value = annotation_obj.get("/V")
+#                                 if field_name and field_value:
+#                                     form_data[field_name] = field_value
+#     except Exception as e:
+#         print(f"Form field extraction error: {e}")
+    
+#     return form_data
+
+# def extract_text_patterns(pdf_path, form_type):
+#     """
+#     Extract text from PDF and parse using regular expressions
+#     """
+#     extracted_data = {}
+    
+#     try:
+#         # Use PyMuPDF for better text extraction
+#         pdf_document = fitz.open(pdf_path)
+#         full_text = ""
+        
+#         for page_num in range(pdf_document.page_count):
+#             page = pdf_document[page_num]
+#             full_text += page.get_text()
+        
+#         pdf_document.close()
+        
+#         # Parse based on form type
+#         if form_type == 'hospital':
+#             extracted_data = parse_hospital_form(full_text)
+#         elif form_type == 'school':
+#             extracted_data = parse_school_form(full_text)
+            
+#     except Exception as e:
+#         print(f"Text pattern extraction error: {e}")
+    
+#     return extracted_data
+
+# def parse_hospital_form(text):
+#     """
+#     Parse hospital admission form text using regex patterns
+#     Updated for City General Hospital format
+#     """
+#     data = {}
+    
+#     # Patterns specifically for your hospital form format
+#     patterns = {
+#         'first_name': [
+#             r'First Name[:\s*]*\n\s*([A-Za-z\s]+)',
+#             r'First Name[:\s*]*([A-Za-z\s]+)',
+#         ],
+#         'last_name': [
+#             r'Last Name[:\s*]*\n\s*([A-Za-z\s]+)',
+#             r'Last Name[:\s*]*([A-Za-z\s]+)',
+#         ],
+#         'middle_name': [
+#             r'Middle Name[:\s*]*\n\s*([A-Za-z\s]+)',
+#             r'Middle Name[:\s*]*([A-Za-z\s]+)',
+#         ],
+#         'date_of_birth': [
+#             r'Date of Birth[:\s*]*\n\s*(\d{1,2}-\d{1,2}-\d{4})',
+#             r'Date of Birth[:\s*]*(\d{1,2}-\d{1,2}-\d{4})',
+#             r'(\d{1,2}-\d{1,2}-\d{4})'
+#         ],
+#         'age': [
+#             r'Age[:\s*]*\n\s*(\d+)',
+#             r'Age[:\s*]*(\d+)',
+#         ],
+#         'gender': [
+#             r'Gender[:\s*]*\n\s*(Male|Female|M|F)',
+#             r'Gender[:\s*]*(Male|Female|M|F)',
+#         ],
+#         'phone': [
+#             r'Phone Number[:\s*]*\n\s*(\d{10,})',
+#             r'Phone Number[:\s*]*(\d{10,})',
+#         ],
+#         'email': [
+#             r'Email Address[:\s*]*\n\s*([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})',
+#             r'Email Address[:\s*]*([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})',
+#         ],
+#         'address': [
+#             r'Home Address[:\s*]*\n\s*([A-Za-z0-9\s,.-]+)',
+#             r'Home Address[:\s*]*([A-Za-z0-9\s,.-]+)',
+#         ],
+#         'emergency_contact_name': [
+#             r'Contact Name[:\s*]*\n\s*(\d+)',  # In your form, it looks like it's a phone number
+#             r'Contact Name[:\s*]*(\d+)',
+#         ],
+#         'emergency_relationship': [
+#             r'Relationship[:\s*]*\n\s*([A-Za-z\s]+)',
+#             r'Relationship[:\s*]*([A-Za-z\s]+)',
+#         ],
+#         'emergency_phone': [
+#             r'EMERGENCY CONTACT INFORMATION.*?Phone Number[:\s*]*\n\s*(\d{10,})',
+#             r'Emergency.*?Phone Number[:\s*]*(\d{10,})',
+#         ],
+#         'admission_date': [
+#             r'Admission Date[:\s*]*\n\s*(\d{1,2}-\d{1,2}-\d{4}\s+\d{1,2}:\d{2})',
+#             r'Admission Date[:\s*]*(\d{1,2}-\d{1,2}-\d{4})',
+#         ],
+#         'department': [
+#             r'Department[:\s*]*\n\s*([A-Za-z\s]+)',
+#             r'Department[:\s*]*([A-Za-z\s]+)',
+#         ],
+#         'chief_complaint': [
+#             r'Chief Complaint[:\s*]*\n\s*([A-Za-z0-9\s,.-]+)',
+#             r'Chief Complaint[:\s*]*([A-Za-z0-9\s,.-]+)',
+#         ],
+#         'allergies': [
+#             r'Known Allergies[:\s*]*\n\s*([A-Za-z0-9\s,.-]+)',
+#             r'Known Allergies[:\s*]*([A-Za-z0-9\s,.-]+)',
+#         ],
+#         'current_medications': [
+#             r'Current Medications[:\s*]*\n\s*([A-Za-z0-9\s,.-]+)',
+#             r'Current Medications[:\s*]*([A-Za-z0-9\s,.-]+)',
+#         ],
+#         'insurance_provider': [
+#             r'Insurance Provider[:\s*]*\n\s*([A-Za-z0-9\s]+)',
+#             r'Insurance Provider[:\s*]*([A-Za-z0-9\s]+)',
+#         ],
+#         'policy_number': [
+#             r'Policy Number[:\s*]*\n\s*([A-Za-z0-9]+)',
+#             r'Policy Number[:\s*]*([A-Za-z0-9]+)',
+#         ]
+#     }
+    
+#     # Extract data using patterns
+#     extracted = extract_with_patterns(text, patterns)
+    
+#     # Combine first and last name if both exist
+#     if extracted.get('first_name') and extracted.get('last_name'):
+#         full_name = f"{extracted['first_name']} {extracted['last_name']}"
+#         if extracted.get('middle_name'):
+#             full_name = f"{extracted['first_name']} {extracted['middle_name']} {extracted['last_name']}"
+#         extracted['patient_name'] = full_name.strip()
+    
+#     return extracted
+
+# def parse_school_form(text):
+#     """
+#     Parse school registration form text using regex patterns
+#     """
+#     data = {}
+    
+#     # Common patterns for school forms
+#     patterns = {
+#         'student_name': [
+#             r'Student Name[:\s]*([A-Za-z\s]+)',
+#             r'Child Name[:\s]*([A-Za-z\s]+)',
+#             r'Full Name[:\s]*([A-Za-z\s]+)'
+#         ],
+#         'date_of_birth': [
+#             r'Date of Birth[:\s]*(\d{1,2}[/-]\d{1,2}[/-]\d{2,4})',
+#             r'DOB[:\s]*(\d{1,2}[/-]\d{1,2}[/-]\d{2,4})',
+#             r'Birth Date[:\s]*(\d{1,2}[/-]\d{1,2}[/-]\d{2,4})'
+#         ],
+#         'grade': [
+#             r'Grade[:\s]*(\d+|[A-Za-z]+)',
+#             r'Class[:\s]*(\d+|[A-Za-z]+)',
+#             r'Standard[:\s]*(\d+|[A-Za-z]+)'
+#         ],
+#         'parent_name': [
+#             r'Parent Name[:\s]*([A-Za-z\s]+)',
+#             r'Father Name[:\s]*([A-Za-z\s]+)',
+#             r'Mother Name[:\s]*([A-Za-z\s]+)',
+#             r'Guardian Name[:\s]*([A-Za-z\s]+)'
+#         ],
+#         'parent_phone': [
+#             r'Parent Phone[:\s]*(\+?\d{10,})',
+#             r'Contact Number[:\s]*(\+?\d{10,})',
+#             r'Mobile[:\s]*(\+?\d{10,})'
+#         ],
+#         'address': [
+#             r'Address[:\s]*([A-Za-z0-9\s,.-]+)',
+#             r'Residential Address[:\s]*([A-Za-z0-9\s,.-]+)'
+#         ],
+#         'previous_school': [
+#             r'Previous School[:\s]*([A-Za-z0-9\s,.-]+)',
+#             r'Last School[:\s]*([A-Za-z0-9\s,.-]+)'
+#         ],
+#         'email': [
+#             r'Email[:\s]*([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})',
+#             r'E-mail[:\s]*([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})'
+#         ]
+#     }
+    
+#     return extract_with_patterns(text, patterns)
+
+# def extract_with_patterns(text, patterns):
+#     """
+#     Extract data using regex patterns
+#     """
+#     data = {}
+    
+#     for field, pattern_list in patterns.items():
+#         for pattern in pattern_list:
+#             match = re.search(pattern, text, re.IGNORECASE | re.MULTILINE)
+#             if match:
+#                 data[field] = match.group(1).strip()
+#                 break
+    
+#     return data
+
+# def create_hospital_table(connection):
+#     """
+#     Create hospital_admissions table if it doesn't exist
+#     Updated schema for City General Hospital format
+#     """
+#     create_table_query = '''
+#     CREATE TABLE IF NOT EXISTS hospital_admissions (
+#         id SERIAL PRIMARY KEY,
+#         patient_name VARCHAR(255),
+#         first_name VARCHAR(100),
+#         last_name VARCHAR(100),
+#         middle_name VARCHAR(100),
+#         date_of_birth DATE,
+#         age INTEGER,
+#         gender VARCHAR(10),
+#         phone VARCHAR(20),
+#         email VARCHAR(255),
+#         address TEXT,
+#         emergency_contact_name VARCHAR(255),
+#         emergency_relationship VARCHAR(50),
+#         emergency_phone VARCHAR(20),
+#         emergency_email VARCHAR(255),
+#         admission_date TIMESTAMP,
+#         department VARCHAR(100),
+#         chief_complaint TEXT,
+#         allergies TEXT,
+#         current_medications TEXT,
+#         insurance_provider VARCHAR(255),
+#         policy_number VARCHAR(100),
+#         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+#     );
+#     '''
+    
+#     cursor = connection.cursor()
+#     cursor.execute(create_table_query)
+#     connection.commit()
+#     cursor.close()
+
+# def create_school_table(connection):
+#     """
+#     Create school_registrations table if it doesn't exist
+#     """
+#     create_table_query = '''
+#     CREATE TABLE IF NOT EXISTS school_registrations (
+#         id SERIAL PRIMARY KEY,
+#         student_name VARCHAR(255),
+#         date_of_birth DATE,
+#         grade VARCHAR(20),
+#         parent_name VARCHAR(255),
+#         parent_phone VARCHAR(20),
+#         address TEXT,
+#         previous_school VARCHAR(255),
+#         email VARCHAR(255),
+#         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+#     );
+#     '''
+    
+#     cursor = connection.cursor()
+#     cursor.execute(create_table_query)
+#     connection.commit()
+#     cursor.close()
+
+# def insert_hospital_data(connection, data):
+#     """
+#     Insert hospital form data into database
+#     Updated for City General Hospital format
+#     """
+#     insert_query = '''
+#     INSERT INTO hospital_admissions 
+#     (patient_name, first_name, last_name, middle_name, date_of_birth, age, gender, 
+#      phone, email, address, emergency_contact_name, emergency_relationship, emergency_phone, 
+#      admission_date, department, chief_complaint, allergies, current_medications, 
+#      insurance_provider, policy_number)
+#     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+#     '''
+    
+#     # Convert and validate data
+#     age = None
+#     if data.get('age'):
+#         try:
+#             age = int(data['age'])
+#         except ValueError:
+#             pass
+    
+#     date_of_birth = None
+#     if data.get('date_of_birth'):
+#         try:
+#             # Handle DD-MM-YYYY format
+#             date_of_birth = datetime.strptime(data['date_of_birth'], '%d-%m-%Y').date()
+#         except ValueError:
+#             try:
+#                 # Handle MM-DD-YYYY format
+#                 date_of_birth = datetime.strptime(data['date_of_birth'], '%m-%d-%Y').date()
+#             except ValueError:
+#                 pass
+    
+#     admission_date = None
+#     if data.get('admission_date'):
+#         try:
+#             # Handle DD-MM-YYYY HH:MM format
+#             admission_date = datetime.strptime(data['admission_date'], '%d-%m-%Y %H:%M')
+#         except ValueError:
+#             try:
+#                 # Handle DD-MM-YYYY format
+#                 admission_date = datetime.strptime(data['admission_date'], '%d-%m-%Y')
+#             except ValueError:
+#                 pass
+    
+#     values = (
+#         data.get('patient_name'),
+#         data.get('first_name'),
+#         data.get('last_name'),
+#         data.get('middle_name'),
+#         date_of_birth,
+#         age,
+#         data.get('gender'),
+#         data.get('phone'),
+#         data.get('email'),
+#         data.get('address'),
+#         data.get('emergency_contact_name'),
+#         data.get('emergency_relationship'),
+#         data.get('emergency_phone'),
+#         admission_date,
+#         data.get('department'),
+#         data.get('chief_complaint'),
+#         data.get('allergies'),
+#         data.get('current_medications'),
+#         data.get('insurance_provider'),
+#         data.get('policy_number')
+#     )
+    
+#     cursor = connection.cursor()
+#     cursor.execute(insert_query, values)
+#     connection.commit()
+#     cursor.close()
+
+# def insert_school_data(connection, data):
+#     """
+#     Insert school form data into database
+#     """
+#     insert_query = '''
+#     INSERT INTO school_registrations 
+#     (student_name, date_of_birth, grade, parent_name, parent_phone, address, previous_school, email)
+#     VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+#     '''
+    
+#     # Convert and validate data
+#     date_of_birth = None
+#     if data.get('date_of_birth'):
+#         try:
+#             date_of_birth = datetime.strptime(data['date_of_birth'], '%d/%m/%Y').date()
+#         except ValueError:
+#             try:
+#                 date_of_birth = datetime.strptime(data['date_of_birth'], '%m/%d/%Y').date()
+#             except ValueError:
+#                 pass
+    
+#     values = (
+#         data.get('student_name'),
+#         date_of_birth,
+#         data.get('grade'),
+#         data.get('parent_name'),
+#         data.get('parent_phone'),
+#         data.get('address'),
+#         data.get('previous_school'),
+#         data.get('email')
+#     )
+    
+#     cursor = connection.cursor()
+#     cursor.execute(insert_query, values)
+#     connection.commit()
+#     cursor.close()
+
+# @app.route('/upload-pdf-form', methods=['POST'])
+# def upload_pdf_form():
+#     try:
+#         # Check if file is present
+#         if 'pdf_file' not in request.files:
+#             return jsonify({'message': 'No PDF file provided'}), 400
+        
+#         file = request.files['pdf_file']
+#         form_type = request.form.get('form_type', 'hospital')
+#         database_name = request.form.get('database_name')
+        
+#         if not database_name:
+#             return jsonify({'message': 'Database name is required'}), 400
+        
+#         if file.filename == '':
+#             return jsonify({'message': 'No file selected'}), 400
+        
+#         if not allowed_file(file.filename):
+#             return jsonify({'message': 'Only PDF files are allowed'}), 400
+        
+#         # Save uploaded file
+#         filename = secure_filename(file.filename)
+#         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+#         filename = f"{timestamp}_{filename}"
+#         filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+#         file.save(filepath)
+        
+#         try:
+#             # Extract data from PDF
+#             print(f"Extracting data from PDF: {filepath}")
+#             extracted_data = extract_pdf_data(filepath, form_type)
+#             print(f"Extracted data: {extracted_data}")
+            
+#             # Connect to database
+#             connection = get_db_connection_view(database_name)
+#             if not connection:
+#                 return jsonify({'message': 'Failed to connect to database'}), 500
+            
+#             try:
+#                 # Create appropriate table and insert data
+#                 if form_type == 'hospital':
+#                     create_hospital_table(connection)
+#                     insert_hospital_data(connection, extracted_data)
+#                 elif form_type == 'school':
+#                     create_school_table(connection)
+#                     insert_school_data(connection, extracted_data)
+                
+#                 print(f"Data successfully inserted into {form_type} table")
+                
+#                 return jsonify({
+#                     'message': 'PDF processed successfully',
+#                     'extracted_data': extracted_data,
+#                     'form_type': form_type,
+#                     'database_name': database_name
+#                 }), 200
+                
+#             finally:
+#                 connection.close()
+        
+#         finally:
+#             # Clean up uploaded file
+#             try:
+#                 os.remove(filepath)
+#             except Exception as e:
+#                 print(f"Warning: Could not delete uploaded file: {e}")
+    
+#     except Exception as e:
+#         print(f"Error processing PDF: {e}")
+#         traceback.print_exc()
+#         return jsonify({'message': f'Error processing PDF: {str(e)}'}), 500
+
+# # if __name__ == '__main__':
+# #     app.run(debug=True, port=5000)
+
+
 
 if __name__ == "__main__":
     # Use socketio.run to enable WebSocket support
