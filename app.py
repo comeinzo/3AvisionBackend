@@ -1534,13 +1534,11 @@ def fetch_data_for_ts_decomposition(table_name, x_axis_columns, filter_options, 
 
 @app.route('/plot_chart', methods=['POST', 'GET'])
 def get_bar_chart_route(): 
-    
-    
-    # Safely access the global DataFrame
+   # Safely access the global DataFrame
     df = bc.global_df
     data = request.json
 
-    # print("data", data)
+    print("data from UI", data)
     
     try:
         x_axis_columns = [col.strip() for col in data['xAxis'].split(',')]
@@ -2004,113 +2002,6 @@ def get_bar_chart_route():
         
         return jsonify({"categories": labels, "values": values, "aggregation": aggregation, "dataframe": df_json})
 
-    # # # Dual Y-axis chart
-    # elif len(y_axis_columns) == 2 and chart_data != "duealbarChart":
-    #     data = fetch_data_for_duel(table_name, x_axis_columns, filter_options, y_axis_columns, aggregation, db_nameeee, selectedUser)
-        
-    #     # Apply data limiting if specified
-    #     if data_limit_type:
-    #         temp_df = pd.DataFrame(data, columns=['category', 'series1', 'series2'])
-    #         limited_df = apply_data_limiting(temp_df, data_limit_type, data_limit_column or 'series1', ['category'], ['series1'], aggregation)
-    #         data = limited_df.values.tolist()
-        
-    #     # Check data points limit with consent logic
-    #     limit_check = check_data_points_limit(len(data), user_consent_given, data_limit_type)
-    #     if limit_check:
-    #         return jsonify(limit_check), 400
-        
-    #     return jsonify({
-    #         "categories": [row[0] for row in data],
-    #         "series1": [row[1] for row in data],
-    #         "series2": [row[2] for row in data],
-    #         "dataframe": df_json
-    #     })
-    #  # Dual Y-axis chart - FIXED
-    
-    # elif chart_data == "timeSeriesDecomposition":
-    #         print("Time Series Decomposition Chart")
-    #         # For time series decomposition, we need one time column (x_axis_columns[0]) and one value column (y_axis_columns[0])
-    #         if not x_axis_columns or not y_axis_columns:
-    #             return jsonify({"error": "Time series decomposition requires a time column and a value column."}), 400
-
-    #         time_column = x_axis_columns[0]
-    #         value_column = y_axis_columns[0]
-    #         print("time_column", time_column)
-    #         print("value_column", value_column)
-        
-    #         temp_df_for_ts = fetch_data_for_ts_decomposition(table_name, [time_column], filter_options, [value_column], None, db_nameeee, selectedUser, calculationData)
-    #         print("temp_df_for_ts", temp_df_for_ts)
-    #         if temp_df_for_ts.empty:
-    #             return jsonify({"error": "No data available for time series decomposition after filtering."}), 400
-    #         temp_df_for_ts.dropna(subset=[time_column], inplace=True)
-    #         # Ensure time column is datetime and set as index
-    #         temp_df_for_ts[time_column] = pd.to_datetime(temp_df_for_ts[time_column], errors='coerce')
-    #         temp_df_for_ts.set_index(time_column, inplace=True)
-
-    #         # Ensure value column is numeric
-    #         temp_df_for_ts[value_column] = pd.to_numeric(temp_df_for_ts[value_column], errors='coerce')
-    #         temp_df_for_ts.dropna(subset=[value_column], inplace=True) # Drop rows with missing values for decomposition
-            
-    #         if temp_df_for_ts.empty:
-    #             return jsonify({"error": "No valid numeric data for time series decomposition after conversion."}), 400
-
-    #         time_series_frequency = data.get('timeSeriesFrequency', 'MS') # Default to Month Start if not provided
-    #         print("time_series_frequency", time_series_frequency)
-    #         try:
-    #             # If there are multiple entries for the same timestamp after filtering, aggregate them
-    #             # For example, sum sales for a given day
-    #             ts_data = temp_df_for_ts[value_column].resample(time_series_frequency).sum().ffill().bfill() # Sum and fill NaNs
-    #             print("ts_data", ts_data)
-    #             # period = 12 # Default to monthly
-    #             # if 'D' in time_series_frequency: # If daily, maybe a weekly seasonality
-    #             #     period = 7
-    #             # elif 'W' in time_series_frequency: # If weekly, maybe a yearly seasonality (52 weeks)
-    #             #     period = 52
-    #             # elif 'Q' in time_series_frequency: # Quarterly
-    #             #     period = 4
-
-    #             if 'D' in time_series_frequency:
-    #                 period = 7
-    #             elif 'W' in time_series_frequency:
-    #                 period = 52
-    #             elif 'Q' in time_series_frequency:
-    #                 period = 4
-    #             else:  # Default for MS (monthly)
-    #                 period = min(4, len(ts_data) // 2)  # Safe fallback for small datasets
-
-    #             if len(ts_data) < 2 * period:
-    #                 return jsonify({"error": f"Not enough data points for decomposition with period {period}. Need at least {2 * period} data points, but got {len(ts_data)}."}), 400
-
-    #             # IMPORTANT: ts_data must have a DatetimeIndex
-    #             # seasonal_decompose requires non-null data and enough observations for the period.
-    #             decomposition = seasonal_decompose(ts_data, model='additive', period=period) # 'additive' or 'multiplicative'
-
-    #             # Extract components
-    #             # .dropna().tolist() is used to convert Series to list, dropping any NaN values that might occur
-    #             # at the start/end of trend/seasonal components due to decomposition process.
-    #             trend = decomposition.trend.dropna().tolist()
-    #             seasonal = decomposition.seasonal.dropna().tolist()
-    #             residual = decomposition.resid.dropna().tolist()
-    #             observed = decomposition.observed.dropna().tolist()
-                
-    #             # Align indices for plotting if needed (e.g., convert datetime index to string)
-    #             dates = decomposition.observed.dropna().index.strftime('%Y-%m-%d').tolist()
-
-    #             response = {
-    #                 "dates": dates,
-    #                 "observed": observed,
-    #                 "trend": trend,
-    #                 "seasonal": seasonal,
-    #                 "residual": residual,
-    #                 "model": "additive" # Or 'multiplicative' - consider making this configurable
-    #             }
-    #             return jsonify(response)
-
-    #         except ValueError as ve:
-    #             return jsonify({"error": f"Error during time series decomposition: {ve}. This often happens with insufficient data for the chosen period or frequency. Ensure your time column has enough granular data."}), 400
-    #         except Exception as e:
-    #             return jsonify({"error": f"An unexpected error occurred during time series decomposition: {e}"}), 500
-
     elif chart_data == "timeSeriesDecomposition":
         print("Time Series Decomposition Chart")
         if not x_axis_columns or not y_axis_columns:
@@ -2154,22 +2045,7 @@ def get_bar_chart_route():
 
         print("time_series_frequency", time_series_frequency)
 
-        try:
-            # # Decide the resampling aggregation method dynamically
-            # if aggregation == "sum":
-            #     ts_data = temp_df_for_ts[value_column].resample(time_series_frequency).sum()
-            # elif aggregation == "average":
-            #     ts_data = temp_df_for_ts[value_column].resample(time_series_frequency).mean()
-            # elif aggregation == "count":
-            #     ts_data = temp_df_for_ts[value_column].resample(time_series_frequency).count()
-            # elif aggregation == "min":
-            #     ts_data = temp_df_for_ts[value_column].resample(time_series_frequency).min()
-            # elif aggregation == "max":
-            #     ts_data = temp_df_for_ts[value_column].resample(time_series_frequency).max()
-            # elif aggregation == "median":
-            #     ts_data = temp_df_for_ts[value_column].resample(time_series_frequency).median()
-            # else:
-            #     return jsonify({"error": f"Unsupported aggregation type for time series decomposition: {aggregation}"}), 400
+        try:           
             if aggregation == "sum":
                 ts_data = temp_df_for_ts[value_column].resample(time_series_frequency).sum()
             elif aggregation == "average":
@@ -2246,9 +2122,6 @@ def get_bar_chart_route():
                 try:
                     # Convert data to DataFrame for limiting - handle different data structures
                     if isinstance(data[0], (list, tuple)) and len(data[0]) >= 3:
-                        # Standard format: [category, series1, series2]
-                        # temp_df = pd.DataFrame(data, columns=['category', 'series1', 'series2'])
-                        # Convert Decimal to float explicitly
                         converted_data = [
                             [row[0], float(row[1]), float(row[2])] for row in data
                         ]
@@ -5600,6 +5473,85 @@ def get_predictions():
     # prediction_data = load_and_predict(x_axis, y_axis)
     return jsonify(prediction_data)  # Return data as JSON
 
+# @app.route('/api/predictions', methods=['GET', 'POST'])
+# def get_predictions():
+#     try:
+#         data = request.json
+#         x_axis = data.get('xAxis')
+#         y_axis = data.get('yAxis')    
+#         timePeriod = data.get('timePeriod')
+#         number_of_periods = data.get('number')   
+#         selectedTableName = data.get('selectedTable')      
+        
+#         print("="*60)
+#         print("REQUEST RECEIVED")
+#         print("="*60)
+#         print("selectedTableName:", selectedTableName) 
+#         print("xAxis:", x_axis, "yAxis:", y_axis)
+#         print("timePeriod:", timePeriod, "number_of_periods:", number_of_periods)
+        
+#         # Validate inputs
+#         if not x_axis or not y_axis:
+#             return jsonify({
+#                 'error': 'Missing required fields',
+#                 'message': 'xAxis and yAxis are required'
+#             }), 400
+        
+#         if not timePeriod or not number_of_periods:
+#             return jsonify({
+#                 'error': 'Missing required fields',
+#                 'message': 'timePeriod and number are required'
+#             }), 400
+        
+#         # Import your data source
+#         import bar_chart as bc
+        
+#         # Check if data exists
+#         if bc.global_df is None or bc.global_df.empty:
+#             return jsonify({
+#                 'error': 'No data available',
+#                 'message': 'The data source is empty'
+#             }), 400
+        
+#         print(f"Data shape: {bc.global_df.shape}")
+#         print(f"Columns: {bc.global_df.columns.tolist()}")
+        
+#         # Use improved prediction function
+#         prediction_data = load_and_predict(
+#             x_axis, 
+#             y_axis, 
+#             number_of_periods, 
+#             timePeriod,
+#             bc.global_df
+#         )
+        
+#         print("\n✓ Prediction successful!")
+#         return jsonify(prediction_data)
+        
+#     except ValueError as ve:
+#         print(f"\n✗ ValueError: {str(ve)}")
+#         return jsonify({
+#             'error': 'Invalid data or parameters',
+#             'message': str(ve)
+#         }), 400
+        
+#     except KeyError as ke:
+#         print(f"\n✗ KeyError: {str(ke)}")
+#         return jsonify({
+#             'error': 'Column not found',
+#             'message': f'Column {str(ke)} does not exist in the data'
+#         }), 400
+        
+#     except Exception as e:
+#         print(f"\n✗ Unexpected error: {str(e)}")
+#         import traceback
+#         traceback.print_exc()
+#         return jsonify({
+#             'error': 'Prediction failed',
+#             'message': str(e),
+#             'type': type(e).__name__
+#         }), 500
+
 @app.route('/Hierarchial-backend-endpoint', methods=['POST', 'GET'])
 def handle_hierarchical_bar_click():
     global global_df
@@ -6061,6 +6013,9 @@ def get_table_columns_with_types_api():
             return jsonify({'error': 'Database name and table name are required'}), 400
 
         columns = get_table_columns_with_types(company_name, table_name)
+        print("==================================Columns==================================")
+        print(columns)
+        print("====================================================================")
         return jsonify(columns)
         
     except Exception as e:
