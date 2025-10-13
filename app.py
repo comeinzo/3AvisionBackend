@@ -5192,6 +5192,7 @@ def dashboard_data(dashboard_name,company_name):
             print("fontStyleLocal",fontStyleLocal)
             print("fontColor",fontColor)
             print("fontSize",fontSize)
+            print("Chart Data=======>",data)
         # return jsonify(data,chart_datas)
         return jsonify({
             "data": data,
