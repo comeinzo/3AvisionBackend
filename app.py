@@ -292,6 +292,7 @@ def create_table():
             )
         """)
         cur.execute("SELECT MAX(id) FROM table_chart_save")
+        max_id = cur.fetchone()[0] 
         if max_id is None:
             max_id = 1
         else:
