@@ -4168,14 +4168,15 @@ def handle_clicked_category():
     category = data.get('category')
     charts= data.get('charts')  
     clicked_catagory_Xaxis=data.get('x_axis')
-    print("data", data)
+    # print("data", data)
     print("Category clicked:", category)
     database_name = data.get('databaseName')
     print("clicked_catagory_Xaxis====================",clicked_catagory_Xaxis)
+    # print("charts===================",charts)
     if isinstance(clicked_catagory_Xaxis, list):
             clicked_catagory_Xaxis = ', '.join(clicked_catagory_Xaxis)
     
-    print("Charts:", charts)    
+    # print("Charts:", charts)    
     chart_details = []
     print("chart_details :", chart_details)
     chart_data_list = []
@@ -4202,6 +4203,7 @@ def handle_clicked_category():
             chart_details.append([{
                 'chart_id': chart_id,
                 'table_name': table_name,
+                'chart_type':chart_type,
                 'x_axis': x_axis,
                 'y_axis': y_axis,
                 'aggregate': aggregate,
@@ -4209,10 +4211,10 @@ def handle_clicked_category():
                 'database_name': database_name,
                 'calculationData':calculationData
             }])
-           
+            
             print("x_axis====================",x_axis)
-            print("x_axis====================",x_axis)
-            chart_data = filter_chart_data(database_name, table_name, x_axis, y_axis, aggregate,clicked_catagory_Xaxis,category,chart_id,calculationData)
+            print("chart_type====================",chart_type)
+            chart_data = filter_chart_data(database_name, table_name, x_axis, y_axis, aggregate,clicked_catagory_Xaxis,category,chart_id,calculationData,chart_type)
             chart_data_list.append({
                 "chart_id": chart_id,
                 "data": chart_data
@@ -5193,7 +5195,7 @@ def dashboard_data(dashboard_name,company_name):
             print("fontStyleLocal",fontStyleLocal)
             print("fontColor",fontColor)
             print("fontSize",fontSize)
-            print("Chart Data=======>",data)
+            print("Chart Data=======>",chart_datas)
         # return jsonify(data,chart_datas)
         return jsonify({
             "data": data,
@@ -5690,8 +5692,11 @@ def nlp_upload_audio():
     table_name = request.form.get('tableName')
     database_name = request.form.get('databaseName')
 
+    
+
     # Fetch global column names
-    COLUMNS_NAMES = bc.global_column_names
+    # COLUMNS_NAMES = bc.global_column_names
+    COLUMNS_NAMES = ['order_id', 'units_sold', 'unit_price', 'unit_cost', 'total_revenue', 'total_cost', 'total_profit','region', 'country', 'product', 'bank_name', 'order_priority', 'order_date', 'ship_date']
     print("Columns names:", COLUMNS_NAMES)
 
     if not COLUMNS_NAMES:
