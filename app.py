@@ -9152,6 +9152,106 @@ def reset_password():
     except Exception as e:
         print("Error in reset_password:", str(e))
         return jsonify({"message": "Invalid or expired token"}), 400
+import requests
+# @app.route('/fetch-api', methods=['POST'])
+# def fetch_api_data(): 
+#     try: 
+#         data = request.json 
+#         api_url = data.get('apiUrl') 
+#         if not api_url: 
+#             return jsonify({"error": "API URL is required"}), 400 # Fetch data from the provided API 
+#         response = requests.get(api_url) 
+#         response.raise_for_status() # Raise error for bad response 
+#         api_data = response.json() # Return fetched data 
+#         return jsonify(api_data) 
+#         print("api_data",api_data)
+#     except requests.exceptions.RequestException as e: 
+#         return jsonify({"error": str(e)}), 500 
+#     except Exception as e: 
+#         return jsonify({"error": str(e)}), 500
+# @app.route('/fetch-api', methods=['POST'])
+# def fetch_api_data():
+#     try:
+#         data = request.json
+#         api_url = data.get('apiUrl')
+#         method = data.get('method', 'GET').upper()
+#         headers = data.get('headers', {})
+#         body = data.get('body', None)
+
+#         if not api_url:
+#             return jsonify({"error": "API URL is required"}), 400
+
+#         if method == 'POST':
+#             response = requests.post(api_url, json=body, headers=headers)
+#         else:
+#             response = requests.get(api_url, headers=headers)
+
+#         response.raise_for_status()
+
+#         try:
+#             api_data = response.json()
+#         except ValueError:
+#             return jsonify({"error": "Response is not valid JSON"}), 400
+
+#         return jsonify({
+#             "status": "success",
+#             "source_url": api_url,
+#             "data_type": type(api_data).__name__,
+#             "data": api_data
+#         })
+
+#     except requests.exceptions.RequestException as e:
+#         return jsonify({"error": f"API request failed: {str(e)}"}), 500
+#     except Exception as e:
+#         return jsonify({"error": f"Unexpected error: {str(e)}"}), 500
+
+
+@app.route('/fetch-api', methods=['POST'])
+def fetch_api_data():
+    try:
+        data = request.json
+        api_url = data.get('apiUrl')
+        method = data.get('method', 'GET').upper()
+        headers = data.get('headers', {})
+        params = data.get('params', {})  # 🔹 added parameters
+        body = data.get('body', None)
+
+        if not api_url:
+            return jsonify({"error": "API URL is required"}), 400
+
+        if method == 'POST':
+            response = requests.post(api_url, json=body, headers=headers, params=params)
+        else:
+            response = requests.get(api_url, headers=headers, params=params)
+
+        response.raise_for_status()
+
+        try:
+            api_data = response.json()
+        except ValueError:
+            return jsonify({"error": "Response is not valid JSON"}), 400
+
+        return jsonify({
+            "status": "success",
+            "source_url": api_url,
+            "data_type": type(api_data).__name__,
+            "data": api_data
+        })
+
+    except requests.exceptions.RequestException as e:
+        return jsonify({"error": f"API request failed: {str(e)}"}), 500
+    except Exception as e:
+        return jsonify({"error": f"Unexpected error: {str(e)}"}), 500
+@app.route('/save-api-data', methods=['POST'])
+def save_api_data():
+    try:
+        data = request.json
+        dataset = data.get('data')
+        print("Data to save:", dataset)
+        # Add logic here to save to your PostgreSQL / MongoDB
+        return jsonify({"message": "Data saved successfully"})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 # @app.route('/static/<path:filename>')
 # def serve_static(filename):
 #     return send_file(os.path.join('static', filename))
