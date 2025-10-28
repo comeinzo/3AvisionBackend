@@ -64,7 +64,9 @@ def create_dashboard_table(conn):
         project_name VARCHAR(255),
         font_style_state VARCHAR(255),
         font_size VARCHAR(255),
-        font_color VARCHAR(255)
+        font_color VARCHAR(255),
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         
 
     );

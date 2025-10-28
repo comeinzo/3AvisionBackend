@@ -933,7 +933,10 @@ def upload_excel_to_postgresql(database_name, username, password, excel_file_nam
                 CREATE TABLE datasource (
                     id SERIAL PRIMARY KEY,
                     data_source_name VARCHAR(255),
-                    data_source_path VARCHAR(255)
+                    data_source_path VARCHAR(255),
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        
                 );
             """)
             print("Created 'datasource' table.")

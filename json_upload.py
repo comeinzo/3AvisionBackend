@@ -427,7 +427,7 @@ def insert_or_update_batch(cur, conn, table_name, df, primary_key_column, batch_
 
 # --- Main Function (Updated) ---
 
-def upload_json_to_postgresql(database_name, username, password, json_file_path, user_provided_primary_key=None, host='localhost', port='5432'):
+def upload_json_to_postgresql(database_name, username, password, json_file_path, user_provided_primary_key=None, host='localhost', port='5432', table_name=None):
     conn = None
     cur = None
     try:
@@ -471,8 +471,16 @@ def upload_json_to_postgresql(database_name, username, password, json_file_path,
         df.columns = [sanitize_column_name(col) for col in df.columns]
 
         # Determine the table name from the JSON file name
-        table_name = os.path.splitext(os.path.basename(json_file_path))[0]
-        table_name = sanitize_column_name(table_name)
+        # table_name = os.path.splitext(os.path.basename(json_file_path))[0]
+        # table_name = sanitize_column_name(table_name)
+        # If table_name not provided, fall back to JSON filename
+        if not table_name:
+            table_name = os.path.splitext(os.path.basename(json_file_path))[0]
+            table_name = sanitize_column_name(table_name)
+        else:
+            table_name = sanitize_column_name(table_name)
+
+
 
         # --- Primary Key Identification Logic ---
         db_primary_key_column = None
@@ -566,7 +574,9 @@ def upload_json_to_postgresql(database_name, username, password, json_file_path,
             CREATE TABLE IF NOT EXISTS datasource (
                 id SERIAL PRIMARY KEY,
                 data_source_name VARCHAR(255) UNIQUE, -- Added UNIQUE constraint
-                data_source_path VARCHAR(255)
+                data_source_path VARCHAR(255),
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
         """)
         conn.commit() # Commit DDL for datasource table

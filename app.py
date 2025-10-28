@@ -291,6 +291,8 @@ def create_table():
                 selectedFrequency VARCHAR,
                 xAxisTitle VARCHAR(220),
                 yAxisTitle VARCHAR(220);
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
         cur.execute("SELECT MAX(id) FROM table_chart_save")
@@ -6480,7 +6482,7 @@ def get_Edb_connection(username, password, host, port, db_name):
 
 from pymongo import MongoClient
 import mysql.connector
-# import cx_Oracle
+import cx_Oracle
 # try:
 #     cx_Oracle.init_oracle_client(lib_dir="C:\instantclient-basic-windows\instantclient_23_6")  # Update the path for your system
 # except cx_Oracle.InterfaceError as e:
@@ -8891,7 +8893,7 @@ def share_dashboard():
                     ClickedTool, Bgcolour, OptimizationData, calculationData, selectedFrequency,xAxisTitle, yAxisTitle
                 ) VALUES (
                     %s, %s, %s, %s, CURRENT_TIMESTAMP, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,%s
+                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,%s,%s
                 )
             """, (
                 new_chart_id,
@@ -9019,6 +9021,49 @@ def share_dashboard():
     finally:
         if conn:
             conn.close()
+@app.route('/api/getUserDashboards', methods=['GET'])
+def get_user_dashboards():
+    conn = None
+    try:
+        company_name = request.args.get('company_name')
+        user_id = request.args.get('user_id')
+
+        if not company_name or not user_id:
+            return jsonify({"message": "Missing company_name or user_id"}), 400
+
+        conn = get_db_connection()
+        if not conn:
+            return jsonify({"message": "Failed to connect to database"}), 500
+
+        cursor = conn.cursor(cursor_factory=RealDictCursor)
+
+        # Fetch dashboard info for this user
+        cursor.execute("""
+            SELECT 
+                project_name,
+                dashboard_name,
+                file_name,
+                id AS dashboard_id
+            FROM table_dashboard
+            WHERE company_name = %s AND user_id = %s
+            ORDER BY project_name, dashboard_name;
+        """, (company_name, user_id))
+
+        dashboards = cursor.fetchall()
+
+        if not dashboards:
+            return jsonify([]), 200
+
+        return jsonify(dashboards), 200
+
+    except Exception as e:
+        print(f"Error in get_user_dashboards: {e}")
+        return jsonify({"message": "Error retrieving dashboards"}), 500
+
+    finally:
+        if conn:
+            conn.close()
+
 
 def send_reset_email(recipient, subject, body):
     try:
@@ -9258,16 +9303,304 @@ def fetch_api_data():
         return jsonify({"error": f"API request failed: {str(e)}"}), 500
     except Exception as e:
         return jsonify({"error": f"Unexpected error: {str(e)}"}), 500
+# @app.route('/save-api-data', methods=['POST'])
+# def save_api_data():
+#     try:
+#         data = request.json
+#         dataset = data.get('data')
+#         print("Data to save:", dataset)
+#         # Add logic here to save to your PostgreSQL / MongoDB
+#         return jsonify({"message": "Data saved successfully"})
+#     except Exception as e:
+#         return jsonify({"error": str(e)}), 500
+
+# @app.route('/save-api-data', methods=['POST'])
+# def save_api_data():
+#     try:
+#         data = request.json
+#         dataset = data.get('data')
+#         database_name = request.form.get('company_database')
+#         primary_key_column = data.get('primary_key_column', None)
+#         table_name = request.form.get("table_name")
+
+#         import tempfile
+#         if not all([dataset, database_name, username, password]):
+#             return jsonify({"error": "Missing required parameters"}), 400
+
+#         # 🔹 Save dataset temporarily as JSON file
+#         with tempfile.NamedTemporaryFile(delete=False, suffix=".json") as temp_file:
+#             json.dump(dataset, temp_file, indent=4)
+#             temp_file_path = temp_file.name
+
+#         print(f"✅ JSON temporarily saved at: {temp_file_path}")
+
+#         # 🔹 Call your upload function
+#         result = upload_json_to_postgresql(
+#             database_name,
+#             username,
+#             password,
+#             temp_file_path,
+#             primary_key_column,
+#             host,
+#             port
+#         )
+
+#         # Cleanup temp file
+#         os.remove(temp_file_path)
+
+#         return jsonify({"message": "Data saved successfully", "result": result})
+
+#     except Exception as e:
+#         return jsonify({"error": str(e)}), 500
+
 @app.route('/save-api-data', methods=['POST'])
 def save_api_data():
     try:
-        data = request.json
-        dataset = data.get('data')
-        print("Data to save:", dataset)
-        # Add logic here to save to your PostgreSQL / MongoDB
-        return jsonify({"message": "Data saved successfully"})
+        import tempfile, os, json
+
+        # Get form data (since frontend sends FormData)
+        database_name = request.form.get('company_database')
+        primary_key_column = request.form.get('primary_key_column')
+        table_name = request.form.get('table_name')  # ✅ User-provided name
+        data_json = request.form.get('data')
+
+        if not all([database_name, data_json]):
+            return jsonify({"error": "Missing required parameters"}), 400
+
+        dataset = json.loads(data_json)
+        
+        # # 🔹 Save dataset temporarily as JSON file
+        # with tempfile.NamedTemporaryFile(delete=False, suffix=".json") as temp_file:
+        #     json.dump(dataset, temp_file, indent=4)
+        #     temp_file_path = temp_file.name
+
+        # print(f"✅ JSON temporarily saved at: {temp_file_path}")
+        # 🔹 Save dataset as a JSON “template” in tmp/
+        os.makedirs('tmp', exist_ok=True)
+        json_file_name = secure_filename(f"{table_name}_template.json")
+        temp_file_path = os.path.join('tmp', json_file_name)
+
+        with open(temp_file_path, 'w', encoding='utf-8') as f:
+            json.dump(dataset, f, indent=4)
+
+        print(f"✅ JSON template saved at: {temp_file_path}")
+
+        # ✅ Pass the table name explicitly to upload_json_to_postgresql
+        result = upload_json_to_postgresql(
+            database_name,
+            username,
+            password,
+            temp_file_path,
+            primary_key_column,
+            host,
+            port,
+            table_name  # ✅ Add this argument
+        )
+
+        # Cleanup temp file
+        os.remove(temp_file_path)
+
+        return jsonify({"message": f"Data saved successfully to table '{table_name}'", "result": result})
+
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+# @app.route('/api/system_summary', methods=['GET'])
+# def system_summary():
+#     try:
+#         company_name = request.args.get('company_name')
+#         user_id = request.args.get('user_id')
+
+#         if not company_name:
+#             return jsonify({"error": "Company name is required"}), 400
+
+#         # ---- 1️⃣ Connect to the main (admin) DB ----
+#         admin_conn = get_company_db_connection(company_name)
+#         admin_cur = admin_conn.cursor()
+
+#         # ---- 2️⃣ Connect to the company’s own database ----
+#         conn = get_db_connection()
+#         cur = conn.cursor()
+
+#         # ---- 3️⃣ Count total tables in the company DB ----
+#         admin_cur.execute("""
+#             SELECT COUNT(*) 
+#             FROM information_schema.tables 
+#             WHERE table_schema = 'public';
+#         """)
+#         num_tables = admin_cur.fetchone()[0]
+
+#         # ---- 4️⃣ Fetch last updated table from admin DB ----
+#         admin_cur.execute("""
+#             SELECT data_source_name
+#             FROM datasource
+#             ORDER BY id DESC
+#             LIMIT 1;
+#                 """)
+
+#         latest_table = admin_cur.fetchone()
+
+#         # Extract table name safely
+#         latest_table_name = latest_table[0] if latest_table else None
+
+
+#         # ---- 5️⃣ Fetch total projects from table_dashboard (unique project_name) ----
+#         cur.execute("""
+#             SELECT COUNT(DISTINCT project_name)
+#             FROM table_dashboard
+#             WHERE company_name = %s AND user_id = %s;
+#         """, (company_name, user_id))
+#         total_projects = cur.fetchone()[0] or 0
+
+#         # # ---- 6️⃣ Fetch last data transfer info ----
+#         # cur.execute("""
+#         #     SELECT last_transfer_time, status
+#         #     FROM last_transfer_status
+#         #     WHERE company_name = %s
+#         #     ORDER BY last_transfer_time DESC
+#         #     LIMIT 1;
+#         # """, (company_name,))
+#         # last_transfer = cur.fetchone()
+
+#         # last_transfer_time = last_transfer[0] if last_transfer else None
+#         # transfer_status = last_transfer[1] if last_transfer else "Unknown"
+
+#         # ---- ✅ Close all connections ----
+#         cur.close()
+#         conn.close()
+#         admin_cur.close()
+#         admin_conn.close()
+
+#         # ---- ✅ Return system summary ----
+#         return jsonify({
+#             "num_tables": num_tables,
+#             "latest_table": latest_table_name,
+#             "total_projects": total_projects,
+#             # "last_transfer_time": last_transfer_time,
+#             # "transfer_status": transfer_status
+#         })
+
+#     except Exception as e:
+#         print("Error:", e)
+#         return jsonify({"error": str(e)}), 500
+
+@app.route('/api/system_summary', methods=['GET'])
+def system_summary():
+    try:
+        company_name = request.args.get('company_name')
+        user_id = request.args.get('user_id')
+
+        if not company_name:
+            return jsonify({"error": "Company name is required"}), 400
+
+        # ---- 1️⃣ Connect to company DB and main DB ----
+        admin_conn = get_company_db_connection(company_name)
+        admin_cur = admin_conn.cursor()
+
+        conn = get_db_connection()
+        cur = conn.cursor()
+
+        # ---- 2️⃣ Count total tables ----
+        admin_cur.execute("""
+            SELECT COUNT(*) 
+            FROM information_schema.tables 
+            WHERE table_schema = 'public';
+        """)
+        num_tables = admin_cur.fetchone()[0]
+
+        # ---- 3️⃣ Fetch latest updated table ----
+        # admin_cur.execute("""
+        #     SELECT data_source_name
+        #     FROM datasource
+        #     ORDER BY id DESC
+        #     LIMIT 1;
+        # """)
+        # latest_table = admin_cur.fetchone()
+        # latest_table_name = latest_table[0] if latest_table else "N/A"
+        admin_cur.execute("""
+            SELECT data_source_name, created_at
+            FROM datasource
+            ORDER BY created_at DESC
+            LIMIT 1;
+        """)
+        latest_table = admin_cur.fetchone()
+        if latest_table:
+            latest_table_name, table_created_time = latest_table
+        else:
+            latest_table_name, table_created_time = "N/A", "N/A"
+
+        # ---- 4️⃣ Fetch total projects ----
+        cur.execute("""
+            SELECT COUNT(DISTINCT project_name)
+            FROM table_dashboard
+            WHERE company_name = %s AND user_id = %s;
+        """, (company_name, user_id))
+        total_projects = cur.fetchone()[0] or 0
+
+        # ---- 5️⃣ Most used chart type ----
+        cur.execute("""
+            SELECT chart_type, COUNT(*) AS usage_count
+            FROM table_chart_save
+            WHERE company_name = %s
+            GROUP BY chart_type
+            ORDER BY usage_count DESC
+            LIMIT 1;
+        """, (company_name,))
+        most_used_chart = cur.fetchone()
+        most_used_chart = most_used_chart[0] if most_used_chart else "N/A"
+
+        # ---- 6️⃣ Active vs Inactive users ----
+        # Get all users from company DB
+        admin_cur.execute("""
+            SELECT DISTINCT employee_id
+            FROM employee_list;
+        """)
+        all_users = [row[0] for row in admin_cur.fetchall()]
+
+        # Get active users (those who created charts)
+        cur.execute("""
+            SELECT DISTINCT user_id
+            FROM table_chart_save
+            WHERE company_name = %s;
+        """, (company_name,))
+        active_users_list = [row[0] for row in cur.fetchall()]
+
+        # Calculate counts
+        active_users = len(set(active_users_list))
+        inactive_users = len(set(all_users) - set(active_users_list))
+        total_users = len(set(all_users))
+
+
+        # ---- 7️⃣ Mock data growth (placeholder for now) ----
+        # data_growth_percentage = 25.3
+        if total_users > 0:
+            data_growth_percentage = round((active_users / total_users) * 100, 2)
+        else:
+            data_growth_percentage = 0.0
+
+        # ---- ✅ Close all connections ----
+        cur.close()
+        conn.close()
+        admin_cur.close()
+        admin_conn.close()
+
+        # ---- ✅ Return summary ----
+        return jsonify({
+            "num_tables": num_tables,
+            "latest_table": latest_table_name,
+            "table_created_time": table_created_time,
+            # "latest_table": latest_table_name,
+            "total_projects": total_projects,
+            "most_used_chart": most_used_chart,
+            "active_users": active_users,
+            "inactive_users": inactive_users,
+            "data_growth_percentage": data_growth_percentage
+        })
+
+    except Exception as e:
+        print("Error:", e)
+        return jsonify({"error": str(e)}), 500
+
 # @app.route('/static/<path:filename>')
 # def serve_static(filename):
 #     return send_file(os.path.join('static', filename))

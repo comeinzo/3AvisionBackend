@@ -588,7 +588,9 @@ def upload_csv_to_postgresql(database_name, username, password, csv_file_name, h
                     CREATE TABLE datasource (
                         id SERIAL PRIMARY KEY,
                         data_source_name VARCHAR(255),
-                        data_source_path VARCHAR(255)
+                        data_source_path VARCHAR(255),
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                     );
                 """)
                 print("Created 'datasource' table.")
