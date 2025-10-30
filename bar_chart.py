@@ -6,6 +6,9 @@ from sqlalchemy import create_engine
 import json
 from psycopg2 import sql
 from load import GLOBAL_CACHE
+import paramiko
+import socket
+import threading
 global_df = None  # Ensure global_df is initialized to None
 global_column_names = None
 def is_numeric(value):
@@ -21,31 +24,237 @@ def remove_symbols(value):
     return value
 
 
-def get_column_names(db_name, username, password, table_name, selected_user, host='localhost', port='5432', connection_type='local'):
-    """
-    Retrieves numeric and text column names for a given table by querying database metadata.
-    This function avoids loading the entire table into memory, preventing MemoryErrors.
+# def get_column_names(db_name, username, password, table_name, selected_user, host='localhost', port='5432', connection_type='local'):
+#     """
+#     Retrieves numeric and text column names for a given table by querying database metadata.
+#     This function avoids loading the entire table into memory, preventing MemoryErrors.
 
-    Args:
-        db_name (str): The name of the database.
-        username (str): Database username.
-        password (str): Database password.
-        table_name (str): The name of the table to inspect.
-        selected_user (str): The selected user for external connections.
-        host (str): Database host address.
-        port (str): Database port number.
-        connection_type (str): Type of connection ('local' or 'external').
+#     Args:
+#         db_name (str): The name of the database.
+#         username (str): Database username.
+#         password (str): Database password.
+#         table_name (str): The name of the table to inspect.
+#         selected_user (str): The selected user for external connections.
+#         host (str): Database host address.
+#         port (str): Database port number.
+#         connection_type (str): Type of connection ('local' or 'external').
 
-    Returns:
-        dict: A dictionary containing lists of 'numeric_columns' and 'text_columns'.
-              Includes an 'error' key if an exception occurs.
+#     Returns:
+#         dict: A dictionary containing lists of 'numeric_columns' and 'text_columns'.
+#               Includes an 'error' key if an exception occurs.
+#     """
+#     conn = None
+#     cursor = None
+#     try:
+#         print("connection_type:", connection_type)
+#         # Establish database connection based on connection_type
+#         # if connection_type == 'local' or connection_type == 'null' or connection_type =='none': # 'null' for compatibility if frontend sends it
+#         if not connection_type or connection_type.lower() in ('local', 'null', 'none'):
+#             conn = psycopg2.connect(
+#                 dbname=db_name,
+#                 user=username,
+#                 password=password,
+#                 host=host,
+#                 port=port
+#             )
+#         # else:  # External database connection
+#         #     connection_details = fetch_external_db_connection(db_name, selected_user)
+#         #     if not connection_details:
+#         #         raise Exception(f"Unable to fetch external database connection details for {db_name}.")
+
+#         #     # Ensure all required details are present and correctly mapped
+#         #     db_details = {
+#         #         "host": connection_details[3],
+#         #         "database": connection_details[7],
+#         #         "user": connection_details[4],
+#         #         "password": connection_details[5],
+#         #         "port": int(connection_details[6]) # Ensure port is an integer
+#         #     }
+#         #     print("External DB Details:", db_details)
+#         else:
+#             # ✅ EXTERNAL CONNECTION
+#             connection_details = fetch_external_db_connection(db_name, selected_user)
+#             print("fetched connection details:",connection_details)
+#             if not connection_details:
+#                 raise Exception(f"Unable to fetch external database connection details for user '{selected_user}'")
+
+#             db_details = {
+#                 "name": connection_details[1],
+#                 "dbType": connection_details[2],
+#                 "host": connection_details[3],
+#                 "user": connection_details[4],
+#                 "password": connection_details[5],
+#                 "port": int(connection_details[6]),
+#                 "database": connection_details[7],
+#                 "use_ssh": connection_details[8],
+#                 "ssh_host": connection_details[9],
+#                 "ssh_port": int(connection_details[10]),
+#                 "ssh_username": connection_details[11],
+#                 "ssh_key_path": connection_details[12],
+#             }
+
+#             print(f"🔹 External DB Connection Details: {db_details}")
+
+#             host = db_details["host"]
+#             port = db_details["port"]
+
+#             # ✅ Start SSH tunnel if required
+#             if db_details["use_ssh"]:
+#                 print("🔐 Establishing SSH tunnel manually (Paramiko)...")
+
+#                 private_key = paramiko.RSAKey.from_private_key_file(db_details["ssh_key_path"])
+#                 ssh_client = paramiko.SSHClient()
+#                 ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+#                 ssh_client.connect(
+#                     db_details["ssh_host"],
+#                     username=db_details["ssh_username"],
+#                     pkey=private_key,
+#                     port=db_details["ssh_port"],
+#                     timeout=10
+#                 )
+
+#                 # Find a free local port
+#                 local_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+#                 local_sock.bind(('127.0.0.1', 0))
+#                 local_port = local_sock.getsockname()[1]
+#                 local_sock.listen(1)
+#                 print(f"✅ Local forwarder listening on 127.0.0.1:{local_port}")
+
+#                 transport = ssh_client.get_transport()
+
+#                 def pipe(src, dst):
+#                     try:
+#                         while True:
+#                             data = src.recv(1024)
+#                             if not data:
+#                                 break
+#                             dst.sendall(data)
+#                     except Exception:
+#                         pass
+#                     finally:
+#                         src.close()
+#                         dst.close()
+
+#                 def forward_tunnel():
+#                     while not stop_event.is_set():
+#                         client_sock, _ = local_sock.accept()
+#                         try:
+#                             chan = transport.open_channel(
+#                                 "direct-tcpip",
+#                                 ("127.0.0.1", 5432),  # 🔹 Always map to PostgreSQL inside EC2
+#                                 client_sock.getsockname()
+#                             )
+#                             threading.Thread(target=pipe, args=(client_sock, chan)).start()
+#                             threading.Thread(target=pipe, args=(chan, client_sock)).start()
+#                         except Exception as e:
+#                             print(f"❌ Channel open failed: {e}")
+#                             client_sock.close()
+
+#                 tunnel_thread = threading.Thread(target=forward_tunnel, daemon=True)
+#                 tunnel_thread.start()
+
+#                 host = "127.0.0.1"
+#                 port = local_port
+
+#             # ✅ Connect to external PostgreSQL through tunnel/local port
+#             print(f"🧩 Connecting to external PostgreSQL at {host}:{port} ...")
+#             conn = psycopg2.connect(
+#                 dbname=db_details['database'],
+#                 user=db_details['user'],
+#                 password=db_details['password'],
+#                 host=db_details['host'],
+#                 port=db_details['port']
+#             )
+
+#         cursor = conn.cursor()
+
+#         # Query information_schema to get column names and their data types
+#         # This is the key change to avoid MemoryError by not fetching all rows.
+#         # It's crucial that your application has permissions to read information_schema.
+#         # current_schema() will use the default schema (e.g., 'public'),
+#         # if your tables are in a different schema, you'll need to specify it.
+#         cursor.execute(f"""
+#             SELECT column_name, data_type
+#             FROM information_schema.columns
+#             WHERE table_schema = current_schema()
+#             AND table_name = %s;
+#         """, (table_name,)) # Use parameterized query to prevent SQL injection
+
+#         columns_metadata = cursor.fetchall()
+
+#         numeric_columns = []
+#         text_columns = []
+
+#         # Define common numeric and text data types for PostgreSQL.
+#         # You can expand these lists based on the specific data types in your database.
+#         numeric_types = [
+#             'smallint', 'integer', 'bigint', 'decimal', 'numeric', 'real',
+#             'double precision', 'serial', 'bigserial', 'money'
+#         ]
+#         text_types = [
+#             'character varying', 'varchar', 'character', 'char', 'text', 'citext',
+#             'json', 'jsonb', 'xml', 'uuid', 'bytea', 'tsquery', 'tsvector',
+#             'inet', 'cidr', 'macaddr' # Network address types often treated as text
+#         ]
+#         # Date/Time types
+#         datetime_types = [
+#             'date', 'timestamp', 'timestamptz', 'time', 'timetz', 'interval'
+#         ]
+#         # Boolean type
+#         boolean_type = ['boolean']
+
+#         for column_name, data_type in columns_metadata:
+#             # PostgreSQL data types are generally lowercase.
+#             # Convert to lowercase to ensure consistent matching.
+#             data_type_lower = data_type.lower()
+#             if data_type_lower in numeric_types:
+#                 numeric_columns.append(column_name)
+#             elif data_type_lower in text_types or data_type_lower in datetime_types or data_type_lower in boolean_type:
+#                 # Group date/time and boolean as text for charting purposes if not numeric
+#                 text_columns.append(column_name)
+#             else:
+#                 # Default unknown types to text
+#                 text_columns.append(column_name)
+
+#         # print("Identified Numeric columns:", numeric_columns)
+#         # print("Identified Text columns:", text_columns)
+
+#         return {
+#             'numeric_columns': numeric_columns,
+#             'text_columns': text_columns
+#         }
+
+#     except psycopg2.Error as e:
+#         print(f"Database error occurred: {e}")
+#         return {'numeric_columns': [], 'text_columns': [], 'error': f"Database error: {e}"}
+#     except Exception as e:
+#         print(f"An unexpected error occurred: {e}")
+#         return {'numeric_columns': [], 'text_columns': [], 'error': f"An unexpected error occurred: {e}"}
+#     finally:
+#         # Ensure cursor and connection are closed
+#         if cursor:
+#             cursor.close()
+#         if conn:
+#             conn.close()
+def get_column_names(db_name, username, password, table_name, selected_user,
+                     host='localhost', port='5432', connection_type='local'):
     """
+    Retrieve numeric and text column names from a given table
+    for both local and external (SSH) PostgreSQL connections.
+    """
+    print("kconnect",connection_type)
     conn = None
     cursor = None
+    ssh_client = None
+    local_sock = None
+    stop_event = threading.Event()
+    tunnel_thread = None
+
     try:
-        # Establish database connection based on connection_type
-        # if connection_type == 'local' or connection_type == 'null' or connection_type =='none': # 'null' for compatibility if frontend sends it
-        if not connection_type or connection_type.lower() in ('local', 'null', 'none'):
+        print("connection_type:", connection_type)
+
+        # ✅ 1️⃣ LOCAL DATABASE CONNECTION
+        if connection_type == 'local' or connection_type == 'null' or connection_type =='none':
             conn = psycopg2.connect(
                 dbname=db_name,
                 user=username,
@@ -53,49 +262,115 @@ def get_column_names(db_name, username, password, table_name, selected_user, hos
                 host=host,
                 port=port
             )
-        else:  # External database connection
-            connection_details = fetch_external_db_connection(db_name, selected_user)
-            if not connection_details:
-                raise Exception(f"Unable to fetch external database connection details for {db_name}.")
 
-            # Ensure all required details are present and correctly mapped
+        # ✅ 2️⃣ EXTERNAL DATABASE CONNECTION (via SSH tunnel)
+        else:
+            connection_details = fetch_external_db_connection(db_name, selected_user)
+            print("fetched connection details:", connection_details)
+            if not connection_details:
+                raise Exception(f"Unable to fetch external database connection details for user '{selected_user}'")
+
             db_details = {
+                "name": connection_details[1],
+                "dbType": connection_details[2],
                 "host": connection_details[3],
-                "database": connection_details[7],
                 "user": connection_details[4],
                 "password": connection_details[5],
-                "port": int(connection_details[6]) # Ensure port is an integer
+                "port": int(connection_details[6]),
+                "database": connection_details[7],
+                "use_ssh": connection_details[8],
+                "ssh_host": connection_details[9],
+                "ssh_port": int(connection_details[10]),
+                "ssh_username": connection_details[11],
+                "ssh_key_path": connection_details[12],
             }
-            print("External DB Details:", db_details)
+
+            print(f"🔹 External DB Connection Details: {db_details}")
+
+            # ✅ Start SSH tunnel if needed
+            if db_details["use_ssh"]:
+                print("🔐 Establishing SSH tunnel manually (Paramiko)...")
+                private_key = paramiko.RSAKey.from_private_key_file(db_details["ssh_key_path"])
+
+                ssh_client = paramiko.SSHClient()
+                ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+                ssh_client.connect(
+                    db_details["ssh_host"],
+                    username=db_details["ssh_username"],
+                    pkey=private_key,
+                    port=db_details["ssh_port"],
+                    timeout=10
+                )
+
+                # Find free local port for tunnel
+                local_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                local_sock.bind(('127.0.0.1', 0))
+                local_port = local_sock.getsockname()[1]
+                local_sock.listen(1)
+                print(f"✅ Local forwarder listening on 127.0.0.1:{local_port}")
+
+                transport = ssh_client.get_transport()
+
+                def pipe(src, dst):
+                    try:
+                        while True:
+                            data = src.recv(1024)
+                            if not data:
+                                break
+                            dst.sendall(data)
+                    except Exception:
+                        pass
+                    finally:
+                        src.close()
+                        dst.close()
+
+                def forward_tunnel():
+                    while not stop_event.is_set():
+                        try:
+                            client_sock, _ = local_sock.accept()
+                            chan = transport.open_channel(
+                                "direct-tcpip",
+                                ("127.0.0.1", 5432),
+                                client_sock.getsockname()
+                            )
+                            if chan is None:
+                                client_sock.close()
+                                continue
+                            threading.Thread(target=pipe, args=(client_sock, chan), daemon=True).start()
+                            threading.Thread(target=pipe, args=(chan, client_sock), daemon=True).start()
+                        except Exception as e:
+                            print(f"❌ Channel open failed: {e}")
+
+                tunnel_thread = threading.Thread(target=forward_tunnel, daemon=True)
+                tunnel_thread.start()
+
+                # Override host and port for local tunnel
+                host = "127.0.0.1"
+                port = local_port
+
+            print(f"🧩 Connecting to external PostgreSQL at {host}:{port} ...")
             conn = psycopg2.connect(
                 dbname=db_details['database'],
                 user=db_details['user'],
                 password=db_details['password'],
-                host=db_details['host'],
-                port=db_details['port']
+                host=host,       # ✅ Use tunneled host
+                port=port        # ✅ Use tunneled port
             )
 
+        # ✅ Fetch column names and types
         cursor = conn.cursor()
-
-        # Query information_schema to get column names and their data types
-        # This is the key change to avoid MemoryError by not fetching all rows.
-        # It's crucial that your application has permissions to read information_schema.
-        # current_schema() will use the default schema (e.g., 'public'),
-        # if your tables are in a different schema, you'll need to specify it.
-        cursor.execute(f"""
+        cursor.execute("""
             SELECT column_name, data_type
             FROM information_schema.columns
             WHERE table_schema = current_schema()
             AND table_name = %s;
-        """, (table_name,)) # Use parameterized query to prevent SQL injection
+        """, (table_name,))
 
         columns_metadata = cursor.fetchall()
 
         numeric_columns = []
         text_columns = []
 
-        # Define common numeric and text data types for PostgreSQL.
-        # You can expand these lists based on the specific data types in your database.
         numeric_types = [
             'smallint', 'integer', 'bigint', 'decimal', 'numeric', 'real',
             'double precision', 'serial', 'bigserial', 'money'
@@ -103,48 +378,40 @@ def get_column_names(db_name, username, password, table_name, selected_user, hos
         text_types = [
             'character varying', 'varchar', 'character', 'char', 'text', 'citext',
             'json', 'jsonb', 'xml', 'uuid', 'bytea', 'tsquery', 'tsvector',
-            'inet', 'cidr', 'macaddr' # Network address types often treated as text
+            'inet', 'cidr', 'macaddr'
         ]
-        # Date/Time types
-        datetime_types = [
-            'date', 'timestamp', 'timestamptz', 'time', 'timetz', 'interval'
-        ]
-        # Boolean type
+        datetime_types = ['date', 'timestamp', 'timestamptz', 'time', 'timetz', 'interval']
         boolean_type = ['boolean']
 
         for column_name, data_type in columns_metadata:
-            # PostgreSQL data types are generally lowercase.
-            # Convert to lowercase to ensure consistent matching.
             data_type_lower = data_type.lower()
             if data_type_lower in numeric_types:
                 numeric_columns.append(column_name)
             elif data_type_lower in text_types or data_type_lower in datetime_types or data_type_lower in boolean_type:
-                # Group date/time and boolean as text for charting purposes if not numeric
                 text_columns.append(column_name)
             else:
-                # Default unknown types to text
                 text_columns.append(column_name)
 
-        # print("Identified Numeric columns:", numeric_columns)
-        # print("Identified Text columns:", text_columns)
-
-        return {
-            'numeric_columns': numeric_columns,
-            'text_columns': text_columns
-        }
+        return {'numeric_columns': numeric_columns, 'text_columns': text_columns}
 
     except psycopg2.Error as e:
         print(f"Database error occurred: {e}")
         return {'numeric_columns': [], 'text_columns': [], 'error': f"Database error: {e}"}
+
     except Exception as e:
         print(f"An unexpected error occurred: {e}")
         return {'numeric_columns': [], 'text_columns': [], 'error': f"An unexpected error occurred: {e}"}
+
     finally:
-        # Ensure cursor and connection are closed
+        # ✅ Close resources
         if cursor:
             cursor.close()
         if conn:
             conn.close()
+        if ssh_client:
+            stop_event.set()
+            ssh_client.close()
+            print("🔒 SSH Tunnel closed.")
 
 
 
@@ -188,32 +455,139 @@ def edit_fetch_data(table_name, x_axis_columns, checked_option, y_axis_column, a
         print("Fetching data from the database...")
         try:
             # Establish database connection
-            if not selectedUser or str(selectedUser).lower() == 'null':
-                print("Using default database connection...")
-                connection_string = f"dbname={db_name} user={USER_NAME} password={PASSWORD} host={HOST}"
+            # if not selectedUser or str(selectedUser).lower() == 'null':
+            #     print("Using default database connection...")
+            #     connection_string = f"dbname={db_name} user={USER_NAME} password={PASSWORD} host={HOST}"
+            #     conn = psycopg2.connect(connection_string)
+            # else:
+            #     print(f"Using connection for user: {selectedUser}")
+            #     connection_string = fetch_external_db_connection(db_name, selectedUser)
+            #     if not connection_string:
+            #         raise Exception("Unable to fetch external database connection details.")
+
+            #     db_details = {
+            #         "host": connection_string[3],
+            #         "database": connection_string[7],
+            #         "user": connection_string[4],
+            #         "password": connection_string[5],
+            #         "port": int(connection_string[6])
+            #     }
+
+            #     conn = psycopg2.connect(
+            #         dbname=db_details['database'],
+            #         user=db_details['user'],
+            #         password=db_details['password'],
+            #         host=db_details['host'],
+            #         port=db_details['port']
+            #     )
+            if not selectedUser or selectedUser.lower() == 'null':
+                print("🟢 Using default local database connection...")
+                connection_string = f"dbname={db_name} user={USER_NAME} password={PASSWORD} host={HOST} port={PORT}"
                 conn = psycopg2.connect(connection_string)
+
             else:
-                print(f"Using connection for user: {selectedUser}")
-                connection_string = fetch_external_db_connection(db_name, selectedUser)
-                if not connection_string:
-                    raise Exception("Unable to fetch external database connection details.")
+                print(f"🟡 Using external database connection for user: {selectedUser}")
+                connection_details = fetch_external_db_connection(db_name, selectedUser)
+
+                if not connection_details:
+                    raise Exception(f"❌ Unable to fetch external database connection details for user '{selectedUser}'")
 
                 db_details = {
-                    "host": connection_string[3],
-                    "database": connection_string[7],
-                    "user": connection_string[4],
-                    "password": connection_string[5],
-                    "port": int(connection_string[6])
+                    "name": connection_details[1],
+                    "dbType": connection_details[2],
+                    "host": connection_details[3],
+                    "user": connection_details[4],
+                    "password": connection_details[5],
+                    "port": int(connection_details[6]),
+                    "database": connection_details[7],
+                    "use_ssh": connection_details[8],
+                    "ssh_host": connection_details[9],
+                    "ssh_port": int(connection_details[10]),
+                    "ssh_username": connection_details[11],
+                    "ssh_key_path": connection_details[12],
                 }
 
-                conn = psycopg2.connect(
-                    dbname=db_details['database'],
-                    user=db_details['user'],
-                    password=db_details['password'],
-                    host=db_details['host'],
-                    port=db_details['port']
-                )
+                print(f"🔹 External DB Connection Details: {db_details}")
 
+                # Initialize SSH tunnel-related variables
+                ssh_client = None
+                local_sock = None
+                stop_event = threading.Event()
+                tunnel_thread = None
+
+                # ✅ SSH Tunnel Setup if required
+                if db_details["use_ssh"]:
+                    print("🔐 Establishing SSH tunnel manually (Paramiko)...")
+                    private_key = paramiko.RSAKey.from_private_key_file(db_details["ssh_key_path"])
+
+                    ssh_client = paramiko.SSHClient()
+                    ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+                    ssh_client.connect(
+                        db_details["ssh_host"],
+                        username=db_details["ssh_username"],
+                        pkey=private_key,
+                        port=db_details["ssh_port"],
+                        timeout=10
+                    )
+
+                    # Find a free local port for tunnel forwarding
+                    local_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                    local_sock.bind(('127.0.0.1', 0))
+                    local_port = local_sock.getsockname()[1]
+                    local_sock.listen(1)
+                    print(f"✅ Local forwarder listening on 127.0.0.1:{local_port}")
+
+                    transport = ssh_client.get_transport()
+
+                    def pipe(src, dst):
+                        try:
+                            while True:
+                                data = src.recv(1024)
+                                if not data:
+                                    break
+                                dst.sendall(data)
+                        except Exception:
+                            pass
+                        finally:
+                            src.close()
+                            dst.close()
+
+                    def forward_tunnel():
+                        while not stop_event.is_set():
+                            try:
+                                client_sock, _ = local_sock.accept()
+                                chan = transport.open_channel(
+                                    "direct-tcpip",
+                                    ("127.0.0.1", 5432),
+                                    client_sock.getsockname()
+                                )
+                                if chan is None:
+                                    client_sock.close()
+                                    continue
+                                threading.Thread(target=pipe, args=(client_sock, chan), daemon=True).start()
+                                threading.Thread(target=pipe, args=(chan, client_sock), daemon=True).start()
+                            except Exception as e:
+                                print(f"❌ Channel open failed: {e}")
+
+                    tunnel_thread = threading.Thread(target=forward_tunnel, daemon=True)
+                    tunnel_thread.start()
+
+                    # Override host and port to tunnel
+                    host = "127.0.0.1"
+                    port = local_port
+                else:
+                    host = db_details["host"]
+                    port = db_details["port"]
+
+                print(f"🧩 Connecting to external PostgreSQL at {host}:{port} ...")
+
+                conn = psycopg2.connect(
+                    dbname=db_details["database"],
+                    user=db_details["user"],
+                    password=db_details["password"],
+                    host=host,
+                    port=port
+                )
             cur = conn.cursor()
             query = f"SELECT {', '.join([x_axis_columns[0], y_axis_column[0]])} FROM {table_name}"
             cur.execute(query)
@@ -338,28 +712,136 @@ def fetch_data(table_name, x_axis_columns, filter_options, y_axis_column, aggreg
     # print("global_df",global_df)
     if global_df is None:
         print("Fetching data from the database...")
+        # if not selectedUser or selectedUser.lower() == 'null':
+        #     print("Using default database connection...")
+        #     connection_string = f"dbname={db_name} user={USER_NAME} password={PASSWORD} host={HOST}"
+        #     connection = psycopg2.connect(connection_string)
+        # else:
+        #     connection_details = fetch_external_db_connection(db_name, selectedUser)
+        #     if not connection_details:
+        #         raise Exception("Unable to fetch external database connection details.")
+        #     db_details = {
+        #         "host": connection_details[3],
+        #         "database": connection_details[7],
+        #         "user": connection_details[4],
+        #         "password": connection_details[5],
+        #         "port": int(connection_details[6])
+        #     }
         if not selectedUser or selectedUser.lower() == 'null':
-            print("Using default database connection...")
-            connection_string = f"dbname={db_name} user={USER_NAME} password={PASSWORD} host={HOST}"
+            print("🟢 Using default local database connection...")
+            connection_string = f"dbname={db_name} user={USER_NAME} password={PASSWORD} host={HOST} port={PORT}"
             connection = psycopg2.connect(connection_string)
+
         else:
+            print(f"🟡 Using external database connection for user: {selectedUser}")
             connection_details = fetch_external_db_connection(db_name, selectedUser)
+
             if not connection_details:
-                raise Exception("Unable to fetch external database connection details.")
+                raise Exception(f"❌ Unable to fetch external database connection details for user '{selectedUser}'")
+
             db_details = {
-                "host": connection_details[3],
-                "database": connection_details[7],
-                "user": connection_details[4],
-                "password": connection_details[5],
-                "port": int(connection_details[6])
+                    "name": connection_details[1],
+                    "dbType": connection_details[2],
+                    "host": connection_details[3],
+                    "user": connection_details[4],
+                    "password": connection_details[5],
+                    "port": int(connection_details[6]),
+                    "database": connection_details[7],
+                    "use_ssh": connection_details[8],
+                    "ssh_host": connection_details[9],
+                    "ssh_port": int(connection_details[10]),
+                    "ssh_username": connection_details[11],
+                    "ssh_key_path": connection_details[12],
             }
+
+            print(f"🔹 External DB Connection Details: {db_details}")
+
+                # Initialize SSH tunnel-related variables
+            ssh_client = None
+            local_sock = None
+            stop_event = threading.Event()
+            tunnel_thread = None
+
+                # ✅ SSH Tunnel Setup if required
+            if db_details["use_ssh"]:
+                print("🔐 Establishing SSH tunnel manually (Paramiko)...")
+                private_key = paramiko.RSAKey.from_private_key_file(db_details["ssh_key_path"])
+
+                ssh_client = paramiko.SSHClient()
+                ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+                ssh_client.connect(
+                        db_details["ssh_host"],
+                        username=db_details["ssh_username"],
+                        pkey=private_key,
+                        port=db_details["ssh_port"],
+                        timeout=10
+                )
+
+                    # Find a free local port for tunnel forwarding
+                local_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                local_sock.bind(('127.0.0.1', 0))
+                local_port = local_sock.getsockname()[1]
+                local_sock.listen(1)
+                print(f"✅ Local forwarder listening on 127.0.0.1:{local_port}")
+
+                transport = ssh_client.get_transport()
+
+                def pipe(src, dst):
+                    try:
+                        while True:
+                            data = src.recv(1024)
+                            if not data:
+                                break
+                            dst.sendall(data)
+                    except Exception:
+                        pass
+                    finally:
+                        src.close()
+                        dst.close()
+
+                def forward_tunnel():
+                    while not stop_event.is_set():
+                        try:
+                            client_sock, _ = local_sock.accept()
+                            chan = transport.open_channel(
+                                "direct-tcpip",
+                                ("127.0.0.1", 5432),
+                                client_sock.getsockname()
+                            )
+                            if chan is None:
+                                client_sock.close()
+                                continue
+                            threading.Thread(target=pipe, args=(client_sock, chan), daemon=True).start()
+                            threading.Thread(target=pipe, args=(chan, client_sock), daemon=True).start()
+                        except Exception as e:
+                            print(f"❌ Channel open failed: {e}")
+
+                tunnel_thread = threading.Thread(target=forward_tunnel, daemon=True)
+                tunnel_thread.start()
+
+                # Override host and port to tunnel
+                host = "127.0.0.1"
+                port = local_port
+            else:
+                host = db_details["host"]
+                port = db_details["port"]
+
+            print(f"🧩 Connecting to external PostgreSQL at {host}:{port} ...")
+
             connection = psycopg2.connect(
-                dbname=db_details['database'],
-                user=db_details['user'],
-                password=db_details['password'],
-                host=db_details['host'],
-                port=db_details['port'],
+                    dbname=db_details["database"],
+                    user=db_details["user"],
+                    password=db_details["password"],
+                    host=host,
+                    port=port
             )
+            # connection = psycopg2.connect(
+            #     dbname=db_details['database'],
+            #     user=db_details['user'],
+            #     password=db_details['password'],
+            #     host=db_details['host'],
+            #     port=db_details['port'],
+            # )
         cur = connection.cursor()
         query = f"SELECT * FROM {table_name}"
         cur.execute(query)
@@ -758,27 +1240,135 @@ def fetch_data_tree(table_name, x_axis_columns, filter_options, y_axis_column, a
 
         # Fetch data from database
         print("Fetching data from the database...")
+        # if not selectedUser or selectedUser.lower() == 'null':
+        #     print("Using default database connection...")
+        #     connection_string = f"dbname={db_name} user={USER_NAME} password={PASSWORD} host={HOST}"
+        #     connection = psycopg2.connect(connection_string)
+        # else:
+        #     connection_details = fetch_external_db_connection(db_name, selectedUser)
+        #     if not connection_details:
+        #         raise Exception("Unable to fetch external database connection details.")
+        #     db_details = {
+        #         "host": connection_details[3],
+        #         "database": connection_details[7],
+        #         "user": connection_details[4],
+        #         "password": connection_details[5],
+        #         "port": int(connection_details[6])
+        #     }
+        #     connection = psycopg2.connect(
+        #         dbname=db_details['database'],
+        #         user=db_details['user'],
+        #         password=db_details['password'],
+        #         host=db_details['host'],
+        #         port=db_details['port'],
+            # )
         if not selectedUser or selectedUser.lower() == 'null':
-            print("Using default database connection...")
-            connection_string = f"dbname={db_name} user={USER_NAME} password={PASSWORD} host={HOST}"
+            print("🟢 Using default local database connection...")
+            connection_string = f"dbname={db_name} user={USER_NAME} password={PASSWORD} host={HOST} port={PORT}"
             connection = psycopg2.connect(connection_string)
+
         else:
+            print(f"🟡 Using external database connection for user: {selectedUser}")
             connection_details = fetch_external_db_connection(db_name, selectedUser)
+
             if not connection_details:
-                raise Exception("Unable to fetch external database connection details.")
+                raise Exception(f"❌ Unable to fetch external database connection details for user '{selectedUser}'")
+
             db_details = {
-                "host": connection_details[3],
-                "database": connection_details[7],
-                "user": connection_details[4],
-                "password": connection_details[5],
-                "port": int(connection_details[6])
+                    "name": connection_details[1],
+                    "dbType": connection_details[2],
+                    "host": connection_details[3],
+                    "user": connection_details[4],
+                    "password": connection_details[5],
+                    "port": int(connection_details[6]),
+                    "database": connection_details[7],
+                    "use_ssh": connection_details[8],
+                    "ssh_host": connection_details[9],
+                    "ssh_port": int(connection_details[10]),
+                    "ssh_username": connection_details[11],
+                    "ssh_key_path": connection_details[12],
             }
+
+            print(f"🔹 External DB Connection Details: {db_details}")
+
+                # Initialize SSH tunnel-related variables
+            ssh_client = None
+            local_sock = None
+            stop_event = threading.Event()
+            tunnel_thread = None
+
+                # ✅ SSH Tunnel Setup if required
+            if db_details["use_ssh"]:
+                print("🔐 Establishing SSH tunnel manually (Paramiko)...")
+                private_key = paramiko.RSAKey.from_private_key_file(db_details["ssh_key_path"])
+
+                ssh_client = paramiko.SSHClient()
+                ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+                ssh_client.connect(
+                        db_details["ssh_host"],
+                        username=db_details["ssh_username"],
+                        pkey=private_key,
+                        port=db_details["ssh_port"],
+                        timeout=10
+                )
+
+                    # Find a free local port for tunnel forwarding
+                local_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                local_sock.bind(('127.0.0.1', 0))
+                local_port = local_sock.getsockname()[1]
+                local_sock.listen(1)
+                print(f"✅ Local forwarder listening on 127.0.0.1:{local_port}")
+
+                transport = ssh_client.get_transport()
+
+                def pipe(src, dst):
+                    try:
+                        while True:
+                            data = src.recv(1024)
+                            if not data:
+                                break
+                            dst.sendall(data)
+                    except Exception:
+                        pass
+                    finally:
+                        src.close()
+                        dst.close()
+
+                def forward_tunnel():
+                    while not stop_event.is_set():
+                        try:
+                            client_sock, _ = local_sock.accept()
+                            chan = transport.open_channel(
+                                "direct-tcpip",
+                                ("127.0.0.1", 5432),
+                                client_sock.getsockname()
+                            )
+                            if chan is None:
+                                client_sock.close()
+                                continue
+                            threading.Thread(target=pipe, args=(client_sock, chan), daemon=True).start()
+                            threading.Thread(target=pipe, args=(chan, client_sock), daemon=True).start()
+                        except Exception as e:
+                            print(f"❌ Channel open failed: {e}")
+
+                tunnel_thread = threading.Thread(target=forward_tunnel, daemon=True)
+                tunnel_thread.start()
+
+                # Override host and port to tunnel
+                host = "127.0.0.1"
+                port = local_port
+            else:
+                host = db_details["host"]
+                port = db_details["port"]
+
+            print(f"🧩 Connecting to external PostgreSQL at {host}:{port} ...")
+
             connection = psycopg2.connect(
-                dbname=db_details['database'],
-                user=db_details['user'],
-                password=db_details['password'],
-                host=db_details['host'],
-                port=db_details['port'],
+                    dbname=db_details["database"],
+                    user=db_details["user"],
+                    password=db_details["password"],
+                    host=host,
+                    port=port
             )
 
         cur = connection.cursor()
@@ -1214,27 +1804,135 @@ def fetch_data_for_duel(table_name, x_axis_columns, filter_options, y_axis_colum
     conn = None
     cur = None
     try:
+        # if not selectedUser or selectedUser.lower() == 'null':
+        #     print("Using default database connection...")
+        #     connection_string = f"dbname={db_nameeee} user={USER_NAME} password={PASSWORD} host={HOST}"
+        #     conn = psycopg2.connect(connection_string)
+        # else:
+        #     connection_details = fetch_external_db_connection(db_nameeee, selectedUser)
+        #     if not connection_details:
+        #         raise Exception("Unable to fetch external database connection details.")
+        #     db_details = {
+        #         "host": connection_details[3],
+        #         "database": connection_details[7],
+        #         "user": connection_details[4],
+        #         "password": connection_details[5],
+        #         "port": int(connection_details[6])
+        #     }
+        #     conn = psycopg2.connect(
+        #         dbname=db_details['database'],
+        #         user=db_details['user'],
+        #         password=db_details['password'],
+        #         host=db_details['host'],
+        #         port=db_details['port'],
+        #     )
         if not selectedUser or selectedUser.lower() == 'null':
-            print("Using default database connection...")
-            connection_string = f"dbname={db_nameeee} user={USER_NAME} password={PASSWORD} host={HOST}"
+            print("🟢 Using default local database connection...")
+            connection_string = f"dbname={db_nameeee} user={USER_NAME} password={PASSWORD} host={HOST} port={PORT}"
             conn = psycopg2.connect(connection_string)
+
         else:
+            print(f"🟡 Using external database connection for user: {selectedUser}")
             connection_details = fetch_external_db_connection(db_nameeee, selectedUser)
+
             if not connection_details:
-                raise Exception("Unable to fetch external database connection details.")
+                raise Exception(f"❌ Unable to fetch external database connection details for user '{selectedUser}'")
+
             db_details = {
-                "host": connection_details[3],
-                "database": connection_details[7],
-                "user": connection_details[4],
-                "password": connection_details[5],
-                "port": int(connection_details[6])
+                    "name": connection_details[1],
+                    "dbType": connection_details[2],
+                    "host": connection_details[3],
+                    "user": connection_details[4],
+                    "password": connection_details[5],
+                    "port": int(connection_details[6]),
+                    "database": connection_details[7],
+                    "use_ssh": connection_details[8],
+                    "ssh_host": connection_details[9],
+                    "ssh_port": int(connection_details[10]),
+                    "ssh_username": connection_details[11],
+                    "ssh_key_path": connection_details[12],
             }
+
+            print(f"🔹 External DB Connection Details: {db_details}")
+
+                # Initialize SSH tunnel-related variables
+            ssh_client = None
+            local_sock = None
+            stop_event = threading.Event()
+            tunnel_thread = None
+
+                # ✅ SSH Tunnel Setup if required
+            if db_details["use_ssh"]:
+                print("🔐 Establishing SSH tunnel manually (Paramiko)...")
+                private_key = paramiko.RSAKey.from_private_key_file(db_details["ssh_key_path"])
+
+                ssh_client = paramiko.SSHClient()
+                ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+                ssh_client.connect(
+                        db_details["ssh_host"],
+                        username=db_details["ssh_username"],
+                        pkey=private_key,
+                        port=db_details["ssh_port"],
+                        timeout=10
+                )
+
+                    # Find a free local port for tunnel forwarding
+                local_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                local_sock.bind(('127.0.0.1', 0))
+                local_port = local_sock.getsockname()[1]
+                local_sock.listen(1)
+                print(f"✅ Local forwarder listening on 127.0.0.1:{local_port}")
+
+                transport = ssh_client.get_transport()
+
+                def pipe(src, dst):
+                    try:
+                        while True:
+                            data = src.recv(1024)
+                            if not data:
+                                break
+                            dst.sendall(data)
+                    except Exception:
+                        pass
+                    finally:
+                        src.close()
+                        dst.close()
+
+                def forward_tunnel():
+                    while not stop_event.is_set():
+                        try:
+                            client_sock, _ = local_sock.accept()
+                            chan = transport.open_channel(
+                                "direct-tcpip",
+                                ("127.0.0.1", 5432),
+                                client_sock.getsockname()
+                            )
+                            if chan is None:
+                                client_sock.close()
+                                continue
+                            threading.Thread(target=pipe, args=(client_sock, chan), daemon=True).start()
+                            threading.Thread(target=pipe, args=(chan, client_sock), daemon=True).start()
+                        except Exception as e:
+                            print(f"❌ Channel open failed: {e}")
+
+                tunnel_thread = threading.Thread(target=forward_tunnel, daemon=True)
+                tunnel_thread.start()
+
+                # Override host and port to tunnel
+                host = "127.0.0.1"
+                port = local_port
+            else:
+                host = db_details["host"]
+                port = db_details["port"]
+
+            print(f"🧩 Connecting to external PostgreSQL at {host}:{port} ...")
+
             conn = psycopg2.connect(
-                dbname=db_details['database'],
-                user=db_details['user'],
-                password=db_details['password'],
-                host=db_details['host'],
-                port=db_details['port'],
+                    dbname=db_details["database"],
+                    user=db_details["user"],
+                    password=db_details["password"],
+                    host=host,
+                    port=port
             )
 
         cur = conn.cursor()
@@ -1717,23 +2415,131 @@ def replace_brackets(expr: str) -> str:
 def fetch_data_for_duel_bar(table_name, x_axis_columns, filter_options, y_axis_columns, aggregation, db_nameeee, selectedUser, calculationData=None):
     # print("data====================", table_name, x_axis_columns, filter_options, y_axis_columns, aggregation, db_nameeee, selectedUser)
     
-    if not selectedUser or selectedUser.lower() == 'null':
-        print("Using default database connection...")
-        connection_string = f"dbname={db_nameeee} user={USER_NAME} password={PASSWORD} host={HOST}"
-        conn = psycopg2.connect(connection_string)
-    else:
-        connection_details = fetch_external_db_connection(db_nameeee, selectedUser)
-        if not connection_details:
-            raise Exception("Unable to fetch external database connection details.")
-        db_details = {
-            "host": connection_details[3],
-            "database": connection_details[7],
-            "user": connection_details[4],
-            "password": connection_details[5],
-            "port": int(connection_details[6])
-        }
-        conn = psycopg2.connect(**db_details)
+    # if not selectedUser or selectedUser.lower() == 'null':
+    #     print("Using default database connection...")
+    #     connection_string = f"dbname={db_nameeee} user={USER_NAME} password={PASSWORD} host={HOST}"
+    #     conn = psycopg2.connect(connection_string)
+    # else:
+    #     connection_details = fetch_external_db_connection(db_nameeee, selectedUser)
+    #     if not connection_details:
+    #         raise Exception("Unable to fetch external database connection details.")
+    #     db_details = {
+    #         "host": connection_details[3],
+    #         "database": connection_details[7],
+    #         "user": connection_details[4],
+    #         "password": connection_details[5],
+    #         "port": int(connection_details[6])
+    #     }
+    #     conn = psycopg2.connect(**db_details)
 
+    if not selectedUser or selectedUser.lower() == 'null':
+        print("🟢 Using default local database connection...")
+        connection_string = f"dbname={db_nameeee} user={USER_NAME} password={PASSWORD} host={HOST} port={PORT}"
+        conn = psycopg2.connect(connection_string)
+
+    else:
+        print(f"🟡 Using external database connection for user: {selectedUser}")
+        connection_details = fetch_external_db_connection(db_nameeee, selectedUser)
+
+        if not connection_details:
+            raise Exception(f"❌ Unable to fetch external database connection details for user '{selectedUser}'")
+
+        db_details = {
+                    "name": connection_details[1],
+                    "dbType": connection_details[2],
+                    "host": connection_details[3],
+                    "user": connection_details[4],
+                    "password": connection_details[5],
+                    "port": int(connection_details[6]),
+                    "database": connection_details[7],
+                    "use_ssh": connection_details[8],
+                    "ssh_host": connection_details[9],
+                    "ssh_port": int(connection_details[10]),
+                    "ssh_username": connection_details[11],
+                    "ssh_key_path": connection_details[12],
+        }
+
+        print(f"🔹 External DB Connection Details: {db_details}")
+
+                # Initialize SSH tunnel-related variables
+        ssh_client = None
+        local_sock = None
+        stop_event = threading.Event()
+        tunnel_thread = None
+
+                # ✅ SSH Tunnel Setup if required
+        if db_details["use_ssh"]:
+            print("🔐 Establishing SSH tunnel manually (Paramiko)...")
+            private_key = paramiko.RSAKey.from_private_key_file(db_details["ssh_key_path"])
+
+            ssh_client = paramiko.SSHClient()
+            ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            ssh_client.connect(
+                        db_details["ssh_host"],
+                        username=db_details["ssh_username"],
+                        pkey=private_key,
+                        port=db_details["ssh_port"],
+                        timeout=10
+            )
+
+                    # Find a free local port for tunnel forwarding
+            local_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            local_sock.bind(('127.0.0.1', 0))
+            local_port = local_sock.getsockname()[1]
+            local_sock.listen(1)
+            print(f"✅ Local forwarder listening on 127.0.0.1:{local_port}")
+
+            transport = ssh_client.get_transport()
+
+            def pipe(src, dst):
+                try:
+                    while True:
+                        data = src.recv(1024)
+                        if not data:
+                            break
+                        dst.sendall(data)
+                except Exception:
+                    pass
+                finally:
+                    src.close()
+                    dst.close()
+
+            def forward_tunnel():
+                while not stop_event.is_set():
+                    try:
+                        client_sock, _ = local_sock.accept()
+                        chan = transport.open_channel(
+                                "direct-tcpip",
+                                ("127.0.0.1", 5432),
+                                client_sock.getsockname()
+                    )
+                        if chan is None:
+                            client_sock.close()
+                            continue
+                        threading.Thread(target=pipe, args=(client_sock, chan), daemon=True).start()
+                        threading.Thread(target=pipe, args=(chan, client_sock), daemon=True).start()
+                    except Exception as e:
+                        print(f"❌ Channel open failed: {e}")
+
+            tunnel_thread = threading.Thread(target=forward_tunnel, daemon=True)
+            tunnel_thread.start()
+
+                # Override host and port to tunnel
+            host = "127.0.0.1"
+            port = local_port
+        else:
+            host = db_details["host"]
+            port = db_details["port"]
+
+        print(f"🧩 Connecting to external PostgreSQL at {host}:{port} ...")
+
+        conn = psycopg2.connect(
+                    dbname=db_details["database"],
+                    user=db_details["user"],
+                    password=db_details["password"],
+                    host=host,
+                    port=port
+        )
     cur = conn.cursor()
     global global_df
     cur.execute(f"SELECT * FROM {table_name} LIMIT 0") # Limit 0 to get schema without fetching data
@@ -1868,27 +2674,141 @@ def fetch_column_name(table_name, x_axis_columns, db_name,calculation_expr,calc_
     
     print("calculationData:", calculation_expr,calc_column)
     # Establish database connection
+    # try:
+    #     if not selectedUser or selectedUser.lower() == 'null':
+    #         conn = psycopg2.connect(f"dbname={db_name} user={USER_NAME} password={PASSWORD} host={HOST}")
+    #     else:
+    #         connection_details = fetch_external_db_connection(db_name, selectedUser)
+    #         if not connection_details:
+    #             raise Exception("Unable to fetch external database connection details.")
+            
+    #         db_details = {
+    #             "host": connection_details[3],
+    #             "database": connection_details[7],
+    #             "user": connection_details[4],
+    #             "password": connection_details[5],
+    #             "port": int(connection_details[6])
+    #         }
+    #         conn = psycopg2.connect(
+    #             dbname=db_details['database'],
+    #             user=db_details['user'],
+    #             password=db_details['password'],
+    #             host=db_details['host'],
+    #             port=db_details['port'],
+    #         )
+    conn = None
+    ssh_client = None
+    local_sock = None
+    stop_event = threading.Event()
+    tunnel_thread = None
+
     try:
-        if not selectedUser or selectedUser.lower() == 'null':
-            conn = psycopg2.connect(f"dbname={db_name} user={USER_NAME} password={PASSWORD} host={HOST}")
+        # ✅ 1️⃣ LOCAL DATABASE CONNECTION
+        if not selectedUser or selectedUser.lower() in ('null', 'none'):
+            print("Using local database connection...")
+            conn = psycopg2.connect(
+                dbname=db_name,
+                user=USER_NAME,
+                password=PASSWORD,
+                host=HOST,
+                port=PORT
+            )
+
+        # ✅ 2️⃣ EXTERNAL DATABASE CONNECTION (via SSH tunnel)
         else:
+            print(f"Using external connection for user: {selectedUser}")
             connection_details = fetch_external_db_connection(db_name, selectedUser)
             if not connection_details:
-                raise Exception("Unable to fetch external database connection details.")
-            
+                raise Exception(f"Unable to fetch external database connection details for user '{selectedUser}'")
+
             db_details = {
+                "name": connection_details[1],
+                "dbType": connection_details[2],
                 "host": connection_details[3],
-                "database": connection_details[7],
                 "user": connection_details[4],
                 "password": connection_details[5],
-                "port": int(connection_details[6])
+                "port": int(connection_details[6]),
+                "database": connection_details[7],
+                "use_ssh": connection_details[8],
+                "ssh_host": connection_details[9],
+                "ssh_port": int(connection_details[10]),
+                "ssh_username": connection_details[11],
+                "ssh_key_path": connection_details[12],
             }
+
+            print(f"🔹 External DB Connection Details: {db_details}")
+
+            # ✅ Start SSH tunnel if needed
+            if db_details["use_ssh"]:
+                print("🔐 Establishing SSH tunnel manually (Paramiko)...")
+                private_key = paramiko.RSAKey.from_private_key_file(db_details["ssh_key_path"])
+
+                ssh_client = paramiko.SSHClient()
+                ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+                ssh_client.connect(
+                    db_details["ssh_host"],
+                    username=db_details["ssh_username"],
+                    pkey=private_key,
+                    port=db_details["ssh_port"],
+                    timeout=10
+                )
+
+                # Find free local port for tunnel
+                local_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                local_sock.bind(('127.0.0.1', 0))
+                local_port = local_sock.getsockname()[1]
+                local_sock.listen(1)
+                print(f"✅ Local forwarder listening on 127.0.0.1:{local_port}")
+
+                transport = ssh_client.get_transport()
+
+                def pipe(src, dst):
+                    try:
+                        while True:
+                            data = src.recv(1024)
+                            if not data:
+                                break
+                            dst.sendall(data)
+                    except Exception:
+                        pass
+                    finally:
+                        src.close()
+                        dst.close()
+
+                def forward_tunnel():
+                    while not stop_event.is_set():
+                        try:
+                            client_sock, _ = local_sock.accept()
+                            chan = transport.open_channel(
+                                "direct-tcpip",
+                                ("127.0.0.1", 5432),
+                                client_sock.getsockname()
+                            )
+                            if chan is None:
+                                client_sock.close()
+                                continue
+                            threading.Thread(target=pipe, args=(client_sock, chan), daemon=True).start()
+                            threading.Thread(target=pipe, args=(chan, client_sock), daemon=True).start()
+                        except Exception as e:
+                            print(f"❌ Channel open failed: {e}")
+
+                tunnel_thread = threading.Thread(target=forward_tunnel, daemon=True)
+                tunnel_thread.start()
+
+                # Override host and port for local tunnel
+                host = "127.0.0.1"
+                port = local_port
+            else:
+                host = db_details["host"]
+                port = db_details["port"]
+
+            print(f"🧩 Connecting to external PostgreSQL at {host}:{port} ...")
             conn = psycopg2.connect(
                 dbname=db_details['database'],
                 user=db_details['user'],
                 password=db_details['password'],
-                host=db_details['host'],
-                port=db_details['port'],
+                host=host,
+                port=port
             )
 
         results = {}
@@ -1974,15 +2894,126 @@ def calculationFetch(db_name, dbTableName='book13', selectedUser=None):
         if 'global_df' in globals() and global_df is not None and not global_df.empty:
             return global_df
 
-        if selectedUser is None:
-            print("Using direct connection to company DB:", db_name)
-            connection_string = f"dbname={db_name} user={USER_NAME} password={PASSWORD} host={HOST}"
+        # if selectedUser is None:
+        #     print("Using direct connection to company DB:", db_name)
+        #     connection_string = f"dbname={db_name} user={USER_NAME} password={PASSWORD} host={HOST}"
+        #     connection = psycopg2.connect(connection_string)
+        # else:
+        #     print("Using external DB connection for user:", selectedUser)
+        #     connection = fetch_external_db_connection(db_name, selectedUser)
+        #     if not connection:
+        #         raise Exception("Could not get external DB connection")
+        if not selectedUser or selectedUser.lower() == 'null':
+            print("🟢 Using default local database connection...")
+            connection_string = f"dbname={db_name} user={USER_NAME} password={PASSWORD} host={HOST} port={PORT}"
             connection = psycopg2.connect(connection_string)
+
         else:
-            print("Using external DB connection for user:", selectedUser)
-            connection = fetch_external_db_connection(db_name, selectedUser)
-            if not connection:
-                raise Exception("Could not get external DB connection")
+            print(f"🟡 Using external database connection for user: {selectedUser}")
+            connection_details = fetch_external_db_connection(db_name, selectedUser)
+
+            if not connection_details:
+                raise Exception(f"❌ Unable to fetch external database connection details for user '{selectedUser}'")
+
+            db_details = {
+                "name": connection_details[1],
+                "dbType": connection_details[2],
+                "host": connection_details[3],
+                "user": connection_details[4],
+                "password": connection_details[5],
+                "port": int(connection_details[6]),
+                "database": connection_details[7],
+                "use_ssh": connection_details[8],
+                "ssh_host": connection_details[9],
+                "ssh_port": int(connection_details[10]),
+                "ssh_username": connection_details[11],
+                "ssh_key_path": connection_details[12],
+            }
+
+            print(f"🔹 External DB Connection Details: {db_details}")
+
+            # Initialize SSH tunnel-related variables
+            ssh_client = None
+            local_sock = None
+            stop_event = threading.Event()
+            tunnel_thread = None
+
+            # ✅ SSH Tunnel Setup if required
+            if db_details["use_ssh"]:
+                print("🔐 Establishing SSH tunnel manually (Paramiko)...")
+                private_key = paramiko.RSAKey.from_private_key_file(db_details["ssh_key_path"])
+
+                ssh_client = paramiko.SSHClient()
+                ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+                ssh_client.connect(
+                    db_details["ssh_host"],
+                    username=db_details["ssh_username"],
+                    pkey=private_key,
+                    port=db_details["ssh_port"],
+                    timeout=10
+                )
+
+                # Find a free local port for tunnel forwarding
+                local_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                local_sock.bind(('127.0.0.1', 0))
+                local_port = local_sock.getsockname()[1]
+                local_sock.listen(1)
+                print(f"✅ Local forwarder listening on 127.0.0.1:{local_port}")
+
+                transport = ssh_client.get_transport()
+
+                def pipe(src, dst):
+                    try:
+                        while True:
+                            data = src.recv(1024)
+                            if not data:
+                                break
+                            dst.sendall(data)
+                    except Exception:
+                        pass
+                    finally:
+                        src.close()
+                        dst.close()
+
+                def forward_tunnel():
+                    while not stop_event.is_set():
+                        try:
+                            client_sock, _ = local_sock.accept()
+                            chan = transport.open_channel(
+                                "direct-tcpip",
+                                ("127.0.0.1", 5432),
+                                client_sock.getsockname()
+                            )
+                            if chan is None:
+                                client_sock.close()
+                                continue
+                            threading.Thread(target=pipe, args=(client_sock, chan), daemon=True).start()
+                            threading.Thread(target=pipe, args=(chan, client_sock), daemon=True).start()
+                        except Exception as e:
+                            print(f"❌ Channel open failed: {e}")
+
+                tunnel_thread = threading.Thread(target=forward_tunnel, daemon=True)
+                tunnel_thread.start()
+
+                # Override host and port to tunnel
+                host = "127.0.0.1"
+                port = local_port
+            else:
+                host = db_details["host"]
+                port = db_details["port"]
+
+            print(f"🧩 Connecting to external PostgreSQL at {host}:{port} ...")
+
+            connection = psycopg2.connect(
+                dbname=db_details["database"],
+                user=db_details["user"],
+                password=db_details["password"],
+                host=host,
+                port=port
+            )
+
+            print("✅ External PostgreSQL connection established successfully!")
+
 
         cursor = connection.cursor()
 
@@ -2439,32 +3470,143 @@ def fetchText_data(databaseName, table_Name, x_axis, aggregate_py,selectedUser):
     # conn = psycopg2.connect(f"dbname={databaseName} user={USER_NAME} password={PASSWORD} host={HOST}")
     # cur = conn.cursor()
     # if selectedUser == None:
-    if not selectedUser or selectedUser.lower() == 'null':
-    # Handle local database connection
+    # if not selectedUser or selectedUser.lower() == 'null':
+    # # Handle local database connection
 
-        conn = psycopg2.connect(f"dbname={databaseName} user={USER_NAME} password={PASSWORD} host={HOST}")
+    #     conn = psycopg2.connect(f"dbname={databaseName} user={USER_NAME} password={PASSWORD} host={HOST}")
 
-    else:  # External connection
-        connection_details = fetch_external_db_connection(databaseName,selectedUser)
-        if connection_details:
-            db_details = {
-                "host": connection_details[3],
-                "database": connection_details[7],
-                "user": connection_details[4],
-                "password": connection_details[5],
-                "port": int(connection_details[6])
-            }
-        if not connection_details:
-            raise Exception("Unable to fetch external database connection details.")
+    # else:  # External connection
+    #     connection_details = fetch_external_db_connection(databaseName,selectedUser)
+    #     if connection_details:
+    #         db_details = {
+    #             "host": connection_details[3],
+    #             "database": connection_details[7],
+    #             "user": connection_details[4],
+    #             "password": connection_details[5],
+    #             "port": int(connection_details[6])
+    #         }
+    #     if not connection_details:
+    #         raise Exception("Unable to fetch external database connection details.")
         
+    #     conn = psycopg2.connect(
+    #         dbname=db_details['database'],
+    #         user=db_details['user'],
+    #         password=db_details['password'],
+    #         host=db_details['host'],
+    #         port=db_details['port'],
+    #     )
+    if not selectedUser or selectedUser.lower() == 'null':
+        print("🟢 Using default local database connection...")
+        connection_string = f"dbname={databaseName} user={USER_NAME} password={PASSWORD} host={HOST} port={PORT}"
+        conn = psycopg2.connect(connection_string)
+
+    else:
+        print(f"🟡 Using external database connection for user: {selectedUser}")
+        connection_details = fetch_external_db_connection(databaseName, selectedUser)
+
+        if not connection_details:
+            raise Exception(f"❌ Unable to fetch external database connection details for user '{selectedUser}'")
+
+        db_details = {
+            "name": connection_details[1],
+            "dbType": connection_details[2],
+            "host": connection_details[3],
+            "user": connection_details[4],
+            "password": connection_details[5],
+            "port": int(connection_details[6]),
+            "database": connection_details[7],
+            "use_ssh": connection_details[8],
+            "ssh_host": connection_details[9],
+            "ssh_port": int(connection_details[10]),
+            "ssh_username": connection_details[11],
+            "ssh_key_path": connection_details[12],
+        }
+
+        print(f"🔹 External DB Connection Details: {db_details}")
+
+        # Initialize SSH tunnel-related variables
+        ssh_client = None
+        local_sock = None
+        stop_event = threading.Event()
+        tunnel_thread = None
+
+        # ✅ SSH Tunnel Setup if required
+        if db_details["use_ssh"]:
+            print("🔐 Establishing SSH tunnel manually (Paramiko)...")
+            private_key = paramiko.RSAKey.from_private_key_file(db_details["ssh_key_path"])
+
+            ssh_client = paramiko.SSHClient()
+            ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            ssh_client.connect(
+                db_details["ssh_host"],
+                username=db_details["ssh_username"],
+                pkey=private_key,
+                port=db_details["ssh_port"],
+                timeout=10
+            )
+
+            # Find a free local port for tunnel forwarding
+            local_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            local_sock.bind(('127.0.0.1', 0))
+            local_port = local_sock.getsockname()[1]
+            local_sock.listen(1)
+            print(f"✅ Local forwarder listening on 127.0.0.1:{local_port}")
+
+            transport = ssh_client.get_transport()
+
+            def pipe(src, dst):
+                try:
+                    while True:
+                        data = src.recv(1024)
+                        if not data:
+                            break
+                        dst.sendall(data)
+                except Exception:
+                    pass
+                finally:
+                    src.close()
+                    dst.close()
+
+            def forward_tunnel():
+                while not stop_event.is_set():
+                    try:
+                        client_sock, _ = local_sock.accept()
+                        chan = transport.open_channel(
+                            "direct-tcpip",
+                            ("127.0.0.1", 5432),
+                            client_sock.getsockname()
+                        )
+                        if chan is None:
+                            client_sock.close()
+                            continue
+                        threading.Thread(target=pipe, args=(client_sock, chan), daemon=True).start()
+                        threading.Thread(target=pipe, args=(chan, client_sock), daemon=True).start()
+                    except Exception as e:
+                        print(f"❌ Channel open failed: {e}")
+
+            tunnel_thread = threading.Thread(target=forward_tunnel, daemon=True)
+            tunnel_thread.start()
+
+            # Override host and port to tunnel
+            host = "127.0.0.1"
+            port = local_port
+        else:
+            host = db_details["host"]
+            port = db_details["port"]
+
+        print(f"🧩 Connecting to external PostgreSQL at {host}:{port} ...")
+
         conn = psycopg2.connect(
-            dbname=db_details['database'],
-            user=db_details['user'],
-            password=db_details['password'],
-            host=db_details['host'],
-            port=db_details['port'],
+            dbname=db_details["database"],
+            user=db_details["user"],
+            password=db_details["password"],
+            host=host,
+            port=port
         )
-    
+
+        print("✅ External PostgreSQL connection established successfully!")
+
+        
     cur = conn.cursor()
 
     # Check the data type of the x_axis column
@@ -2596,29 +3738,137 @@ def fetch_hierarchical_data(table_name, db_name,selectedUser):
         try:
             # conn = psycopg2.connect(f"dbname={db_name} user={USER_NAME} password={PASSWORD} host={HOST}")
             # cur = conn.cursor()
-            if not selectedUser or selectedUser.lower() == 'null':
-                conn = psycopg2.connect(f"dbname={db_name} user={USER_NAME} password={PASSWORD} host={HOST}")
-            else:  # External connection
-                connection_details = fetch_external_db_connection(db_name,selectedUser)
-                if connection_details:
-                    db_details = {
-                        "host": connection_details[3],
-                        "database": connection_details[7],
-                        "user": connection_details[4],
-                        "password": connection_details[5],
-                        "port": int(connection_details[6])
-                    }
-                if not connection_details:
-                    raise Exception("Unable to fetch external database connection details.")
+            # if not selectedUser or selectedUser.lower() == 'null':
+            #     conn = psycopg2.connect(f"dbname={db_name} user={USER_NAME} password={PASSWORD} host={HOST}")
+            # else:  # External connection
+            #     connection_details = fetch_external_db_connection(db_name,selectedUser)
+            #     if connection_details:
+            #         db_details = {
+            #             "host": connection_details[3],
+            #             "database": connection_details[7],
+            #             "user": connection_details[4],
+            #             "password": connection_details[5],
+            #             "port": int(connection_details[6])
+            #         }
+            #     if not connection_details:
+            #         raise Exception("Unable to fetch external database connection details.")
                 
+            #     conn = psycopg2.connect(
+            #         dbname=db_details['database'],
+            #         user=db_details['user'],
+            #         password=db_details['password'],
+            #         host=db_details['host'],
+            #         port=db_details['port'],
+            #     )
+            if not selectedUser or selectedUser.lower() == 'null':
+                print("🟢 Using default local database connection...")
+                connection_string = f"dbname={db_name} user={USER_NAME} password={PASSWORD} host={HOST} port={PORT}"
+                conn = psycopg2.connect(connection_string)
+
+            else:
+                print(f"🟡 Using external database connection for user: {selectedUser}")
+                connection_details = fetch_external_db_connection(db_name, selectedUser)
+
+                if not connection_details:
+                    raise Exception(f"❌ Unable to fetch external database connection details for user '{selectedUser}'")
+
+                db_details = {
+                    "name": connection_details[1],
+                    "dbType": connection_details[2],
+                    "host": connection_details[3],
+                    "user": connection_details[4],
+                    "password": connection_details[5],
+                    "port": int(connection_details[6]),
+                    "database": connection_details[7],
+                    "use_ssh": connection_details[8],
+                    "ssh_host": connection_details[9],
+                    "ssh_port": int(connection_details[10]),
+                    "ssh_username": connection_details[11],
+                    "ssh_key_path": connection_details[12],
+                }
+
+                print(f"🔹 External DB Connection Details: {db_details}")
+
+                # Initialize SSH tunnel-related variables
+                ssh_client = None
+                local_sock = None
+                stop_event = threading.Event()
+                tunnel_thread = None
+
+                # ✅ SSH Tunnel Setup if required
+                if db_details["use_ssh"]:
+                    print("🔐 Establishing SSH tunnel manually (Paramiko)...")
+                    private_key = paramiko.RSAKey.from_private_key_file(db_details["ssh_key_path"])
+
+                    ssh_client = paramiko.SSHClient()
+                    ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+                    ssh_client.connect(
+                        db_details["ssh_host"],
+                        username=db_details["ssh_username"],
+                        pkey=private_key,
+                        port=db_details["ssh_port"],
+                        timeout=10
+                    )
+
+                    # Find a free local port for tunnel forwarding
+                    local_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                    local_sock.bind(('127.0.0.1', 0))
+                    local_port = local_sock.getsockname()[1]
+                    local_sock.listen(1)
+                    print(f"✅ Local forwarder listening on 127.0.0.1:{local_port}")
+
+                    transport = ssh_client.get_transport()
+
+                    def pipe(src, dst):
+                        try:
+                            while True:
+                                data = src.recv(1024)
+                                if not data:
+                                    break
+                                dst.sendall(data)
+                        except Exception:
+                            pass
+                        finally:
+                            src.close()
+                            dst.close()
+
+                    def forward_tunnel():
+                        while not stop_event.is_set():
+                            try:
+                                client_sock, _ = local_sock.accept()
+                                chan = transport.open_channel(
+                                    "direct-tcpip",
+                                    ("127.0.0.1", 5432),
+                                    client_sock.getsockname()
+                                )
+                                if chan is None:
+                                    client_sock.close()
+                                    continue
+                                threading.Thread(target=pipe, args=(client_sock, chan), daemon=True).start()
+                                threading.Thread(target=pipe, args=(chan, client_sock), daemon=True).start()
+                            except Exception as e:
+                                print(f"❌ Channel open failed: {e}")
+
+                    tunnel_thread = threading.Thread(target=forward_tunnel, daemon=True)
+                    tunnel_thread.start()
+
+                    # Override host and port to tunnel
+                    host = "127.0.0.1"
+                    port = local_port
+                else:
+                    host = db_details["host"]
+                    port = db_details["port"]
+
+                print(f"🧩 Connecting to external PostgreSQL at {host}:{port} ...")
+
                 conn = psycopg2.connect(
-                    dbname=db_details['database'],
-                    user=db_details['user'],
-                    password=db_details['password'],
-                    host=db_details['host'],
-                    port=db_details['port'],
+                    dbname=db_details["database"],
+                    user=db_details["user"],
+                    password=db_details["password"],
+                    host=host,
+                    port=port
                 )
-            
+                    
             cur = conn.cursor()
 
             print("conn",conn)
