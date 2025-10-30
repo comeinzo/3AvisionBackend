@@ -9197,8 +9197,9 @@ from datetime import datetime, timedelta
 from functools import lru_cache, wraps
 from urllib.parse import quote_plus
 
+from dotenv import load_dotenv
+import os
 from openai import OpenAI
-
 # ==============================
 # Third-Party Imports
 # ==============================
@@ -11101,7 +11102,7 @@ def get_bar_chart_route():
     if len(y_axis_columns) == 1 and chart_data not in ["treeHierarchy", "tablechart","timeSeriesDecomposition"]:
         print("Single Y-axis chart")
         data = fetch_data(table_name, x_axis_columns, filter_options, y_axis_columns, aggregation, db_nameeee, selectedUser,calculationData)
-        print(data)
+        # print(data)
         if aggregation == "count":
             array1 = [item[0] for item in data]
             array2 = [item[1] for item in data]
@@ -18437,7 +18438,7 @@ def execute_sql(sql_query):
         return None, str(e)
 
 
-
+load_dotenv()
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 openai_client = OpenAI(api_key=OPENAI_API_KEY)
 
@@ -18584,9 +18585,92 @@ def get_schema(table_name):
         }), 500
 
 
+# @app.route('/api/query', methods=['POST'])
+# def process_query():
+#     """Process natural language query and return results."""
+#     try:
+#         data = request.json
+#         question = data.get('question')
+#         table_name = data.get('table_name')
+        
+#         if not question or not table_name:
+#             return jsonify({
+#                 'success': False,
+#                 'error': 'Missing question or table_name'
+#             }), 400
+        
+#         # Get table schema
+#         schema = get_table_schema(table_name)
+#         if not schema:
+#             return jsonify({
+#                 'success': False,
+#                 'error': f'Table {table_name} not found'
+#             }), 404
+        
+#         # Generate SQL query
+#         sql_query = generate_sql_with_openai(question, schema, table_name)
+        
+#         if not sql_query:
+#             return jsonify({
+#                 'success': False,
+#                 'error': 'Failed to generate SQL query'
+#             }), 500
+        
+#         # Execute query
+#         results_df, error = execute_sql(sql_query)
+        
+#         if error:
+#             return jsonify({
+#                 'success': False,
+#                 'error': f'SQL execution error: {error}',
+#                 'sql': sql_query
+#             }), 400
+        
+#         # Generate natural language answer
+#         natural_answer = generate_natural_answer(question, sql_query, results_df)
+        
+#         # Convert DataFrame to list of dicts for JSON response
+#         # results_list = results_df.to_dict('records') if results_df is not None else []
+#         # print("results_list--------------------",results_list)        
+#         # return jsonify({
+#         #     'success': True,
+#         #     'question': question,
+#         #     'sql': sql_query,
+#         #     'answer': natural_answer,
+#         #     'results': results_list,
+#         #     'row_count': len(results_list)
+#         # })
+#         # After getting results_list from DataFrame
+#         results_list = results_df.to_dict('records') if results_df is not None else []
+
+#         # Split into categories and values
+#         categories = [row['carrier'] for row in results_list]
+#         values = [float(row['total_cost']) for row in results_list]  # or keep as Decimal
+
+#         print("categories--------------------", categories)
+#         print("values--------------------", values)
+
+#         return jsonify({
+#             'success': True,
+#             'question': question,
+#             'sql': sql_query,
+#             'answer': natural_answer,
+#             'results': results_list,  # Keep original for reference
+#             'categories': categories,  # Separate list of carriers
+#             'values': values,          # Separate list of costs
+#             'row_count': len(results_list)
+#         })
+        
+#     except Exception as e:
+#         print(f"Error processing query: {e}")
+#         print(traceback.format_exc())
+#         return jsonify({
+#             'success': False,
+#             'error': str(e)
+#         }), 500
+
 @app.route('/api/query', methods=['POST'])
 def process_query():
-    """Process natural language query and return results."""
     try:
         data = request.json
         question = data.get('question')
@@ -18630,14 +18714,51 @@ def process_query():
         
         # Convert DataFrame to list of dicts for JSON response
         results_list = results_df.to_dict('records') if results_df is not None else []
-        print("results_list--------------------",results_list)        
+        
+        # Detect if this is a chart query
+        chart_keywords = ['chart', 'graph', 'plot', 'visualize', 'bar chart', 'show']
+        is_chart_query = any(keyword in question.lower() for keyword in chart_keywords)
+        
+        # Prepare chart data if applicable
+        chart_data = None
+        chart_type = None
+        
+        if is_chart_query and results_list and len(results_list) > 0:
+            # Determine chart type from question
+            if 'bar' in question.lower():
+                chart_type = 'bar'
+            elif 'line' in question.lower():
+                chart_type = 'line'
+            elif 'pie' in question.lower():
+                chart_type = 'pie'
+            else:
+                chart_type = 'bar'  # Default to bar chart
+            
+            # Split data into categories and values
+            if len(results_list[0]) >= 2:
+                first_key = list(results_list[0].keys())[0]
+                second_key = list(results_list[0].keys())[1]
+                
+                chart_data = {
+                    'categories': [row[first_key] for row in results_list],
+                    'values': [float(row[second_key]) for row in results_list],
+                    'xAxis': first_key,
+                    'yAxis': second_key,
+                    'aggregation': 'sum'  # You can detect this from SQL query
+                }
+        print("results_list--------------------",results_list)
+        print("chart_data--------------------",chart_data)
+        print("chart_type--------------------",chart_type)
+        
         return jsonify({
             'success': True,
             'question': question,
             'sql': sql_query,
             'answer': natural_answer,
             'results': results_list,
-            'row_count': len(results_list)
+            'row_count': len(results_list),
+            'chart_type': chart_type,
+            'chart_data': chart_data
         })
         
     except Exception as e:
@@ -18647,6 +18768,10 @@ def process_query():
             'success': False,
             'error': str(e)
         }), 500
+
+
+
+
 
 
 @app.route('/api/execute-sql', methods=['POST'])
