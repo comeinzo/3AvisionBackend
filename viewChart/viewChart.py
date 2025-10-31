@@ -10,6 +10,7 @@ import json
 import paramiko
 import socket
 import threading
+from dashboard_design import get_db_connection_or_path
 def get_db_connection_view(database_name):
     connection = psycopg2.connect(
         dbname=database_name,  # Connect to the specified database
@@ -363,112 +364,8 @@ def filter_chart_data(database_name, table_name, x_axis, y_axis, aggregate, clic
         #     connection = psycopg2.connect(dbname=dbname, user=user, password=password, host=host)
         # else:
         #     connection = get_db_connection_view(database_name)
-        if not selectedUser or selectedUser.lower() == 'null':
-            print("🟢 Using default local database connection...")
-            connection = get_db_connection_view(database_name)
-
-        else:
-            print(f"🟡 Using external database connection for user: {selectedUser}")
-            connection_details = fetch_external_db_connection(database_name, selectedUser)
-
-            if not connection_details:
-                raise Exception(f"❌ Unable to fetch external database connection details for user '{selectedUser}'")
-
-            db_details = {
-                "name": connection_details[1],
-                "dbType": connection_details[2],
-                "host": connection_details[3],
-                "user": connection_details[4],
-                "password": connection_details[5],
-                "port": int(connection_details[6]),
-                "database": connection_details[7],
-                "use_ssh": connection_details[8],
-                "ssh_host": connection_details[9],
-                "ssh_port": int(connection_details[10]),
-                "ssh_username": connection_details[11],
-                "ssh_key_path": connection_details[12],
-            }
-
-            print(f"🔹 External DB Connection Details: {db_details}")
-
-            ssh_client = None
-            local_sock = None
-            stop_event = threading.Event()
-            tunnel_thread = None
-
-            # ✅ If SSH is required, establish tunnel
-            if db_details["use_ssh"]:
-                print("🔐 Establishing SSH tunnel manually (Paramiko)...")
-                private_key = paramiko.RSAKey.from_private_key_file(db_details["ssh_key_path"])
-
-                ssh_client = paramiko.SSHClient()
-                ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-                ssh_client.connect(
-                    db_details["ssh_host"],
-                    username=db_details["ssh_username"],
-                    pkey=private_key,
-                    port=db_details["ssh_port"],
-                    timeout=10
-                )
-
-                local_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                local_sock.bind(('127.0.0.1', 0))
-                local_port = local_sock.getsockname()[1]
-                local_sock.listen(1)
-                print(f"✅ Local forwarder listening on 127.0.0.1:{local_port}")
-
-                transport = ssh_client.get_transport()
-
-                def pipe(src, dst):
-                    try:
-                        while True:
-                            data = src.recv(1024)
-                            if not data:
-                                break
-                            dst.sendall(data)
-                    except Exception:
-                        pass
-                    finally:
-                        src.close()
-                        dst.close()
-
-                def forward_tunnel():
-                    while not stop_event.is_set():
-                        try:
-                            client_sock, _ = local_sock.accept()
-                            chan = transport.open_channel(
-                                "direct-tcpip",
-                                ("127.0.0.1", 5432),
-                                client_sock.getsockname()
-                            )
-                            if chan is None:
-                                client_sock.close()
-                                continue
-                            threading.Thread(target=pipe, args=(client_sock, chan), daemon=True).start()
-                            threading.Thread(target=pipe, args=(chan, client_sock), daemon=True).start()
-                        except Exception as e:
-                            print(f"❌ Channel open failed: {e}")
-
-                tunnel_thread = threading.Thread(target=forward_tunnel, daemon=True)
-                tunnel_thread.start()
-
-                host = "127.0.0.1"
-                port = local_port
-            else:
-                host = db_details["host"]
-                port = db_details["port"]
-
-            print(f"🧩 Connecting to external PostgreSQL at {host}:{port} ...")
-            connection = psycopg2.connect(
-                dbname=db_details["database"],
-                user=db_details["user"],
-                password=db_details["password"],
-                host=host,
-                port=port
-            )
-            print("✅ External PostgreSQL connection established successfully!")
-
-
+        
+        connection = get_db_connection_or_path(selectedUser, database_name)
         cursor = connection.cursor(cursor_factory=RealDictCursor)
         
         global global_df
@@ -633,3 +530,4 @@ def fetch_ai_saved_chart_data(connection, tableName, chart_id):
     finally:
         # Ensure cursor is closed
         cursor.close()
+
