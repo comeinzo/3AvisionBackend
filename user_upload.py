@@ -3,10 +3,10 @@ from flask import jsonify
 import psycopg2
 import bcrypt
 from signup.signup import encrypt_password
-from config import PASSWORD, USER_NAME, HOST, PORT
+from config import PASSWORD, USER_NAME, HOST, PORT,DB_NAME
 
 # Connect to a database (defaults to datasource)
-def get_db_connection(dbname="datasource"):
+def get_db_connection(dbname=DB_NAME):
     return psycopg2.connect(
         dbname=dbname,
         user=USER_NAME,
