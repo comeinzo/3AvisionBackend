@@ -409,7 +409,30 @@ def upload_csv_to_postgresql(database_name, username, password, csv_file_name, h
         file_size_mb = os.path.getsize(csv_file_path) / (1024 * 1024)
         process_in_chunks = file_size_mb > 100
 
-        initial_df = pd.read_csv(csv_file_path, nrows=1000, low_memory=False, dtype_backend='numpy_nullable')
+        # initial_df = pd.read_csv(csv_file_path, nrows=1000, low_memory=False, dtype_backend='numpy_nullable')
+       # Read only a small sample for schema inference
+        schema_df = pd.read_csv(csv_file_path, nrows=1000, low_memory=False, dtype_backend='numpy_nullable')
+        print(f"Processing CSV for schema inference: {schema_df.shape[0]} rows.")
+
+        schema_df = preprocess_dates(schema_df)
+        schema_df = clean_data(schema_df)
+        schema_df.columns = [sanitize_column_name(col) for col in schema_df.columns]
+
+        duplicate_columns = check_repeating_columns(schema_df)
+        if duplicate_columns:
+            return f"Error: Duplicate columns found in the CSV: {', '.join(duplicate_columns)}"
+
+        primary_key_column_from_csv = identify_primary_key(schema_df)
+        db_primary_key_column = 'id'
+
+        # 🧠 After schema inference, read the **full file** or process in chunks:
+        if process_in_chunks:
+            # large file, handled below in chunks
+            pass
+        else:
+            # Read the entire CSV for smaller datasets
+            initial_df = pd.read_csv(csv_file_path, low_memory=False, dtype_backend='numpy_nullable')
+
         print(f"Processing CSV for schema inference: {initial_df.shape[0]} rows.")
 
         initial_df = preprocess_dates(initial_df)
