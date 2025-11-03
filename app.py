@@ -433,17 +433,17 @@ def upload_file_excel():
                 selected_sheets
             )
             
-            # /if result == "Upload successful":
-            if isinstance(result, dict) and result.get("message") == "Upload successful":
+            if result == "Upload successful":
+            # if isinstance(result, dict) and result.get("message") == "Upload successful":
                 return jsonify({
                     'message': 'File uploaded successfully',
                     'status': True,
                     'uploaded_by': request.current_user.get('user_id'),
                     'file_name': excel_file_name,
-                    'rows_added': result["rows_added"],
-                    'rows_deleted': result["rows_deleted"],
-                    'rows_skipped': result["rows_skipped"],
-                    'rows_updated': result["rows_updated"]
+                    # 'rows_added': result["rows_added"],
+                    # 'rows_deleted': result["rows_deleted"],
+                    # 'rows_skipped': result["rows_skipped"],
+                    # 'rows_updated': result["rows_updated"]
                 }), 200
             else:
                 return jsonify({'message': result, 'status': False}), 500
@@ -3460,7 +3460,7 @@ def get_chart_names(user_id, database_name):
     all_employee_ids = list(map(int, reporting_employees)) + [int(user_id)]
     print("all_employee_ids",all_employee_ids)
     # Step 2: Fetch dashboard names for these employees from the datasource database.
-    conn_datasource = get_db_connection("datasource")
+    conn_datasource = get_db_connection(DB_NAME)
     dashboard_structure = []
 
 
@@ -3505,7 +3505,7 @@ def get_chart_names_Edit(user_id, database_name):
     if not isinstance(user_id,list):
         user_id=[user_id]
     # Step 2: Fetch dashboard names for these employees from the datasource database.
-    conn_datasource = get_db_connection("datasource")
+    conn_datasource = get_db_connection(DB_NAME)
     dashboard_structure = []
    
 
@@ -5362,7 +5362,8 @@ def dashboard_data(dashboard_name,company_name):
                             'disableDragging': img_data[7]
                         })
             cursor.close()
-            wallpaper_src = None 
+            wallpaper_src = None
+            dashboard_wallpapers_table(conn) 
             if wallpaper_id:
                 cursor = conn.cursor()
                 cursor.execute("""
@@ -5466,7 +5467,7 @@ def usersignup():
 
     return jsonify({'message': 'Invalid registration type'}), 400
 
-def get_db_connection(dbname="datasource"):
+def get_db_connection(dbname=DB_NAME):
     conn = psycopg2.connect(
         dbname=dbname,
         user="postgres",
@@ -5661,7 +5662,7 @@ def fetch_user_data():
         employee_id, employee_name, role_id, category_name,username,email = employee_data
         print("employee data",employee_data)
         # Fetch the category name from the signup database
-        conn_datasource = get_db_connection("datasource")
+        conn_datasource = get_db_connection(DB_NAME)
         user_details = {
             'employee_id': employee_id,
             'employee_name': employee_name,
@@ -6676,7 +6677,7 @@ def drop_view_api():
 
 
 # Function to create a database connection
-def create_connection( db_name="datasource",
+def create_connection( db_name=DB_NAME,
         user=USER_NAME,
         password=PASSWORD,
         host=HOST,
@@ -10803,12 +10804,20 @@ def system_summary():
         cur = conn.cursor()
 
         # ---- 2️⃣ Count total tables ----
+        # admin_cur.execute("""
+        #     SELECT COUNT(*) 
+        #     FROM information_schema.tables 
+        #     WHERE table_schema = 'public';
+        # """)
+        # num_tables = admin_cur.fetchone()[0]
         admin_cur.execute("""
-            SELECT COUNT(*) 
-            FROM information_schema.tables 
-            WHERE table_schema = 'public';
+            SELECT COUNT(*)
+            FROM information_schema.tables
+            WHERE table_schema = 'public'
+            AND table_name NOT IN ('category', 'role', 'role_permission', 'user', 'employee_list', 'datasource');
         """)
         num_tables = admin_cur.fetchone()[0]
+
 
         # ---- 3️⃣ Fetch latest updated table ----
         # admin_cur.execute("""

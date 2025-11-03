@@ -12,9 +12,10 @@ from flask import Flask, request, jsonify # Assuming these are part of a larger 
 import io
 import time
 import random
+from config import PASSWORD, USER_NAME, HOST, PORT,DB_NAME
 # --- Existing Helper Functions (kept for context, some are already optimized) ---
 def is_table_used_in_charts(table_name):
-    conn = get_db_connection(dbname="datasource")
+    conn = get_db_connection(dbname=DB_NAME)
     cur = conn.cursor()
     cur.execute(
         """

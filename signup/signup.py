@@ -4,9 +4,9 @@ import bcrypt
 import logging
 
 import binascii
-from config import PASSWORD, USER_NAME, HOST, PORT
+from config import PASSWORD, USER_NAME, HOST, PORT,DB_NAME
 
-def get_db_connection(dbname="datasource"):
+def get_db_connection(dbname=DB_NAME):
     conn = psycopg2.connect(
         dbname=dbname,
         # user="postgres",
