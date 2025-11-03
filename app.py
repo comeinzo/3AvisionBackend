@@ -13598,13 +13598,7 @@ def receive_chart_details():
     except (ValueError, SyntaxError, json.JSONDecodeError) as e:
         print(f"Error parsing filter_options: {e}")
         return jsonify({"message": "Invalid filter_options format", "error": str(e)}), 400
-
-
-    # print("filter_options====================", filter_options)
     databaseName = data.get('databaseName')
-    
-    print("optimizeData====================", optimizeData)
-
     # Define aggregate function based on request
     aggregate_py = {
         'count': 'count',
@@ -13623,23 +13617,18 @@ def receive_chart_details():
         cursor.execute(query, (chart_id,))
         selectedUser = cursor.fetchone()
         print("selectedUser",selectedUser)
-        # connection = get_db_connection_view(databaseName)
-        # df = fetch_chart_data(connection, tableName)
         if selectedUser is None:
             print("No selectedUser found for this chart_id.")
             connection = get_db_connection_view(databaseName)
         else:
             selectedUser = selectedUser[0]  # Extract the actual value from the tuple
             print("Fetched selectedUser:", selectedUser)
-
-
             if selectedUser:
                 connection = fetch_external_db_connection(databaseName, selectedUser)
                 host = connection[3]
                 dbname = connection[7]
                 user = connection[4]
                 password = connection[5]
-
                 # Create a new psycopg2 connection using the details from the tuple
                 connection = psycopg2.connect(
                     dbname=dbname,
@@ -13654,8 +13643,6 @@ def receive_chart_details():
         masterdatabasecon=get_db_connection()
         df = fetch_chart_data(connection, tableName)
         print(df.head())
-        
-        
         # Logic for 'singleValueChart'
         if chart_type in ["singleValueChart","meterGauge"]:
             try:
@@ -13677,6 +13664,7 @@ def receive_chart_details():
                 print(f"Error processing singleValueChart: {e}")
                 connection.close()
                 return jsonify({"message": "Error processing single value chart", "error": str(e)}), 500
+        
         if chart_type == 'timeSeriesDecomposition':
             try:
                 selectedFrequency = data.get("selectedFrequency",)
@@ -13774,6 +13762,7 @@ def receive_chart_details():
             except Exception as e:
                 print("Error while processing chart:", e)
                 return jsonify({"error": "An error occurred while generating the chart."}), 500
+        
         if chart_type == 'sampleAitestChart':
             try:
                 df = fetch_chart_data(connection, tableName)
@@ -13786,7 +13775,7 @@ def receive_chart_details():
             except Exception as e:
                 print("Error while processing chart:", e)
                 return jsonify({"error": "An error occurred while generating the chart."}), 500
-        # if chart_type != 'treeHierarchy':
+
         if chart_type != 'treeHierarchy' and chart_type != 'tablechart':
 
             if chart_type in ["duealbarChart", "stackedbar"]:
@@ -13806,13 +13795,7 @@ def receive_chart_details():
             
             if chart_type == "Butterfly"  :
                     print("Dual y-axis chart detected")
-                    # print("filter_options====================", filter_options)
-                    # print("filtertype====================", type(filter_options))
                     data = fetch_data_for_duel(tableName, x_axis, filter_options, y_axis, aggregate, databaseName, selectedUser,calculation_data)
-                    # print("Data from fetch_data_for_duel:")  # Print before returning
-                    # print("Categories:", [row[0] for row in data])
-                    # print("Series1:", [row[1] for row in data])
-                    # print("Series2:", [row[2] for row in data])
                     return jsonify({
                         "categories": [row[0] for row in data],
                         "series1": [row[1] for row in data],
@@ -13822,14 +13805,7 @@ def receive_chart_details():
                     })
             if chart_type == "duealChart"  :
                     print("Dual y-axis chart detected")
-                    # print("filter_options====================", filter_options)
-                    # print("filtertype====================", type(filter_options))
-                    data = fetch_data_for_duel(tableName, x_axis, filter_options, y_axis, aggregate, databaseName, selectedUser,calculation_data)
-                    # print("Data from fetch_data_for_duel:")  # Print before returning
-                    # print("Categories:", [row[0] for row in data])
-                    # print("Series1:", [row[1] for row in data])
-                    # print("Series2:", [row[2] for row in data])
-                    
+                    data = fetch_data_for_duel(tableName, x_axis, filter_options, y_axis, aggregate, databaseName, selectedUser,calculation_data)                 
                     return jsonify({
                         "categories": [row[0] for row in data],
                         "series1": [row[1] for row in data],
@@ -13837,50 +13813,6 @@ def receive_chart_details():
                         # "dataframe": df_json
                          "optimizeData": optimizeData, 
                     })
-            
-            # if aggregate == 'count':
-              
-            #     df, x_axis, y_axis = apply_calculation_to_df(df, calculation_data, x_axis, y_axis)
-
-            #     grouped_df = df.groupby(x_axis[0]).size().reset_index(name="count")
-            #     print("Grouped DataFrame with all rows:", grouped_df)
-            #     filtered_df_valid = df[df[y_axis[0]].notnull()]
-            #     grouped_df_valid = filtered_df_valid.groupby(x_axis[0])[y_axis[0]].count().reset_index(name="count")
-            #     print("Grouped DataFrame with valid rows:", grouped_df_valid)
-            #     chosen_grouped_df = grouped_df_valid
-            #     categories = chosen_grouped_df[x_axis[0]].tolist()
-            #     values = chosen_grouped_df["count"].tolist()
-            #     # print("categories====================", categories)
-            #     # print("values====================", values)
-            #     allowed_categories = filter_options.get(x_axis[0], [])  # Get the list of valid categories
-            #     filtered_categories = []
-            #     filtered_values = []
-
-            #     for category, value in zip(categories, values):
-            #         # if category.strip() in allowed_categories:  # Ensure category matches the filter
-            #         if str(category).strip() in allowed_categories:
-            #             filtered_categories.append(category)
-            #             filtered_values.append(value)
-            #         else:
-            #             print(f"Category '{category}' not in filter_options[{x_axis[0]}]")
-
-
-            #     # print("filtered_categories====================3333", filtered_categories)
-            #     # print("filtered_values====================33333", filtered_values)
-
-            #     connection.close()
-
-            #     return jsonify({
-            #         "message": "Chart details received successfully!",
-            #         "categories": filtered_categories,
-            #         "values": filtered_values,
-            #         "chart_type": chart_type,
-            #         "chart_heading": chart_heading,
-            #         "x_axis": x_axis,
-            #         "y_axis": y_axis,
-            #          "optimizeData": optimizeData, 
-            #     }), 200
-
             if aggregate == 'count':
                 print("Count aggregation detected")
                 
@@ -14103,78 +14035,171 @@ def receive_chart_details():
                     
                   
 
-                    df, x_axis, y_axis = apply_calculation_to_df(df, calculation_data, x_axis, y_axis)
-                    grouped_df = df.groupby(x_axis[0])[y_axis].agg(aggregate_py).reset_index()
+                    # df, x_axis, y_axis = apply_calculation_to_df(df, calculation_data, x_axis, y_axis)
+                    # grouped_df = df.groupby(x_axis[0])[y_axis].agg(aggregate_py).reset_index()
 
-                    print("Grouped DataFrame: ", grouped_df.head())
+                    # print("Grouped DataFrame: ", grouped_df.head())
 
-                    categories = grouped_df[x_axis[0]].tolist()
-                    if isinstance(categories[0], pd.Timestamp):  # Assumes at least one value is present
-                        categories = [category.strftime('%Y-%m-%d') for category in categories]
-                    else:
-                        categories = [str(category) for category in categories]  
+                    # categories = grouped_df[x_axis[0]].tolist()
+                    # if isinstance(categories[0], pd.Timestamp):  # Assumes at least one value is present
+                    #     categories = [category.strftime('%Y-%m-%d') for category in categories]
+                    # else:
+                    #     categories = [str(category) for category in categories]  
 
-                    values = [float(value) for value in grouped_df[y_axis[0]]]  # Convert Decimal to float
+                    # values = [float(value) for value in grouped_df[y_axis[0]]]  # Convert Decimal to float
 
-                    print("categories====================22222", categories) 
-                    print("values====================22222", values)
-                    # allowed_categories = filter_options.get(x_axis[0], [])  # Get the list of valid categories
-                    allowed_categories = list(map(str, filter_options.get(x_axis[0], [])))
-
-                    filtered_categories = []
-                    filtered_values = []
-
+                    # print("categories====================22222", categories) 
+                    # print("values====================22222", values)
+                    # print("filter_options====================", filter_options)
+                    # # allowed_categories = filter_options.get(x_axis[0], [])  # Get the list of valid categories
+                    # allowed_categories = list(map(str, filter_options.get(x_axis[0], [])))
+                    # print("allowed_categories====================", allowed_categories)
+                    # filtered_categories = []
+                    # filtered_values = []
                     # for category, value in zip(categories, values):
-                    #     # if category.strip() in allowed_categories:  # Ensure category matches the filter
+                    #     print("Type of category:", type(category), "Value:", category)
                     #     if str(category).strip() in allowed_categories:
-
                     #         filtered_categories.append(category)
                     #         filtered_values.append(value)
                     #     else:
                     #         print(f"Category '{category}' not in filter_options[{x_axis[0]}]")
-                    for category, value in zip(categories, values):
-                        print("Type of category:", type(category), "Value:", category)
-                        if str(category).strip() in allowed_categories:
-                            filtered_categories.append(category)
-                            filtered_values.append(value)
-                        else:
-                            print(f"Category '{category}' not in filter_options[{x_axis[0]}]")
 
 
-                    print("filtered_categories====================1111", filtered_categories)
-                    print("filtered_values====================", filtered_values)
+                    # print("filtered_categories====================1111", filtered_categories)
+                    # print("filtered_values====================", filtered_values)
 
-                    # Create a combined list of (category, value) pairs
-                    category_value_pairs = list(zip(filtered_categories, filtered_values))
+                    # # Create a combined list of (category, value) pairs
+                    # category_value_pairs = list(zip(filtered_categories, filtered_values))
 
-                    # Sort based on optimization strategy
-                    optimized_categories = []
-                    optimized_values = []
+                    # # Sort based on optimization strategy
+                    # optimized_categories = []
+                    # optimized_values = []
+
+                    # if optimizeData == "top10":
+                    #     # Sort by values in descending order and take top 10
+                    #     sorted_pairs = sorted(category_value_pairs, key=lambda x: x[1], reverse=True)
+                    #     optimized_pairs = sorted_pairs[:10]
+                        
+                    # elif optimizeData == "bottom10":
+                    #     # Sort by values in ascending order and take bottom 10
+                    #     sorted_pairs = sorted(category_value_pairs, key=lambda x: x[1])
+                    #     optimized_pairs = sorted_pairs[:10]
+                        
+                    # elif optimizeData == "both10":
+                    #     # Get bottom 5
+                    #     sorted_asc = sorted(category_value_pairs, key=lambda x: x[1])
+                    #     bottom5_pairs = sorted_asc[:5]
+                        
+                    #     # Get top 5
+                    #     sorted_desc = sorted(category_value_pairs, key=lambda x: x[1], reverse=True)
+                    #     top5_pairs = sorted_desc[:5]
+                        
+                    #     # Combine bottom 5 and top 5
+                    #     optimized_pairs = bottom5_pairs + top5_pairs
+                        
+                    # else:
+                    #     # Default: return all filtered data
+                    #     optimized_pairs = category_value_pairs
+
+                    # # Separate back into categories and values
+                    # optimized_categories = [pair[0] for pair in optimized_pairs]
+                    # optimized_values = [pair[1] for pair in optimized_pairs]
+
+                    # print(f"{optimizeData} optimized_categories====================", optimized_categories)
+                    # print(f"{optimizeData} optimized_values====================", optimized_values)
+
+                    # connection.close()
+
+                    # # Return the optimized data
+                    # return jsonify({
+                    #     "message": "Chart details received successfully!",
+                    #     "categories": optimized_categories,
+                    #     "values": optimized_values,
+                    #     "chart_type": chart_type,
+                    #     "chart_heading": chart_heading,
+                    #     "tableName": tableName,
+                    #     "x_axis": x_axis,
+                    #     "optimizeData": optimizeData, 
+                    # }), 200
+
+                    # Get filter_options
+                    filter_options = json.loads(data.get('filter_options'))
+                    print("filter_options====================", filter_options)
+
+                    # ============================================
+                    # APPLY ALL FILTERS TO RAW DATA FIRST
+                    # ============================================
+                    df_filtered = df.copy()
+
+                    for column, valid_values in filter_options.items():
+                        if column in df_filtered.columns and valid_values:
+                            # Convert to string for safe comparison
+                            df_filtered[column] = df_filtered[column].astype(str).str.strip()
+                            valid_values_str = [str(v).strip() for v in valid_values]
+
+                            # Apply filter
+                            df_filtered = df_filtered[df_filtered[column].isin(valid_values_str)]
+                            print(f"After filtering {column} with {valid_values_str}: {len(df_filtered)} rows remaining")
+
+                    print(f"Original DataFrame rows: {len(df)}")
+                    print(f"Filtered DataFrame rows: {len(df_filtered)}")
+
+                    # Check if we have data after filtering
+                    if df_filtered.empty:
+                        return jsonify({
+                        "message": "No data matches the filter criteria",
+                        "categories": [],
+                        "values": [],
+                        "chart_type": chart_type,
+                        "chart_heading": chart_heading,
+                        "filters_applied": filter_options
+                        }), 200
+
+                    # ============================================
+                    # NOW PROCESS THE FILTERED DATA
+                    # ============================================
+                    df_filtered, x_axis, y_axis = apply_calculation_to_df(df_filtered, calculation_data, x_axis, y_axis)
+
+                    # Group the FILTERED dataframe
+                    grouped_df = df_filtered.groupby(x_axis[0])[y_axis].agg(aggregate_py).reset_index()
+
+                    print("Grouped DataFrame: ", grouped_df.head())
+
+                    # Format categories
+                    categories = grouped_df[x_axis[0]].tolist()
+                    if categories and isinstance(categories[0], pd.Timestamp):
+                        categories = [category.strftime('%Y-%m-%d') for category in categories]
+                    else:
+                        categories = [str(category) for category in categories]
+
+                        values = [float(value) for value in grouped_df[y_axis[0]]]
+
+                    print("categories====================", categories)
+                    print("values====================", values)
+
+                    # ============================================
+                    # APPLY OPTIMIZATION (NO MORE FILTERING NEEDED)
+                    # ============================================
+                    category_value_pairs = list(zip(categories, values))
 
                     if optimizeData == "top10":
-                        # Sort by values in descending order and take top 10
                         sorted_pairs = sorted(category_value_pairs, key=lambda x: x[1], reverse=True)
                         optimized_pairs = sorted_pairs[:10]
-                        
+
                     elif optimizeData == "bottom10":
-                        # Sort by values in ascending order and take bottom 10
                         sorted_pairs = sorted(category_value_pairs, key=lambda x: x[1])
                         optimized_pairs = sorted_pairs[:10]
-                        
+
                     elif optimizeData == "both10":
-                        # Get bottom 5
                         sorted_asc = sorted(category_value_pairs, key=lambda x: x[1])
                         bottom5_pairs = sorted_asc[:5]
-                        
-                        # Get top 5
+
                         sorted_desc = sorted(category_value_pairs, key=lambda x: x[1], reverse=True)
                         top5_pairs = sorted_desc[:5]
-                        
-                        # Combine bottom 5 and top 5
+
                         optimized_pairs = bottom5_pairs + top5_pairs
-                        
+
                     else:
-                        # Default: return all filtered data
                         optimized_pairs = category_value_pairs
 
                     # Separate back into categories and values
@@ -14186,27 +14211,22 @@ def receive_chart_details():
 
                     connection.close()
 
-                    # Return the optimized data
+                    # Return the optimized data with filters applied
                     return jsonify({
-                        "message": "Chart details received successfully!",
-                        "categories": optimized_categories,
-                        "values": optimized_values,
-                        "chart_type": chart_type,
-                        "chart_heading": chart_heading,
-                        "tableName": tableName,
-                        "x_axis": x_axis,
-                        "optimizeData": optimizeData, 
+                    "message": "Chart details received successfully!",
+                    "categories": optimized_categories,
+                    "values": optimized_values,
+                    "chart_type": chart_type,
+                    "chart_heading": chart_heading,
+                    "tableName": tableName,
+                    "x_axis": x_axis,
+                    "optimizeData": optimizeData,
+                    "filters_applied": filter_options  # Add this to show what filters were used
                     }), 200
+
+
+                    
         else:
-            print("Tree hierarchy chart detected")
-            print("tableName====================", tableName)
-            print("x_axis====================", x_axis)
-            print("filter_options====================", filter_options)
-            print("y_axis====================", y_axis)
-            print("aggregate====================", aggregate)
-            print("databaseName====================", databaseName)
-            print("selectedUser====================", selectedUser)
-            
             data = fetch_data_tree(tableName, x_axis, filter_options, y_axis, aggregate, databaseName,selectedUser,calculation_data)
             categories = data.get("categories", [])
             values = data.get("values", [])
@@ -18669,6 +18689,10 @@ def get_schema(table_name):
 #             'error': str(e)
 #         }), 500
 
+
+
+
+
 @app.route('/api/query', methods=['POST'])
 def process_query():
     try:
@@ -18719,6 +18743,9 @@ def process_query():
         chart_keywords = ['chart', 'graph', 'plot', 'visualize', 'bar chart', 'show']
         is_chart_query = any(keyword in question.lower() for keyword in chart_keywords)
         
+        # Extract filter conditions from SQL query
+        filters = extract_filters_from_sql(sql_query)
+        
         # Prepare chart data if applicable
         chart_data = None
         chart_type = None
@@ -18746,9 +18773,11 @@ def process_query():
                     'yAxis': second_key,
                     'aggregation': 'sum'  # You can detect this from SQL query
                 }
-        print("results_list--------------------",results_list)
-        print("chart_data--------------------",chart_data)
-        print("chart_type--------------------",chart_type)
+        
+        print("results_list--------------------", results_list)
+        print("chart_data--------------------", chart_data)
+        print("chart_type--------------------", chart_type)
+        print("filters--------------------", filters)
         
         return jsonify({
             'success': True,
@@ -18758,7 +18787,8 @@ def process_query():
             'results': results_list,
             'row_count': len(results_list),
             'chart_type': chart_type,
-            'chart_data': chart_data
+            'chart_data': chart_data,
+            'filters': filters  # Added filters to response
         })
         
     except Exception as e:
@@ -18768,6 +18798,178 @@ def process_query():
             'success': False,
             'error': str(e)
         }), 500
+
+
+def extract_filters_from_sql(sql_query):
+    """
+    Extract filter conditions from WHERE clause in SQL query
+    """
+    import re
+    
+    filters = []
+    
+    try:
+        # Convert to uppercase for parsing
+        sql_upper = sql_query.upper()
+        
+        # Check if WHERE clause exists
+        if 'WHERE' not in sql_upper:
+            return filters
+        
+        # Extract WHERE clause
+        where_match = re.search(r'WHERE\s+(.+?)(?:GROUP BY|ORDER BY|LIMIT|$)', sql_query, re.IGNORECASE | re.DOTALL)
+        
+        if not where_match:
+            return filters
+        
+        where_clause = where_match.group(1).strip()
+        
+        # Split by AND/OR to get individual conditions
+        conditions = re.split(r'\s+(?:AND|OR)\s+', where_clause, flags=re.IGNORECASE)
+        
+        for condition in conditions:
+            condition = condition.strip()
+            
+            # Parse different types of conditions
+            # Pattern: column operator value
+            comparison_match = re.match(r'(\w+)\s*(=|!=|<>|>|<|>=|<=|LIKE|IN|NOT IN)\s*(.+)', condition, re.IGNORECASE)
+            
+            if comparison_match:
+                column = comparison_match.group(1)
+                operator = comparison_match.group(2).upper()
+                value = comparison_match.group(3).strip().strip("'\"")
+                
+                # Handle IN clause
+                if operator in ['IN', 'NOT IN']:
+                    # Extract values from IN clause
+                    in_values = re.findall(r"'([^']*)'", comparison_match.group(3))
+                    value = in_values if in_values else value
+                
+                filters.append({
+                    'raw_condition': condition
+                })
+            
+            # Handle BETWEEN
+            elif 'BETWEEN' in condition.upper():
+                between_match = re.match(r'(\w+)\s+BETWEEN\s+(.+?)\s+AND\s+(.+)', condition, re.IGNORECASE)
+                if between_match:
+                    filters.append({
+                        'raw_condition': condition
+                    })
+            
+            # Handle IS NULL / IS NOT NULL
+            elif 'IS NULL' in condition.upper() or 'IS NOT NULL' in condition.upper():
+                null_match = re.match(r'(\w+)\s+(IS NULL|IS NOT NULL)', condition, re.IGNORECASE)
+                if null_match:
+                    filters.append({
+                        'raw_condition': condition
+                    })
+    
+    except Exception as e:
+        print(f"Error extracting filters: {e}")
+    
+    return filters
+
+
+# @app.route('/api/query', methods=['POST'])
+# def process_query():
+#     try:
+#         data = request.json
+#         question = data.get('question')
+#         table_name = data.get('table_name')
+        
+#         if not question or not table_name:
+#             return jsonify({
+#                 'success': False,
+#                 'error': 'Missing question or table_name'
+#             }), 400
+        
+#         # Get table schema
+#         schema = get_table_schema(table_name)
+#         if not schema:
+#             return jsonify({
+#                 'success': False,
+#                 'error': f'Table {table_name} not found'
+#             }), 404
+        
+#         # Generate SQL query
+#         sql_query = generate_sql_with_openai(question, schema, table_name)
+        
+#         if not sql_query:
+#             return jsonify({
+#                 'success': False,
+#                 'error': 'Failed to generate SQL query'
+#             }), 500
+        
+#         # Execute query
+#         results_df, error = execute_sql(sql_query)
+        
+#         if error:
+#             return jsonify({
+#                 'success': False,
+#                 'error': f'SQL execution error: {error}',
+#                 'sql': sql_query
+#             }), 400
+        
+#         # Generate natural language answer
+#         natural_answer = generate_natural_answer(question, sql_query, results_df)
+        
+#         # Convert DataFrame to list of dicts for JSON response
+#         results_list = results_df.to_dict('records') if results_df is not None else []
+        
+#         # Detect if this is a chart query
+#         chart_keywords = ['chart', 'graph', 'plot', 'visualize', 'bar chart', 'show']
+#         is_chart_query = any(keyword in question.lower() for keyword in chart_keywords)
+        
+#         # Prepare chart data if applicable
+#         chart_data = None
+#         chart_type = None
+        
+#         if is_chart_query and results_list and len(results_list) > 0:
+#             # Determine chart type from question
+#             if 'bar' in question.lower():
+#                 chart_type = 'bar'
+#             elif 'line' in question.lower():
+#                 chart_type = 'line'
+#             elif 'pie' in question.lower():
+#                 chart_type = 'pie'
+#             else:
+#                 chart_type = 'bar'  # Default to bar chart
+            
+#             # Split data into categories and values
+#             if len(results_list[0]) >= 2:
+#                 first_key = list(results_list[0].keys())[0]
+#                 second_key = list(results_list[0].keys())[1]
+                
+#                 chart_data = {
+#                     'categories': [row[first_key] for row in results_list],
+#                     'values': [float(row[second_key]) for row in results_list],
+#                     'xAxis': first_key,
+#                     'yAxis': second_key,
+#                     'aggregation': 'sum'  # You can detect this from SQL query
+#                 }
+#         print("results_list--------------------",results_list)
+#         print("chart_data--------------------",chart_data)
+#         print("chart_type--------------------",chart_type)
+        
+#         return jsonify({
+#             'success': True,
+#             'question': question,
+#             'sql': sql_query,
+#             'answer': natural_answer,
+#             'results': results_list,
+#             'row_count': len(results_list),
+#             'chart_type': chart_type,
+#             'chart_data': chart_data
+#         })
+        
+#     except Exception as e:
+#         print(f"Error processing query: {e}")
+#         print(traceback.format_exc())
+#         return jsonify({
+#             'success': False,
+#             'error': str(e)
+#         }), 500
 
 
 

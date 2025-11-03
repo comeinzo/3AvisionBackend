@@ -1828,10 +1828,90 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                     else:
                         # x axis 1 and y axis 1
                         # x axis 1 and y axis 1
-                        grouped_df = dataframe.groupby(x_axis[0])[y_axis].agg(aggregate_py).reset_index()
-                        print("Grouped DataFrame:", grouped_df.head())
+                        # print("filter_options before optimization--222", filter_options)
+                        # grouped_df = dataframe.groupby(x_axis[0])[y_axis].agg(aggregate_py).reset_index()
+                        # print("Grouped DataFrame:", grouped_df.head())
 
-                        # Apply optimization filtering if specified
+                        # print("filter_options before optimization--222", filter_options)
+                        # # Apply optimization filtering if specified
+                        # if 'OptimizationData' in locals() or 'OptimizationData' in globals():
+                        #     if OptimizationData == 'top10':
+                        #         # Sort descending and get top 10
+                        #         grouped_df = grouped_df.sort_values(by=y_axis[0], ascending=False).head(10)
+                        #     elif OptimizationData == 'bottom10':
+                        #         # Sort ascending and get bottom 10
+                        #         grouped_df = grouped_df.sort_values(by=y_axis[0], ascending=True).head(10)
+                        #     elif OptimizationData == 'both5':
+                        #         # Get top 5 and bottom 5
+                        #         top_df = grouped_df.sort_values(by=y_axis[0], ascending=False).head(5)
+                        #         bottom_df = grouped_df.sort_values(by=y_axis[0], ascending=True).head(5)
+                        #         grouped_df = pd.concat([top_df, bottom_df])
+
+                        # categories = grouped_df[x_axis[0]].tolist()
+                        # if isinstance(categories[0], pd.Timestamp):  # Assumes at least one value is present
+                        #     categories = [category.strftime('%Y-%m-%d') for category in categories]
+                        # else:
+                        #     categories = [str(category) for category in categories]  
+                        # values = [float(value) for value in grouped_df[y_axis[0]]]
+
+                        # print("categories--222", categories)
+                        # print("values--222", values)
+
+                        # # Filter categories and values based on filter_options
+                        # filtered_categories = []
+                        # filtered_values = []
+                        # for category, value in zip(categories, values):
+                        #     if category in filter_options:
+                        #         filtered_categories.append(category)
+                        #         filtered_values.append(value)
+                        # print("Filtered Categories:", filtered_categories)
+                        # print("Filtered Values:", filtered_values)
+
+
+
+                        print("filter_options before filtering--222", filter_options)
+
+                        # ============================================
+                        # PARSE filter_options if it's a string
+                        # ============================================
+                        if isinstance(filter_options, str):
+                            try:
+                                filter_options = json.loads(filter_options)
+                                print("Parsed filter_options:", filter_options)
+                            except json.JSONDecodeError as e:
+                                print(f"Error parsing filter_options: {e}")
+                                filter_options = {}
+
+                        print(f"Original dataframe rows: {len(dataframe)}")
+
+                        # ============================================
+                        # APPLY FILTERS BEFORE GROUPING
+                        # ============================================
+                        filtered_df = dataframe.copy()
+
+                        for column, valid_values in filter_options.items():
+                            if column in filtered_df.columns and valid_values:
+                                # Convert to string for safe comparison
+                                filtered_df[column] = filtered_df[column].astype(str).str.strip()
+                                valid_values_str = [str(v).strip() for v in valid_values]
+                                
+                                # Apply filter
+                                filtered_df = filtered_df[filtered_df[column].isin(valid_values_str)]
+                                print(f"After filtering {column}: {len(filtered_df)} rows")
+
+                        print(f"Filtered dataframe rows: {len(filtered_df)}")
+
+                        # ============================================
+                        # GROUP THE FILTERED DATA
+                        # ============================================
+                        grouped_df = filtered_df.groupby(x_axis[0])[y_axis].agg(aggregate_py).reset_index()
+                        print("Grouped DataFrame (after filtering):", grouped_df.head())
+
+                        # ============================================
+                        # APPLY OPTIMIZATION
+                        # ============================================
+                        print("Applying optimization--222", filter_options)
+
                         if 'OptimizationData' in locals() or 'OptimizationData' in globals():
                             if OptimizationData == 'top10':
                                 # Sort descending and get top 10
@@ -1845,26 +1925,30 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                                 bottom_df = grouped_df.sort_values(by=y_axis[0], ascending=True).head(5)
                                 grouped_df = pd.concat([top_df, bottom_df])
 
+                        # ============================================
+                        # FORMAT CATEGORIES AND VALUES
+                        # ============================================
                         categories = grouped_df[x_axis[0]].tolist()
-                        if isinstance(categories[0], pd.Timestamp):  # Assumes at least one value is present
+                        if categories and isinstance(categories[0], pd.Timestamp):
                             categories = [category.strftime('%Y-%m-%d') for category in categories]
                         else:
-                            categories = [str(category) for category in categories]  
+                            categories = [str(category) for category in categories]
+
                         values = [float(value) for value in grouped_df[y_axis[0]]]
 
-                        print("categories--222", categories)
-                        print("values--222", values)
+                        print("Final categories--222", categories)
+                        print("Final values--222", values)
 
-                        # Filter categories and values based on filter_options
-                        filtered_categories = []
-                        filtered_values = []
-                        for category, value in zip(categories, values):
-                            if category in filter_options:
-                                filtered_categories.append(category)
-                                filtered_values.append(value)
+                        # ============================================
+                        # USE THESE AS filtered_categories and filtered_values
+                        # ============================================
+                        # Since we already filtered the dataframe before grouping,
+                        # these ARE the filtered results
+                        filtered_categories = categories
+                        filtered_values = values
+
                         print("Filtered Categories:", filtered_categories)
                         print("Filtered Values:", filtered_values)
-
                         chart_data_list.append({
                             "categories": filtered_categories,
                             "values": filtered_values,
