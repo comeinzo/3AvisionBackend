@@ -740,15 +740,35 @@ def upload_csv_to_postgresql(database_name, username, password, csv_file_name, h
             cur.execute("SELECT id FROM datasource WHERE data_source_name = %s;", (directory_name,))
             existing_data_source = cur.fetchone()
 
+            # if existing_data_source:
+            #     print(f"Data source '{directory_name}' already exists in 'datasource' table. Skipping insertion.")
+            # else:
+            #     insert_query = sql.SQL("""
+            #         INSERT INTO datasource (data_source_name, data_source_path)
+            #         VALUES (%s, %s)
+            #     """)
+            #     cur.execute(insert_query, (directory_name, directory_path))
+            #     print(f"Inserted '{directory_name}' into 'datasource' table.")
+
+            # conn.commit()
             if existing_data_source:
-                print(f"Data source '{directory_name}' already exists in 'datasource' table. Skipping insertion.")
+                # ✅ Update existing record
+                update_query = sql.SQL("""
+                    UPDATE datasource
+                    SET data_source_path = %s,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE data_source_name = %s;
+                """)
+                cur.execute(update_query, (directory_path, directory_name))
+                print(f"Updated existing data source '{directory_name}' in 'datasource' table.")
             else:
+                # 🆕 Insert new record
                 insert_query = sql.SQL("""
                     INSERT INTO datasource (data_source_name, data_source_path)
                     VALUES (%s, %s)
                 """)
                 cur.execute(insert_query, (directory_name, directory_path))
-                print(f"Inserted '{directory_name}' into 'datasource' table.")
+                print(f"Inserted new data source '{directory_name}' into 'datasource' table.")
 
             conn.commit()
 

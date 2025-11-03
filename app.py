@@ -295,12 +295,12 @@ def create_table():
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
-        cur.execute("SELECT MAX(id) FROM table_chart_save")
-        if max_id is None:
-            max_id = 1
-        else:
-            max_id = max_id + 1
-        cur.execute("SELECT setval(pg_get_serial_sequence('table_chart_save', 'id'), %s, false)", (max_id,))
+        # cur.execute("SELECT MAX(id) FROM table_chart_save")
+        # if max_id is None:
+        #     max_id = 1
+        # else:
+        #     max_id = max_id + 1
+        # cur.execute("SELECT setval(pg_get_serial_sequence('table_chart_save', 'id'), %s, false)", (max_id,))
 
 
        
