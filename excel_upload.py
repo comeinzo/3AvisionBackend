@@ -436,9 +436,10 @@ from flask import Flask, request, jsonify
 import io
 from datetime import datetime, date
 import dateutil.parser as date_parser
+from config import DB_NAME, USER_NAME, PASSWORD, HOST, PORT
 
 def is_table_used_in_charts(table_name):
-    conn = get_db_connection(dbname="datasource")
+    conn = get_db_connection(dbname=DB_NAME)
     cur = conn.cursor()
     cur.execute(
         """

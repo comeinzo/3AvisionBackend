@@ -12459,7 +12459,7 @@ def get_chart_names(user_id, database_name):
     all_employee_ids = list(map(int, reporting_employees)) + [int(user_id)]
     print("all_employee_ids",all_employee_ids)
     # Step 2: Fetch dashboard names for these employees from the datasource database.
-    conn_datasource = get_db_connection("datasource")
+    conn_datasource = get_db_connection(DB_NAME)
     dashboard_structure = []
 
 
@@ -12504,7 +12504,7 @@ def get_chart_names_Edit(user_id, database_name):
     if not isinstance(user_id,list):
         user_id=[user_id]
     # Step 2: Fetch dashboard names for these employees from the datasource database.
-    conn_datasource = get_db_connection("datasource")
+    conn_datasource = get_db_connection(DB_NAME)
     dashboard_structure = []
    
 
@@ -14464,7 +14464,7 @@ def usersignup():
 
     return jsonify({'message': 'Invalid registration type'}), 400
 
-def get_db_connection(dbname="datasource"):
+def get_db_connection(dbname=DB_NAME):
     conn = psycopg2.connect(
         dbname=dbname,
         user="postgres",
@@ -14659,7 +14659,7 @@ def fetch_user_data():
         employee_id, employee_name, role_id, category_name,username,email = employee_data
         print("employee data",employee_data)
         # Fetch the category name from the signup database
-        conn_datasource = get_db_connection("datasource")
+        conn_datasource = get_db_connection(DB_NAME)
         user_details = {
             'employee_id': employee_id,
             'employee_name': employee_name,
@@ -15564,7 +15564,7 @@ def drop_view_api():
 
 
 # Function to create a database connection
-def create_connection( db_name="datasource",
+def create_connection( db_name=DB_NAME,
         user=USER_NAME,
         password=PASSWORD,
         host=HOST,

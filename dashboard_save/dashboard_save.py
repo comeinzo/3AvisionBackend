@@ -1,6 +1,7 @@
 import psycopg2
 from psycopg2 import sql
 from flask import jsonify, request
+# import json
 from config import DB_NAME,USER_NAME,PASSWORD,HOST,PORT
 from bar_chart import fetch_data_for_duel ,fetch_data_tree,fetchText_data,fetch_data_for_duel_bar
 from histogram_utils import generate_histogram_details,handle_column_data_types
@@ -156,10 +157,10 @@ def alter_columns_if_needed(conn):
         print(f"Error altering columns: {e}")
 
 
-import json
 
 
-def get_db_connection(dbname="datasource"):
+
+def get_db_connection(dbname=DB_NAME):
     conn = psycopg2.connect(
         dbname=dbname,
         # user="postgres",
@@ -232,7 +233,7 @@ def get_dashboard_names(user_id, database_name):
     all_employee_ids = list(map(int, reporting_employees)) + [int(user_id)]
 
     # Step 2: Fetch dashboard names for these employees from the datasource database.
-    conn_datasource = get_db_connection("datasource")
+    conn_datasource = get_db_connection(DB_NAME)
     dashboard_names = {}
 
     if conn_datasource:
@@ -298,7 +299,7 @@ def fetch_project_names(user_id, database_name):
         finally:
             conn_company.close()
 
-    conn_datasource = get_db_connection("datasource")
+    conn_datasource = get_db_connection(DB_NAME)
     project_names = []
 
     if conn_datasource and all_employee_ids:
@@ -363,7 +364,7 @@ def get_dashboard_names(user_id, database_name, project_name=None):
     all_employee_ids = list(map(int, reporting_employees)) + [int(user_id)]
 
     # Step 2: Fetch dashboard names for these employees from the datasource database.
-    conn_datasource = get_db_connection("datasource")
+    conn_datasource = get_db_connection(DB_NAME)
     dashboard_names = {}
 
     if conn_datasource:
@@ -402,7 +403,7 @@ def get_Edit_dashboard_names(user_id, database_name):
     dashboard_names = {}
 
     # Step: Fetch dashboard names only for the current user from the datasource database.
-    conn_datasource = get_db_connection("datasource")
+    conn_datasource = get_db_connection(DB_NAME)
 
     if conn_datasource:
         try:
