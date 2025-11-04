@@ -765,6 +765,10 @@ def upload_excel_to_postgresql(database_name, username, password, excel_file_nam
         directory_name = os.path.splitext(os.path.basename(excel_file_name))[0]
         directory_path = os.path.join(UPLOAD_FOLDER, directory_name)
         os.makedirs(directory_path, exist_ok=True)
+        rows_inserted = 0
+        rows_deleted = 0
+        rows_updated = 0
+        rows_skipped = 0
         
 
         for sheet_name in selected_sheets:
@@ -892,7 +896,7 @@ def upload_excel_to_postgresql(database_name, username, password, excel_file_nam
                 
                 cur.execute(delete_query, (batch_values,))
                 total_deleted += cur.rowcount
-
+            rows_deleted += total_deleted
             if total_deleted > 0:
                 print(f"Deleted {total_deleted} rows with matching primary key values in table '{table_name}'.")
             else:
@@ -905,14 +909,18 @@ def upload_excel_to_postgresql(database_name, username, password, excel_file_nam
                 # For very large datasets, try COPY FROM first
                 print("Using COPY FROM for large dataset...")
                 copy_success = bulk_insert_with_copy(cur, conn, table_name, df)
+                rows_inserted += len(df)
+                
                 
                 if not copy_success:
                     print("COPY FROM failed, using optimized batch insert...")
                     optimized_batch_insert(cur, conn, table_name, df, batch_size=5000)
+                    rows_inserted += len(df)
             else:
                 # For smaller datasets, use optimized batch insert
                 print("Using optimized batch insert...")
                 optimized_batch_insert(cur, conn, table_name, df, batch_size=2000)
+                rows_inserted += len(df)
 
             # Save Excel file
             file_name = f"{table_name}.xlsx"
@@ -958,8 +966,31 @@ def upload_excel_to_postgresql(database_name, username, password, excel_file_nam
 
         cur.close()
         conn.close()
+        operation_summary = []
 
-        return "Upload successful"
+        if rows_inserted > 0:
+            operation_summary.append("insert")
+        if rows_updated > 0:
+            operation_summary.append("update")
+        if rows_deleted > 0:
+            operation_summary.append("delete")
+        if rows_skipped > 0:
+            operation_summary.append("skip")
+
+        # Default action type if none performed
+        if not operation_summary:
+            operation_summary.append("no_change")
+
+        # return "Upload successful"
+        return {
+            "message": "Upload successful",
+            "table_name": table_name,
+            "actions_performed": operation_summary,
+            "rows_inserted": rows_inserted,
+            "rows_deleted": rows_deleted,
+            "rows_updated": rows_updated,
+            "rows_skipped": rows_skipped
+        }
         
     except Exception as e:
         print("An error occurred:", e)

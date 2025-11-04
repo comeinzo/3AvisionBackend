@@ -267,14 +267,100 @@ def flatten_json_data(data):
     return df
 
 
+# def insert_or_update_batch(cur, conn, table_name, df, primary_key_column, batch_size=5000):
+#     """
+#     Performs batch UPSERT (INSERT ... ON CONFLICT DO UPDATE) or batch INSERT
+#     into the specified table.
+#     """
+#     if df.empty:
+#         print(f"No data to insert into '{table_name}' in this batch.")
+#         return
+
+#     # Get actual columns from the database and identify SERIAL columns
+#     cur.execute(f"SELECT column_name, data_type FROM information_schema.columns WHERE table_name = '{table_name}' ORDER BY ordinal_position;")
+#     db_cols_info = cur.fetchall()
+#     db_columns = [c_info[0] for c_info in db_cols_info]
+#     serial_cols_in_db = [c_info[0] for c_info in db_cols_info if 'nextval' in c_info[1] or 'serial' in c_info[1].lower() or 'identity' in c_info[1].lower()]
+
+#     # Columns from DataFrame that will be explicitly inserted/updated.
+#     # Exclude DB-managed SERIAL/IDENTITY PKs from the list of columns to provide values for.
+#     cols_to_insert = [col for col in db_columns if col in df.columns and col not in serial_cols_in_db]
+
+#     # Prepare values for batch insertion/update
+#     rows_to_process = []
+#     for _, row in df.iterrows():
+#         processed_row = []
+#         for col in cols_to_insert:
+#             # Ensure value is converted to a type psycopg2 can handle
+#             expected_db_type = next((info[1] for info in db_cols_info if info[0] == col), 'TEXT') # Get actual DB type for conversion
+#             processed_row.append(convert_to_correct_type(row.get(col), expected_db_type))
+#         rows_to_process.append(tuple(processed_row))
+
+#     if primary_key_column and primary_key_column in db_columns: # Ensure PK is actually in DB schema
+#         # UPSERT scenario:
+#         # Construct the ON CONFLICT DO UPDATE SET clause
+#         update_columns = [col for col in cols_to_insert if col != primary_key_column]
+#         update_set_clause = sql.SQL(', ').join(
+#             sql.SQL("{} = EXCLUDED.{}").format(sql.Identifier(col), sql.Identifier(col))
+#             for col in update_columns
+#         )
+
+#         upsert_query = sql.SQL("""
+#             INSERT INTO {} ({}) VALUES %s
+#             ON CONFLICT ({}) DO UPDATE SET {}
+#         """).format(
+#             sql.Identifier(table_name),
+#             sql.SQL(', ').join(map(sql.Identifier, cols_to_insert)),
+#             sql.Identifier(primary_key_column),
+#             update_set_clause
+#         )
+#         print(f"Using UPSERT strategy for table '{table_name}' on primary key '{primary_key_column}'.")
+#         query_str = upsert_query.as_string(conn)
+#     else:
+#         # Simple INSERT scenario (e.g., for tables with SERIAL PK where no explicit PK is provided from data)
+#         print(f"Using simple INSERT strategy for table '{table_name}'. No UPSERT possible without a conflict target.")
+#         insert_query = sql.SQL("INSERT INTO {} ({}) VALUES %s").format(
+#             sql.Identifier(table_name),
+#             sql.SQL(', ').join(map(sql.Identifier, cols_to_insert))
+#         )
+#         query_str = insert_query.as_string(conn)
+
+#     try:
+#         with tqdm(total=len(rows_to_process), desc=f"Inserting into {table_name}", unit="row") as pbar:
+#             for i in range(0, len(rows_to_process), batch_size):
+#                 batch = rows_to_process[i:i + batch_size]
+#                 execute_values(
+#                     cur,
+#                     query_str,
+#                     batch,
+#                     page_size=batch_size
+#                 )
+#                 conn.commit() # Commit each batch
+#                 pbar.update(len(batch))
+
+#         print(f"Processed {len(rows_to_process)} rows in table '{table_name}'.")
+#     except Exception as e:
+#         print(f"Error during batch operation: {str(e)}")
+#         traceback.print_exc()
+#         conn.rollback() # Rollback the current transaction on error
+#         raise e
+
+
+
 def insert_or_update_batch(cur, conn, table_name, df, primary_key_column, batch_size=5000):
     """
     Performs batch UPSERT (INSERT ... ON CONFLICT DO UPDATE) or batch INSERT
     into the specified table.
     """
+    rows_inserted = 0
+    rows_updated = 0
+    rows_deleted = 0
+    rows_skipped = 0
     if df.empty:
         print(f"No data to insert into '{table_name}' in this batch.")
+        rows_skipped = 0
         return
+        
 
     # Get actual columns from the database and identify SERIAL columns
     cur.execute(f"SELECT column_name, data_type FROM information_schema.columns WHERE table_name = '{table_name}' ORDER BY ordinal_position;")
@@ -295,6 +381,8 @@ def insert_or_update_batch(cur, conn, table_name, df, primary_key_column, batch_
             expected_db_type = next((info[1] for info in db_cols_info if info[0] == col), 'TEXT') # Get actual DB type for conversion
             processed_row.append(convert_to_correct_type(row.get(col), expected_db_type))
         rows_to_process.append(tuple(processed_row))
+    
+
 
     if primary_key_column and primary_key_column in db_columns: # Ensure PK is actually in DB schema
         # UPSERT scenario:
@@ -336,7 +424,10 @@ def insert_or_update_batch(cur, conn, table_name, df, primary_key_column, batch_
                     page_size=batch_size
                 )
                 conn.commit() # Commit each batch
+                rows_inserted += len(batch)
                 pbar.update(len(batch))
+                
+                
 
         print(f"Processed {len(rows_to_process)} rows in table '{table_name}'.")
     except Exception as e:
@@ -344,86 +435,7 @@ def insert_or_update_batch(cur, conn, table_name, df, primary_key_column, batch_
         traceback.print_exc()
         conn.rollback() # Rollback the current transaction on error
         raise e
-
-
-
-def insert_or_update_batch(cur, conn, table_name, df, primary_key_column, batch_size=5000):
-    """
-    Performs batch UPSERT (INSERT ... ON CONFLICT DO UPDATE) or batch INSERT
-    into the specified table.
-    """
-    if df.empty:
-        print(f"No data to insert into '{table_name}' in this batch.")
-        return
-
-    # Get actual columns from the database and identify SERIAL columns
-    cur.execute(f"SELECT column_name, data_type FROM information_schema.columns WHERE table_name = '{table_name}' ORDER BY ordinal_position;")
-    db_cols_info = cur.fetchall()
-    db_columns = [c_info[0] for c_info in db_cols_info]
-    serial_cols_in_db = [c_info[0] for c_info in db_cols_info if 'nextval' in c_info[1] or 'serial' in c_info[1].lower() or 'identity' in c_info[1].lower()]
-
-    # Columns from DataFrame that will be explicitly inserted/updated.
-    # Exclude DB-managed SERIAL/IDENTITY PKs from the list of columns to provide values for.
-    cols_to_insert = [col for col in db_columns if col in df.columns and col not in serial_cols_in_db]
-
-    # Prepare values for batch insertion/update
-    rows_to_process = []
-    for _, row in df.iterrows():
-        processed_row = []
-        for col in cols_to_insert:
-            # Ensure value is converted to a type psycopg2 can handle
-            expected_db_type = next((info[1] for info in db_cols_info if info[0] == col), 'TEXT') # Get actual DB type for conversion
-            processed_row.append(convert_to_correct_type(row.get(col), expected_db_type))
-        rows_to_process.append(tuple(processed_row))
-
-    if primary_key_column and primary_key_column in db_columns: # Ensure PK is actually in DB schema
-        # UPSERT scenario:
-        # Construct the ON CONFLICT DO UPDATE SET clause
-        update_columns = [col for col in cols_to_insert if col != primary_key_column]
-        update_set_clause = sql.SQL(', ').join(
-            sql.SQL("{} = EXCLUDED.{}").format(sql.Identifier(col), sql.Identifier(col))
-            for col in update_columns
-        )
-
-        upsert_query = sql.SQL("""
-            INSERT INTO {} ({}) VALUES %s
-            ON CONFLICT ({}) DO UPDATE SET {}
-        """).format(
-            sql.Identifier(table_name),
-            sql.SQL(', ').join(map(sql.Identifier, cols_to_insert)),
-            sql.Identifier(primary_key_column),
-            update_set_clause
-        )
-        print(f"Using UPSERT strategy for table '{table_name}' on primary key '{primary_key_column}'.")
-        query_str = upsert_query.as_string(conn)
-    else:
-        # Simple INSERT scenario (e.g., for tables with SERIAL PK where no explicit PK is provided from data)
-        print(f"Using simple INSERT strategy for table '{table_name}'. No UPSERT possible without a conflict target.")
-        insert_query = sql.SQL("INSERT INTO {} ({}) VALUES %s").format(
-            sql.Identifier(table_name),
-            sql.SQL(', ').join(map(sql.Identifier, cols_to_insert))
-        )
-        query_str = insert_query.as_string(conn)
-
-    try:
-        with tqdm(total=len(rows_to_process), desc=f"Inserting into {table_name}", unit="row") as pbar:
-            for i in range(0, len(rows_to_process), batch_size):
-                batch = rows_to_process[i:i + batch_size]
-                execute_values(
-                    cur,
-                    query_str,
-                    batch,
-                    page_size=batch_size
-                )
-                conn.commit() # Commit each batch
-                pbar.update(len(batch))
-
-        print(f"Processed {len(rows_to_process)} rows in table '{table_name}'.")
-    except Exception as e:
-        print(f"Error during batch operation: {str(e)}")
-        traceback.print_exc()
-        conn.rollback() # Rollback the current transaction on error
-        raise e
+    return rows_inserted, rows_updated, rows_deleted, rows_skipped
 
 # --- Main Function (Updated) ---
 
@@ -479,6 +491,7 @@ def upload_json_to_postgresql(database_name, username, password, json_file_path,
             table_name = sanitize_column_name(table_name)
         else:
             table_name = sanitize_column_name(table_name)
+        
 
 
 
@@ -560,8 +573,10 @@ def upload_json_to_postgresql(database_name, username, password, json_file_path,
         # TRUNCATE might be desired before insert_or_update_batch.
         # For now, `insert_or_update_batch` will either UPSERT (if a natural PK exists in DF)
         # or simply INSERT (if PK is SERIAL and not provided in DF).
-        insert_or_update_batch(cur, conn, table_name, df, db_primary_key_column, batch_size=5000)
-
+        # insert_or_update_batch(cur, conn, table_name, df, db_primary_key_column, batch_size=5000)
+        rows_inserted, rows_updated, rows_deleted, rows_skipped = insert_or_update_batch(
+            cur, conn, table_name, df, db_primary_key_column, batch_size=5000
+        )
         # --- Save details in the datasource table ---
         json_save_path = os.path.join('uploads', f"{table_name}.json")
         os.makedirs(os.path.dirname(json_save_path), exist_ok=True)
@@ -599,7 +614,30 @@ def upload_json_to_postgresql(database_name, username, password, json_file_path,
 
         conn.commit() # Commit DML for datasource table
 
-        return "Upload successful"
+        # return "Upload successful"
+        # --- Operation Summary ---
+        operation_summary = []
+        if rows_inserted > 0:
+            operation_summary.append("insert")
+        if rows_updated > 0:
+            operation_summary.append("update")
+        if rows_deleted > 0:
+            operation_summary.append("delete")
+        if rows_skipped > 0:
+            operation_summary.append("skip")
+        if not operation_summary:
+            operation_summary.append("no_change")
+
+        # ✅ Return detailed summary
+        return {
+            "message": "Upload successful",
+            "table_name": table_name,
+            "actions_performed": operation_summary,
+            "rows_inserted": rows_inserted,
+            "rows_deleted": rows_deleted,
+            "rows_updated": rows_updated,
+            "rows_skipped": rows_skipped
+        }
     except Exception as e:
         print("An error occurred:", e)
         traceback.print_exc()

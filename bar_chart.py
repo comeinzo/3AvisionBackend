@@ -256,7 +256,7 @@ def get_column_names(db_name, username, password, table_name, selected_user,
         print("connection_type:", connection_type)
 
         # ✅ 1️⃣ LOCAL DATABASE CONNECTION
-        if connection_type == 'local' or connection_type == 'null' or connection_type =='none':
+        if not connection_type or connection_type.lower() in ('local', 'null', 'none'):
             conn = psycopg2.connect(
                 dbname=db_name,
                 user=username,

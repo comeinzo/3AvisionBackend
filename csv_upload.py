@@ -803,10 +803,25 @@ def upload_csv_to_postgresql(database_name, username, password, csv_file_name, h
         if conn:
             conn.close()
             print("Database connection closed.")
+    operation_summary = []
 
+    if rows_added_total > 0:
+        operation_summary.append("insert")
+    if rows_updated_total > 0:
+        operation_summary.append("update")
+    if rows_deleted_total > 0:
+        operation_summary.append("delete")
+    if rows_skipped_total > 0:
+        operation_summary.append("skip")
+
+    # Default action type if none performed
+    if not operation_summary:
+        operation_summary.append("no_change")
     # return "Upload successful"
     return {
     "message": "Upload successful",
+    "table_name": table_name,
+    "actions_performed": operation_summary,
     "rows_added": rows_added_total,
     "rows_updated": rows_updated_total,
     "rows_skipped": rows_skipped_total,

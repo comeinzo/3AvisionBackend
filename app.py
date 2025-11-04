@@ -375,6 +375,7 @@ def upload_file_excel():
         # Validate required form data
         database_name = request.form.get('company_database')
         primary_key_column = request.form.get('primaryKeyColumnName')
+        user_email = request.form.get('email', 'Unknown User')
         
         if not database_name:
             return jsonify({'message': 'Company database name is required', 'status': False}), 400
@@ -433,19 +434,42 @@ def upload_file_excel():
                 selected_sheets
             )
             
-            if result == "Upload successful":
+            # if result == "Upload successful":
+            if isinstance(result, dict) and result.get("message") == "Upload successful":
+                sheet_list = ', '.join(selected_sheets)
+                log_activity(
+                    user_email=user_email,
+                    action_type="Upload Excel",
+                    description=(
+                        f"Uploaded Excel file '{excel_file_name}' to database '{database_name}' "
+                        f"with {result.get('rows_inserted', 0)} inserted, "
+                        f"{result.get('rows_updated', 0)} updated, "
+                        f"{result.get('rows_deleted', 0)} deleted, and "
+                        f"{result.get('rows_skipped', 0)} skipped rows."
+                    ),
+                    company_name=database_name,
+                    table_name=sheet_list
+                )
+
             # if isinstance(result, dict) and result.get("message") == "Upload successful":
                 return jsonify({
                     'message': 'File uploaded successfully',
                     'status': True,
                     'uploaded_by': request.current_user.get('user_id'),
                     'file_name': excel_file_name,
-                    # 'rows_added': result["rows_added"],
-                    # 'rows_deleted': result["rows_deleted"],
-                    # 'rows_skipped': result["rows_skipped"],
-                    # 'rows_updated': result["rows_updated"]
+                    'rows_added': result["rows_added"],
+                    'rows_deleted': result["rows_deleted"],
+                    'rows_skipped': result["rows_skipped"],
+                    'rows_updated': result["rows_updated"]
                 }), 200
             else:
+                log_activity(
+                    user_email=user_email,
+                    action_type="Upload Failed",
+                    description=f"Failed to upload Excel file '{excel_file_name}' to database '{database_name}'. Error: {result}",
+                    company_name=database_name
+                )
+
                 return jsonify({'message': result, 'status': False}), 500
                 
         finally:
@@ -470,6 +494,7 @@ def upload_file_csv():
         database_name = request.form.get('company_database')
         primary_key_column = request.form.get('primaryKeyColumnName')
         update_permission = request.form.get('updatePermission')
+        user_email = request.form.get('email', 'Unknown User')
         
         if not database_name:
             return jsonify({'message': 'Company database name is required', 'status': False}), 400
@@ -524,6 +549,13 @@ def upload_file_csv():
             # else:
             #     return jsonify({'message': result, 'status': False}), 500
             if isinstance(result, dict) and result.get("message") == "Upload successful":
+                log_activity(
+                    user_email=request.current_user.get("email", "Unknown"),
+                    action_type=", ".join(result.get("actions_performed", [])),
+                    table_name=result.get("table_name"),
+                    company_name=database_name,
+                    description=f"CSV upload performed with {result['rows_added']} inserted, {result['rows_updated']} updated, {result['rows_skipped']} skipped rows."
+                )
                 return jsonify({
                     'message': 'File uploaded successfully',
                     'status': True,
@@ -555,6 +587,8 @@ def upload_file_json():
     try:
         database_name = request.form.get('company_database')
         primary_key_column = request.form.get('primaryKeyColumnName')
+        user_email = request.form.get('email', 'Unknown User')
+        
         
         # Check if file is present in the request
         if 'file' not in request.files:
@@ -579,10 +613,30 @@ def upload_file_json():
         # Call the upload_json_to_postgresql function
         result = upload_json_to_postgresql(database_name, username, password, temp_file_path, primary_key_column, host, port)
         
-        if result == "Upload successful":
-            return jsonify({'message': 'File uploaded successfully'}), 200
+        # if result == "Upload successful":
+        if isinstance(result, dict) and result.get("message") == "Upload successful":
+            log_activity(
+                    user_email=request.current_user.get("email", "Unknown"),
+                    action_type=", ".join(result.get("actions_performed", [])),
+                    table_name=result.get("table_name"),
+                    company_name=database_name,
+                    description=f"Json upload performed with {result['rows_inserted']} inserted, {result['rows_updated']} updated, {result['rows_skipped']} skipped rows."
+            )
+            return jsonify({
+                    'message': 'File uploaded successfully',
+                    'status': True,
+                    'uploaded_by': request.current_user.get('user_id'),
+                    'file_name': json_file_name,
+                    'rows_added': result["rows_inserted"],
+                    'rows_deleted': result["rows_deleted"],
+                    'rows_skipped': result["rows_skipped"],
+                    'rows_updated': result["rows_updated"]
+            }), 200
         else:
-            return jsonify({'message': result}), 500
+            return jsonify({'message': result, 'status': False}), 500
+        #     return jsonify({'message': 'File uploaded successfully'}), 200
+        # else:
+        #     return jsonify({'message': result}), 500
 
     except Exception as e:
         traceback.print_exc()
@@ -992,6 +1046,7 @@ def join_tables():
     join_type = data.get('joinType', 'INNER JOIN') 
     database_name = data.get('databaseName')
     view_name = data.get('joinedTableName')  
+    user_email = data.get('email', 'system')
 
     query = f"CREATE OR REPLACE VIEW {view_name} AS SELECT {', '.join(selected_columns)} FROM {tables[0]}"
 
@@ -1009,9 +1064,26 @@ def join_tables():
         cursor = connection.cursor()
         cursor.execute(query)
         connection.commit()  # Commit to save the view in the database
+        log_activity(
+            user_email=user_email,
+            action_type="JOIN_TABLES",
+            description=f"Created joined view '{view_name}' using tables: {', '.join(tables)}",
+            table_name=view_name,
+            company_name=database_name,
+            
+        )
+        
         print("View created successfully")
     except Exception as e:
         print("Error executing query:", e)
+        log_activity(
+            user_email=user_email,
+            action_type="ERROR",
+            description=f"Failed to create joined view '{view_name}': {str(e)}",
+            table_name=view_name,
+            company_name=database_name,
+            
+        )
         return jsonify({"error": str(e)}), 500
     finally:
         if connection:
@@ -3316,6 +3388,41 @@ def save_data():
         conn.commit()
         cur.close()
         conn.close()
+        user_email = None
+        user_name=None
+        try:
+            emp_conn = psycopg2.connect(
+                dbname=company_name,
+                user=username,
+                password=password,
+                host=host,
+                port=port
+            )
+            emp_cur = emp_conn.cursor()
+            emp_cur.execute("SELECT email,username FROM employee_list WHERE employee_id = %s;", (user_id,))
+            result = emp_cur.fetchone()
+            if result:
+                user_email = result[0]
+                user_name=result[1]
+            emp_cur.close()
+            emp_conn.close()
+        except Exception as e:
+            print("⚠️ Error fetching user email:", e)
+
+        # ✅ If email not found, fallback to user_id
+        if not user_email:
+            user_email = str(user_id)
+
+        # ✅ Log the save chart action
+        log_activity(
+            user_email=user_email,
+            action_type="Save Chart",
+            description=f"User '{user_name}' saved a chart named '{save_name}' in company '{company_name}'.",
+            table_name=data.get('selectedTable'),
+            company_name=company_name,
+            dashboard_name=save_name
+        )
+
         
         return jsonify({'message': 'Data inserted successfully'})
     except Exception as e:
@@ -3402,8 +3509,44 @@ def update_data():
         
 
         conn.commit()
+
+        # ✅ Fetch chart_name from table_chart_save using chartId
+        cur.execute("SELECT chart_name FROM table_chart_save WHERE id = %s;", (data.get('chartId'),))
+        chart_name_result = cur.fetchone()
+        chart_name = chart_name_result[0] if chart_name_result else "Unknown Chart"
+
         cur.close()
         conn.close()
+
+        # ✅ Fetch user email and username
+        company_name = data.get("company_name")
+        user_id = data.get("user_id")
+
+        if company_name and user_id:
+            email_conn = connect_db(company_name)
+            email_cur = email_conn.cursor()
+            email_cur.execute("SELECT email, username FROM employee_list WHERE employee_id = %s;", (user_id,))
+            result = email_cur.fetchone()
+            user_email = result[0] if result else None
+            username = result[1] if result else "Unknown User"
+            email_cur.close()
+            email_conn.close()
+        else:
+            user_email = None
+            username = "Unknown User"
+
+        # ✅ Log activity with chart name and ID
+        log_activity(
+            user_email=user_email or "Unknown",
+            action_type="Chart Updated",
+            description=(
+                f"User '{username}' ({user_email}) updated chart '{chart_name}' "
+                f"(ID: {data.get('chartId')}) successfully with new configurations."
+            ),
+            table_name="table_chart_save",
+            company_name=company_name,
+            dashboard_name=chart_name
+        )
         
         return jsonify({'message': 'Data updated successfully'})
     except Exception as e:
@@ -3777,7 +3920,45 @@ def save_all_chart_details():
     insert_combined_chart_details(conn, combined_chart_details)
     
     conn.close()
-    
+    # ✅ LOGGING SECTION
+    try:
+        # 1️⃣ Fetch email from company’s employee_list table
+        user_email = None
+        user_name=None
+        emp_conn = psycopg2.connect(
+            dbname=company_name,
+            user=username,
+            password=password,
+            host=host,
+            port=port
+        )
+        emp_cur = emp_conn.cursor()
+        emp_cur.execute("SELECT email,username FROM employee_list WHERE employee_id = %s;", (user_id,))
+        result = emp_cur.fetchone()
+        if result:
+            user_email = result[0]
+            user_name=result[1]
+        emp_cur.close()
+        emp_conn.close()
+
+        # 2️⃣ Fallback if email not found
+        if not user_email:
+            user_email = str(user_id)
+
+        # 3️⃣ Log the action
+        log_activity(
+            user_email=user_email,
+            action_type="Save Dashboard",
+            description=f"User '{user_name}' saved dashboard '{file_name}' under company '{company_name}'.",
+            table_name=None,
+            company_name=company_name,
+            dashboard_name=file_name
+        )
+
+        print("✅ Dashboard save logged successfully.")
+
+    except Exception as e:
+        print("⚠️ Error logging save_all_chart_details activity:", e)
     return jsonify({
         'message': 'Chart details saved successfully',
         'chart_details': combined_chart_details
@@ -4074,6 +4255,7 @@ def login():
         
         tokens = JWTManager.generate_tokens(user_data, 'admin')
         print("Admin Token------",tokens)
+        log_activity(email, 'login', 'Super Admin logged in successfully')
         
         return jsonify({
             'message': 'Login successful',
@@ -4107,6 +4289,7 @@ def login():
             
             tokens = JWTManager.generate_tokens(user_data, 'user')
             print("Cleent user Token------",tokens)
+            log_activity(email, 'login', f'User {email} logged in')
             
             return jsonify({
                 'message': 'Login successful',
@@ -4134,6 +4317,7 @@ def login():
             
             tokens = JWTManager.generate_tokens(user_data, 'employee')
             print("Employee Token------------------",tokens)
+            log_activity(email, 'login', f'Employee {email} logged into {company}', company_name=company)
             
             return jsonify({
                 'message': 'Login successful',
@@ -4591,6 +4775,7 @@ def receive_chart_details():
     chart_type = data.get('chart_type')
     chart_heading = data.get('chart_heading')
     optimizeData= data.get('optimizeData')
+    user_id=data.get('user_id')
     try:
         filter_options_str = data.get('filter_options').replace('null', 'null') #this line is not needed.
         filter_options = json.loads(data.get('filter_options')) #use json.loads instead of ast.literal_eval.
@@ -4656,6 +4841,33 @@ def receive_chart_details():
         masterdatabasecon=get_db_connection()
         df = fetch_chart_data(connection, tableName)
         print(df.head())
+        cur = masterdatabasecon.cursor()
+        cur.execute("SELECT chart_name FROM table_chart_save WHERE id = %s;", (chart_id,))
+        result1 = cur.fetchone()
+        chart = result1[0] if result1 else None
+        cur.close()
+        masterdatabasecon.close()
+        user_email = None
+        user_name=None
+        emp_conn = psycopg2.connect(
+            dbname=databaseName,
+            user=username,
+            password=password,
+            host=host,
+            port=port
+        )
+        emp_cur = emp_conn.cursor()
+        emp_cur.execute("SELECT email,username FROM employee_list WHERE employee_id = %s;", (user_id,))
+        result = emp_cur.fetchone()
+        if result:
+            user_email = result[0]
+            user_name=result[1]
+        emp_cur.close()
+        emp_conn.close()
+
+        # 2️⃣ Fallback if email not found
+        if not user_email:
+            user_email = str(user_id)
         
         
         # Logic for 'singleValueChart'
@@ -4668,6 +4880,15 @@ def receive_chart_details():
                 connection.close()
 
                 # Return the single value as part of the response
+                description = f"{user_name} viewed the chart '{chart}' from table '{tableName}'."
+                log_activity(
+                    company_name=databaseName,
+                    user_email=user_email,
+                    action_type="View Chart",
+                    table_name=tableName,
+                    dashboard_name=chart,
+                    description=description
+                )
                 return jsonify({
                     "message": "Single value chart details received successfully!",
                     "single_value": float(single_value),  # Convert Decimal to float
@@ -4750,7 +4971,15 @@ def receive_chart_details():
                
                 observed = decomposition.observed.dropna().tolist()
                 dates = decomposition.observed.dropna().index.strftime('%Y-%m-%d').tolist()
-
+                description = f"{user_name} viewed the chart '{chart}' from table '{tableName}'."
+                log_activity(
+                    company_name=databaseName,
+                    user_email=user_email,
+                    action_type="View Chart",
+                    table_name=tableName,
+                    dashboard_name=chart,
+                    description=description
+                )
                 return jsonify({
                     "chart_type": "timeSeriesDecomposition",
                     "categories": dates,
@@ -4770,6 +4999,15 @@ def receive_chart_details():
                 
                 df = fetch_ai_saved_chart_data(masterdatabasecon, tableName="table_chart_save",chart_id=chart_id)
                 print("AI/ML chart details:", df)
+                description = f"{user_name} viewed the chart '{chart}' from table '{tableName}'."
+                log_activity(
+                    company_name=databaseName,
+                    user_email=user_email,
+                    action_type="View Chart",
+                    table_name=tableName,
+                    dashboard_name=chart,
+                    description=description
+                )
                 return jsonify({
                     "histogram_details": df,
                 }), 200
@@ -4794,6 +5032,15 @@ def receive_chart_details():
             if chart_type in ["duealbarChart", "stackedbar"]:
                     datass = fetch_data_for_duel_bar(tableName, x_axis, filter_options, y_axis, aggregate, databaseName,selectedUser,calculation_data)
                     print("Duel/Stacked bar")
+                    description = f"{user_name} viewed the chart '{chart}' from table '{tableName}'."
+                    log_activity(
+                        company_name=databaseName,
+                        user_email=user_email,
+                        action_type="View Chart",
+                        table_name=tableName,
+                        dashboard_name=chart,
+                        description=description
+                    )
                     return jsonify({
                                 "message": "Chart details received successfully!",
                                 "categories": [row[0] for row in datass],
@@ -4815,6 +5062,15 @@ def receive_chart_details():
                     # print("Categories:", [row[0] for row in data])
                     # print("Series1:", [row[1] for row in data])
                     # print("Series2:", [row[2] for row in data])
+                    description = f"{user_name} viewed the chart '{chart}' from table '{tableName}'."
+                    log_activity(
+                        company_name=databaseName,
+                        user_email=user_email,
+                        action_type="View Chart",
+                        table_name=tableName,
+                        dashboard_name=chart,
+                        description=description
+                    )
                     return jsonify({
                         "categories": [row[0] for row in data],
                         "series1": [row[1] for row in data],
@@ -4831,6 +5087,15 @@ def receive_chart_details():
                     # print("Categories:", [row[0] for row in data])
                     # print("Series1:", [row[1] for row in data])
                     # print("Series2:", [row[2] for row in data])
+                    description = f"{user_name} viewed the chart '{chart}' from table '{tableName}'."
+                    log_activity(
+                            company_name=databaseName,
+                            user_email=user_email,
+                            action_type="View Chart",
+                            table_name=tableName,
+                            dashboard_name=chart,
+                            description=description
+                    )
                     
                     return jsonify({
                         "categories": [row[0] for row in data],
@@ -4957,6 +5222,15 @@ def receive_chart_details():
                 print("Final values====================", values)
                 
                 connection.close()
+                description = f"{user_name} viewed the chart '{chart}' from table '{tableName}'."
+                log_activity(
+                    company_name=databaseName,
+                    user_email=user_email,
+                    action_type="View Chart",
+                    table_name=tableName,
+                    dashboard_name=chart,
+                    description=description
+                )
                 return jsonify({
                     "message": "Chart details received successfully!",
                     "categories": optimized_categories,
@@ -5032,6 +5306,15 @@ def receive_chart_details():
 
 
                     connection.close()
+                    description = f"{user_name} viewed the chart '{chart}' from table '{tableName}'."
+                    log_activity(
+                        company_name=databaseName,
+                        user_email=user_email,
+                        action_type="View Chart",
+                        table_name=tableName,
+                        dashboard_name=chart,
+                        description=description
+                    )
 
                     # Return the filtered data for both series
                     return jsonify({
@@ -5088,6 +5371,15 @@ def receive_chart_details():
 
 
                     connection.close()
+                    description = f"{user_name} viewed the chart '{chart}' from table '{tableName}'."
+                    log_activity(
+                        company_name=databaseName,
+                        user_email=user_email,
+                        action_type="View Chart",
+                        table_name=tableName,
+                        dashboard_name=chart,
+                        description=description
+                    )
 
                     # Return the filtered data for both series
                     return jsonify({
@@ -5187,6 +5479,15 @@ def receive_chart_details():
                     print(f"{optimizeData} optimized_values====================", optimized_values)
 
                     connection.close()
+                    description = f"{user_name} viewed the chart '{chart}' from table '{tableName}'."
+                    log_activity(
+                        company_name=databaseName,
+                        user_email=user_email,
+                        action_type="View Chart",
+                        table_name=tableName,
+                        dashboard_name=chart,
+                        description=description
+                    )
 
                     # Return the optimized data
                     return jsonify({
@@ -5248,6 +5549,15 @@ def receive_chart_details():
             print("categories",categories)
             print("values",values)
             # Return the filtered data
+            description = f"{user_name} viewed the chart '{chart}' from table '{tableName}'."
+            log_activity(
+                    company_name=databaseName,
+                    user_email=user_email,
+                    action_type="View Chart",
+                    table_name=tableName,
+                    dashboard_name=chart,
+                    description=description
+            )
             return jsonify({
                 "message": "Chart details received successfully!",
                 "categories": optimized_categories,
@@ -5378,6 +5688,36 @@ def dashboard_data(dashboard_name,company_name):
             print("fontColor",fontColor)
             print("fontSize",fontSize)
             print("Chart Data=======>",data)
+        user_email = None
+        user_name=None
+        emp_conn = psycopg2.connect(
+            dbname=company_name,
+            user=username,
+            password=password,
+            host=host,
+            port=port
+        )
+        emp_cur = emp_conn.cursor()
+        emp_cur.execute("SELECT email,username FROM employee_list WHERE employee_id = %s;", (user_id,))
+        result = emp_cur.fetchone()
+        if result:
+            user_email = result[0]
+            user_name=result[1]
+        emp_cur.close()
+        emp_conn.close()
+
+        # 2️⃣ Fallback if email not found
+        if not user_email:
+            user_email = str(user_id)
+        description = f"User {user_name} viewed dashboard '{dashboard_name}'"
+        log_activity(
+            user_email=user_email,
+            action_type="View_Dashboard",
+            description=description,
+            table_name=None,
+            company_name=company_name,
+            dashboard_name=dashboard_name
+        )
         # return jsonify(data,chart_datas)
         return jsonify({
             "data": data,
@@ -6766,6 +7106,7 @@ def save_connection():
     port = data.get('port')
     dbName = data.get('dbName')
     company_name = data.get('company_name')
+    user_id=data.get("user_id")
 
     # ✅ SSH-related fields
     use_ssh = data.get('use_ssh', False)
@@ -6793,6 +7134,41 @@ def save_connection():
             ssh_key_path,
             created_at
         )
+        try:
+            # Fetch user email if user_id or username is known (optional)
+            user_email = None
+            user_name=None
+            emp_conn = psycopg2.connect(
+                dbname=company_name,
+                user=username,
+                password=password,
+                host=host,
+                port=port
+            )
+            emp_cur = emp_conn.cursor()
+            emp_cur.execute("SELECT email,username FROM employee_list WHERE employee_id = %s;", (user_id,))
+            result = emp_cur.fetchone()
+            if result:
+                user_email = result[0]
+                user_name=result[1]
+            emp_cur.close()
+            emp_conn.close()
+
+            # 2️⃣ Fallback if email not found
+            if not user_email:
+                user_email = str(user_id)
+            log_activity(
+                user_email=user_email,
+                action_type="Save Connection",
+                description=(
+                    f"Saved a new database connection '{saveName}' "
+                    f"for provider '{provider}' ({dbType}) in database '{dbName}'."
+                ),
+                company_name=company_name
+            )
+        except Exception as log_err:
+            print("⚠️ Log entry failed:", log_err)
+
 
         return jsonify(
             success=True,
@@ -8569,6 +8945,7 @@ def save_dashboard():
     # dashboard_name = data['dashboard_name']
     # dashboard_name = data['dashboard_name'].strip()
     dashboard_name_data = data.get("dashboard_name")
+    company=data.get("company")
 
     if isinstance(dashboard_name_data, list):
             # Expect [id, name]
@@ -8784,6 +9161,44 @@ def save_dashboard():
 
         cur.close()
         conn.close()
+        # ✅ --- ACTIVITY LOGGING SECTION ---
+        try:
+            # Fetch user email from employee_list in company DB
+            user_email = None
+            user_name=None
+            emp_conn = psycopg2.connect(
+                dbname=company,
+                user=username,
+                password=password,
+                host=host,
+                port=port
+            )
+            emp_cur = emp_conn.cursor()
+            emp_cur.execute("SELECT email,username FROM employee_list WHERE employee_id = %s;", (user_id,))
+            result = emp_cur.fetchone()
+            if result:
+                user_email = result[0]
+                user_name=result[1]
+            emp_cur.close()
+            emp_conn.close()
+
+            # If not found, fallback
+            if not user_email:
+                user_email = str(user_id)
+
+            # Log the update
+            log_activity(
+                user_email=user_email,
+                action_type="Update Dashboard",
+                description=f"User '{user_name}' updated dashboard '{dashboard_name}' for company '{company}'.",
+                table_name=None,
+                company_name=company,
+                dashboard_name=dashboard_name
+            )
+            print("✅ Dashboard update logged successfully.")
+        except Exception as log_err:
+            print("⚠️ Error logging dashboard update:", log_err)
+
 
         return jsonify({"message": "Dashboard updated successfully"}), 200
 
@@ -9407,6 +9822,7 @@ def transfer_and_verify_data():
     schedule_time = data.get('scheduleTime')
     update_existing_table = data.get('updateExistingTable', False)
     create_view_if_exists = data.get('createViewIfExists', False)
+    company_name = destination_config.get("dbName")  # ⚡ assume company DB
     email = data.get('email')
     print("dest_table_name",dest_table_name)
 
@@ -9463,6 +9879,25 @@ def transfer_and_verify_data():
             return jsonify({"success": False, "error": f"Error checking destination table: {str(e)}"}), 500
 
     print("Final destination table name:", dest_table_name)
+    try:
+        email_conn = get_company_db_connection(company_name)
+        print("email_conn",email_conn)
+        email_cur = email_conn.cursor()
+        email_cur.execute(
+            "SELECT email, username FROM employee_list WHERE email = %s LIMIT 1;",
+            (email,)
+        )
+        user_result = email_cur.fetchone()
+        print("user")
+        if user_result:
+            user_email, user_name = user_result
+        else:
+            user_email, user_name = email, "Unknown"
+        email_cur.close()
+        email_conn.close()
+    except Exception as e:
+        print("⚠️ Could not fetch user info:", e)
+        user_email, user_name = email, "Unknown"
     
 
     job_id = f"{source_table_name}_to_{dest_table_name}_{datetime.utcnow().strftime('%Y%m%d%H%M%S')}"
@@ -9481,6 +9916,17 @@ def transfer_and_verify_data():
     print("job_kwargs",job_kwargs)
     if not schedule_type or schedule_type == '':
         result = job_logic(**job_kwargs)
+        log_activity(
+            user_email=user_email,
+            action_type="Data Transfer",
+            description=(
+                f"User {user_name} ({user_email}) transferred data "
+                f"from '{source_table_name}' to '{dest_table_name}'."
+            ),
+            table_name=source_table_name,
+            company_name=company_name,
+            dashboard_name=None
+        )
         return jsonify(result)
 
     try:
@@ -9498,6 +9944,19 @@ def transfer_and_verify_data():
             scheduler.add_job(func=job_logic, trigger='cron', hour=schedule_hour, minute=schedule_minute, id=job_id, kwargs=job_kwargs, next_run_time=now)
         else:
             return jsonify({"success": False, "error": f"Invalid schedule type: {schedule_type}"}), 400
+        log_activity(
+            user_email=user_email,
+            action_type="Scheduled Data Transfer",
+            description=(
+                f"User {user_name} ({user_email}) scheduled a data transfer job "
+                f"from '{source_table_name}' to '{dest_table_name}' "
+                f"({schedule_type}, time: {schedule_time})."
+            ),
+            table_name=source_table_name,
+            company_name=company_name,
+            dashboard_name=None
+        )
+
         print("\n📋 Scheduled Jobs List:")
         print(scheduler.get_jobs())
 
@@ -9534,6 +9993,14 @@ Regards,
 
     except Exception as e:
         error_msg = f"Failed to schedule job: {str(e)}"
+        log_activity(
+            user_email=user_email,
+            action_type="Data Transfer Error",
+            description=f"Error scheduling data transfer: {str(e)}",
+            table_name=source_table_name,
+            company_name=company_name,
+            dashboard_name=None
+        )
         if email:
             send_notification_email(email, "Data Transfer Scheduling Failed", error_msg)
         return jsonify({"success": False, "error": error_msg}), 500
@@ -10315,6 +10782,53 @@ def share_dashboard():
         print("Dashboard copied with new ID:", new_dashboard_id)
 
         conn.commit()
+        # ✅ Step 4: Log activity
+        try:
+            # Fetch user email for logging
+            # ✅ Fetch sender (from_user) details
+            email_conn = connect_db(company_name)
+            email_cur = email_conn.cursor()
+            email_cur.execute(
+                "SELECT email, username FROM employee_list WHERE employee_id = %s;", 
+                (from_user,)
+            )
+            sender_result = email_cur.fetchone()
+
+            if sender_result:
+                sender_email, sender_username = sender_result
+            else:
+                sender_email, sender_username = "Unknown", "Unknown"
+
+            # ✅ Fetch receiver (to_user_id) details
+            email_cur.execute(
+                "SELECT email, username FROM employee_list WHERE employee_id = %s;", 
+                (to_user_id,)
+            )
+            receiver_result = email_cur.fetchone()
+
+            if receiver_result:
+                receiver_email, receiver_username = receiver_result
+            else:
+                receiver_email, receiver_username = "Unknown", "Unknown"
+
+            email_cur.close()
+            email_conn.close()
+
+            # ✅ Log the activity
+            log_activity(
+                user_email=sender_email,
+                action_type="Dashboard Shared",
+                description=(
+                    f"Dashboard '{dashboard_name}' shared successfully by {sender_username} "
+                    f"({sender_email}) to {receiver_username} ({receiver_email})."
+                ),
+                table_name="table_dashboard",
+                company_name=company_name,
+                dashboard_name=dashboard_name
+            )
+
+        except Exception as log_err:
+            print("⚠️ Error logging dashboard share activity:", log_err)
         return jsonify({"message": "Dashboard shared successfully!"}), 200
 
     except Exception as e:
@@ -10912,6 +11426,112 @@ def system_summary():
         print("Error:", e)
         return jsonify({"error": str(e)}), 500
 
+
+
+
+
+#-------------------LOG DETAILS----------------
+
+def create_activity_log_table(company_name):
+    """
+    Creates the activity_log table if it doesn't already exist in the given database.
+    """
+    conn = None
+    try:
+        conn = psycopg2.connect(
+            dbname=company_name,
+            user=username,
+            password=password,
+            host=host,
+            port=port
+        )
+        cur = conn.cursor()
+
+        create_table_query = """
+        CREATE TABLE IF NOT EXISTS activity_log (
+            id SERIAL PRIMARY KEY,
+            user_email VARCHAR(255),
+            action_type VARCHAR(100),
+            table_name VARCHAR(255),
+            company_name VARCHAR(255),
+            dashboard_name VARCHAR(255),
+            description TEXT,
+            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        """
+
+        cur.execute(create_table_query)
+        conn.commit()
+        print(f"✅ activity_log table created (or already exists) in database: {company_name}")
+
+        cur.close()
+    except Exception as e:
+        print(f"❌ Error creating activity_log table in {company_name}:", e)
+    finally:
+        if conn:
+            conn.close()
+def log_activity(user_email, action_type, description, table_name=None, company_name=None,dashboard_name=None):
+    conn = None
+    try:
+        create_activity_log_table(company_name)
+        conn = psycopg2.connect(
+            dbname=company_name,  # or your global connection
+            user=username,
+            password=password,
+            host=host,
+            port=port
+        )
+        cur = conn.cursor()
+        
+        print("inerting log")
+        query = """
+            INSERT INTO activity_log (user_email, action_type, description, table_name, company_name,dashboard_name, timestamp)
+            VALUES (%s, %s, %s, %s, %s, %s,%s)
+        """
+        cur.execute(query, (user_email, action_type, description, table_name, company_name,dashboard_name, datetime.now()))
+        conn.commit()
+        cur.close()
+    except Exception as e:
+        print("Error logging activity:", e)
+    finally:
+        if conn:
+            conn.close()
+@app.route('/api/get_activity_logs', methods=['GET'])
+def get_activity_logs():
+    company_name = request.args.get("company_name")
+
+    if not company_name:
+        return jsonify({"error": "Company name is required"}), 400
+
+    try:
+        conn = psycopg2.connect(
+            dbname=company_name,
+            user=username,
+            password=password,
+            host=host,
+            port=port
+        )
+        cur = conn.cursor()
+
+        cur.execute("""
+            SELECT id, user_email, action_type, table_name, company_name, dashboard_name, description, timestamp
+            FROM activity_log
+            ORDER BY timestamp DESC
+        """)
+        rows = cur.fetchall()
+        cur.close()
+        conn.close()
+
+        columns = [
+            "id", "user_email", "action_type", "table_name", "company_name",
+            "dashboard_name", "description", "timestamp"
+        ]
+        logs = [dict(zip(columns, row)) for row in rows]
+
+        return jsonify(logs)
+    except Exception as e:
+        print("❌ Error fetching activity logs:", e)
+        return jsonify({"error": str(e)}), 500
 # @app.route('/static/<path:filename>')
 # def serve_static(filename):
 #     return send_file(os.path.join('static', filename))
