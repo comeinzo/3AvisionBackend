@@ -875,6 +875,8 @@ def upload_excel_to_postgresql(database_name, username, password, excel_file_nam
                         continue
 
             # Check for duplicate primary keys
+            df.columns = df.columns.str.strip().str.lower().str.replace('.', '_')
+            primary_key_column = primary_key_column.strip().lower().replace('.', '_')
             duplicate_primary_keys = df[df.duplicated(subset=[primary_key_column], keep=False)][primary_key_column].tolist()
             if duplicate_primary_keys:
                 return f"Error: Duplicate primary key values found: {', '.join(map(str, duplicate_primary_keys))}"
@@ -980,13 +982,13 @@ def upload_excel_to_postgresql(database_name, username, password, excel_file_nam
         # Default action type if none performed
         if not operation_summary:
             operation_summary.append("no_change")
-
+        rows_added = rows_inserted
         # return "Upload successful"
         return {
             "message": "Upload successful",
             "table_name": table_name,
             "actions_performed": operation_summary,
-            "rows_inserted": rows_inserted,
+            "rows_added": rows_added,
             "rows_deleted": rows_deleted,
             "rows_updated": rows_updated,
             "rows_skipped": rows_skipped

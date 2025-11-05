@@ -316,7 +316,7 @@ def _convert_to_native_types(value):
         return value
 
 
-def insert_dataframe_with_upsert(db_config, dest_table_name, source_df, source_table_name=None, selected_columns=None, create_view_if_exists=False):
+def insert_dataframe_with_upsert(db_config, dest_table_name, source_df,source_config, source_table_name=None, selected_columns=None, create_view_if_exists=False):
     """
     Inserts or updates (upserts) data from a pandas DataFrame into a PostgreSQL table
     using a temporary staging table for bulk loading. Updates only if data in
@@ -385,20 +385,36 @@ def insert_dataframe_with_upsert(db_config, dest_table_name, source_df, source_t
             if not sanitized_columns:
                 raise ValueError("DataFrame has no columns to create a table. Cannot create an empty table.")
             
-            if len(sanitized_columns) > 0:
-                primary_key_for_new_table = [sanitized_columns[0]] 
-            else:
-                raise ValueError("Cannot create table: no columns found in DataFrame.")
+            # if len(sanitized_columns) > 0:
+            #     primary_key_for_new_table = [sanitized_columns[0]] 
+            # else:
+            #     raise ValueError("Cannot create table: no columns found in DataFrame.")
+            source_pk_columns = []
+            if source_table_name:
+                print(f"Fetching primary keys from source table '{source_table_name}'...")
+                try:
+                    source_pk_columns = get_primary_key_columns_dest(source_config, source_table_name)
+                    print(f"Source primary keys found: {source_pk_columns}")
+                except Exception as pk_err:
+                    print(f"Could not fetch primary keys from source table: {pk_err}")
+
+            # If still empty, try to auto-detect based on common column names
+            if not source_pk_columns:
+                possible_pks = [col for col in sanitized_columns if col.lower() in ['id', 'pk', 'primary_id']]
+                if possible_pks:
+                    source_pk_columns = [possible_pks[0]]
+                    print(f"No explicit PK found. Using heuristic primary key: {source_pk_columns[0]}")
+
 
             columns_with_types = ', '.join(
                 f"{col} {determine_sql_data_type(df_cleaned[col])}"
                 for col in sanitized_columns
             )
-            pk_constraint = f", PRIMARY KEY ({', '.join(primary_key_for_new_table)})"
+            pk_constraint = f", PRIMARY KEY ({', '.join(source_pk_columns)})"
             create_table_query = f"CREATE TABLE {dest_table_name} ({columns_with_types}{pk_constraint})"
             cur.execute(create_table_query)
             conn.commit()
-            print(f"Table '{dest_table_name}' created successfully with PK: {primary_key_for_new_table}.")
+            print(f"Table '{dest_table_name}' created successfully with PK: {source_pk_columns}.")
             dest_table_exists = True
 
         # 2. Handle view creation if requested (does not stop upsert) - Simplified for brevity

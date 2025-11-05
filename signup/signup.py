@@ -147,15 +147,20 @@ def fetch_login_data(email, password):
     user = cursor.fetchone()
 
     logo_path = None
+    company_name = None
     if user and user[5]:  # Assuming user[5] is the column containing logo path
         logo_path = user[5].replace("\\", "/")  # Normalize path for URL
+    if user and user[1]:  # Assuming user[5] is the column containing logo path
+        company_name = user[1]
+       
 
     cursor.close()
     conn.close()
 
     return {
         "user": user,
-        "logo_url": f"http://localhost:5000/static/{logo_path}" if logo_path else None
+        "logo_url": f"http://localhost:5000/static/{logo_path}" if logo_path else None,
+        "company_name": company_name
     }
 
 

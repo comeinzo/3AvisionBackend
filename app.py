@@ -88,7 +88,7 @@ from upload import is_table_used_in_charts
 from user_upload import (
     get_db_connection,
     handle_file_upload_registration,
-    handle_manual_registration,
+    handle_manual_registration,create_user_management_log_table,log_user_management_action
 )
 from viewChart.viewChart import (
     fetch_ai_saved_chart_data,
@@ -4278,6 +4278,8 @@ def login():
         print("usersdata", usersdata)
         
         if usersdata:
+            company_from_db = usersdata.get("company_name")
+
             user_data = {
                 'user_id': usersdata.get('user_id') or usersdata.get('id'),
                 'email': email,
@@ -4289,7 +4291,20 @@ def login():
             
             tokens = JWTManager.generate_tokens(user_data, 'user')
             print("Cleent user Token------",tokens)
-            log_activity(email, 'login', f'User {email} logged in')
+            # log_activity(email, 'login', f'User {email} logged in')
+
+            if company_from_db:
+                create_user_management_log_table(company_from_db)
+
+                description = f"Organization Admin ({email}) logged in to company '{company_from_db}'."
+                log_user_management_action(
+                    admin_email=email,
+                    user_email=email,
+                    action_type="COMPANY_ADMIN_LOGIN",
+                    description=description,
+                    company_name=company_from_db
+                )
+
             
             return jsonify({
                 'message': 'Login successful',
@@ -5795,15 +5810,16 @@ def usersignup():
     company = company.lower()  # Convert company name to lowercase
     print("company:", company)
     register_type = data.get("registerType")
+    admin_email=data.get("email")
     print("Register Type:", register_type)
 
     user_details = data.get("userDetails")
     print("User Details:", user_details)
 
     if register_type == "manual":
-        return handle_manual_registration(user_details,company)
+        return handle_manual_registration(user_details,company,admin_email)
     elif register_type == "File_Upload":
-        return handle_file_upload_registration(user_details,company)
+        return handle_file_upload_registration(user_details,company,admin_email)
 
     return jsonify({'message': 'Invalid registration type'}), 400
 
@@ -6059,6 +6075,7 @@ def update_user_details():
     category_name = data.get('categoryName')
     formatted_category_name = category_name  # Format category with curly braces
     print("category---------", formatted_category_name)
+    admin_email=data.get("email")
 
     # Connect to company database
     conn = connect_db(organization_name)
@@ -6075,7 +6092,22 @@ def update_user_details():
                 
             """, (new_role_id,formatted_category_name,reporting_id,username))
             conn.commit()
+        create_user_management_log_table(organization_name)
 
+        # ✅ Log this admin action
+        description = (
+            f"Admin ({admin_email}) updated user '{username}' "
+            f"with new role_id='{new_role_id}', category='{formatted_category_name}', "
+            f"and reporting_id='{reporting_id}' in company '{organization_name}'."
+        )
+
+        log_user_management_action(
+            admin_email=admin_email,
+            user_email=username,
+            action_type="USER_UPDATED",
+            description=description,
+            company_name=organization_name
+        )
         return jsonify({'message': 'User details updated successfully'}), 200
     except Exception as e:
         print(f"Error updating user details: {e}")
@@ -6311,6 +6343,7 @@ def delete_dashboard_name():
     # user_id = request.args.get('user_id')  # Use query param for GET
 
     company_name=request.args.get('company_name')
+    email=request.args.get("email")
     print("company_name",company_name)
     print("chart_name",chart_name)
     print("user_id",user_id)
@@ -6331,6 +6364,33 @@ def delete_dashboard_name():
 
         if rows_deleted == 0:
             return jsonify({"message": f"No chart found with the name '{chart_name}'"}), 404
+        if company_name and user_id:
+            email_conn = connect_db(company_name)
+            email_cur = email_conn.cursor()
+            email_cur.execute("SELECT email, username FROM employee_list WHERE employee_id = %s;", (user_id,))
+            result = email_cur.fetchone()
+            user_email = result[0] if result else None
+            username = result[1] if result else "Unknown User"
+            email_cur.close()
+            email_conn.close()
+        else:
+            user_email = None
+            username = "Unknown User"
+
+        # ✅ Log activity for chart deletion
+        description = (
+            f"User '{username}' ({user_email}) deleted Dahboard '{chart_name}' "
+            f"from company '{company_name}'."
+        )
+
+        log_activity(
+            user_email=user_email,
+            action_type="Delete_Dahboard",
+            description=description,
+            table_name="table_dashboard",
+            company_name=company_name,
+            dashboard_name=chart_name
+        )
 
         return jsonify({"message": f"Chart '{chart_name}' deleted successfully"}), 200
     
@@ -9649,7 +9709,7 @@ def job_logic(cols=None, source_config=None, destination_config=None,
         insert_error = None
         view_name = None
         insert_success, insert_error, view_created, view_name ,inserted_count, updated_count = insert_dataframe_with_upsert(
-            destination_config, dest_table_name, source_df, source_table_name, cols, create_view_if_exists
+            destination_config, dest_table_name, source_df,source_config, source_table_name, cols, create_view_if_exists
         )
         skipped_count = len(source_df) - inserted_count - updated_count
         if not insert_success:
@@ -10203,6 +10263,7 @@ def create_single_table_view():
 def upload_logo():
     logo = request.files.get("logo")
     organizationName = request.form.get("organizationName")
+    
 
     if not logo or not organizationName:
         return jsonify({"message": "Missing logo or organization name"}), 400
@@ -10217,6 +10278,19 @@ def upload_logo():
         relative_path = save_logo(logo, organizationName, db_cursor, db_conn)
 
         url_path = f"{relative_path}"  # <-- Construct URL
+        create_user_management_log_table(organizationName)
+
+        # 📝 Prepare log description
+        description = f"Admin uploaded/updated the company logo for '{organizationName}'."
+
+        # 🪵 Log this action in the user management log
+        log_user_management_action(
+            admin_email=None,
+            user_email=None,  # No specific user affected
+            action_type="LOGO_UPLOADED",
+            description=description,
+            company_name=organizationName
+        )
         
         print("✅ Final logo URL returned to frontend:", url_path)          # <-- Print it
 
@@ -11532,6 +11606,31 @@ def get_activity_logs():
     except Exception as e:
         print("❌ Error fetching activity logs:", e)
         return jsonify({"error": str(e)}), 500
+@app.route('/api/user_management_logs', methods=['GET'])
+def get_user_management_logs():
+    company_name = request.args.get('company_name')
+    
+    if not company_name:
+        return jsonify({"error": "company_name is required"}), 400
+
+    conn = get_company_db_connection(company_name)
+    if not conn:
+        return jsonify({"error": "Failed to connect to company database"}), 500
+    
+    try:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute("""
+                SELECT id, admin_email, user_email, action_type, description, company_name, timestamp
+                FROM user_management_logs
+                ORDER BY timestamp DESC;
+            """)
+            logs = cur.fetchall()
+        conn.close()
+        return jsonify(logs), 200
+    except Exception as e:
+        print("Error fetching admin logs:", e)
+        return jsonify({"error": str(e)}), 500
+
 # @app.route('/static/<path:filename>')
 # def serve_static(filename):
 #     return send_file(os.path.join('static', filename))
