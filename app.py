@@ -10737,7 +10737,9 @@ def get_bar_chart_route():
     db_nameeee = data['databaseName']
     selectedUser = data['selectedUser']
     chart_data = data['chartType']
-    print("chart_data",data)
+
+    
+    print("chart_data-----",data)
     
     # NEW: Get data limiting options and consent tracking
     data_limit_type = data.get('dataLimitType', None)  # 'top10', 'bottom10', 'both5'
@@ -15246,6 +15248,7 @@ def get_table_data():
         result = get_table_data_with_cache(
             company_name, table_name, date_column, start_date, end_date, selected_columns, column_conditions
         )
+        # print("Result fetched successfully", result)
         return jsonify(result)
         
     except Exception as e:
@@ -18771,7 +18774,9 @@ def process_query():
                     'values': [float(row[second_key]) for row in results_list],
                     'xAxis': first_key,
                     'yAxis': second_key,
-                    'aggregation': 'sum'  # You can detect this from SQL query
+                    'aggregation': 'sum' , # You can detect this from SQL query
+                    'chartType': chart_type,
+                    'filter_conditions': filters  # Include filter conditions
                 }
         
         print("results_list--------------------", results_list)
@@ -18800,13 +18805,84 @@ def process_query():
         }), 500
 
 
+# def extract_filters_from_sql(sql_query):
+#     """
+#     Extract filter conditions from WHERE clause in SQL query
+#     """
+#     import re
+    
+#     filters = []
+    
+#     try:
+#         # Convert to uppercase for parsing
+#         sql_upper = sql_query.upper()
+        
+#         # Check if WHERE clause exists
+#         if 'WHERE' not in sql_upper:
+#             return filters
+        
+#         # Extract WHERE clause
+#         where_match = re.search(r'WHERE\s+(.+?)(?:GROUP BY|ORDER BY|LIMIT|$)', sql_query, re.IGNORECASE | re.DOTALL)
+        
+#         if not where_match:
+#             return filters
+        
+#         where_clause = where_match.group(1).strip()
+        
+#         # Split by AND/OR to get individual conditions
+#         conditions = re.split(r'\s+(?:AND|OR)\s+', where_clause, flags=re.IGNORECASE)
+        
+#         for condition in conditions:
+#             condition = condition.strip()
+            
+#             # Parse different types of conditions
+#             # Pattern: column operator value
+#             comparison_match = re.match(r'(\w+)\s*(=|!=|<>|>|<|>=|<=|LIKE|IN|NOT IN)\s*(.+)', condition, re.IGNORECASE)
+            
+#             if comparison_match:
+#                 column = comparison_match.group(1)
+#                 operator = comparison_match.group(2).upper()
+#                 value = comparison_match.group(3).strip().strip("'\"")
+                
+#                 # Handle IN clause
+#                 if operator in ['IN', 'NOT IN']:
+#                     # Extract values from IN clause
+#                     in_values = re.findall(r"'([^']*)'", comparison_match.group(3))
+#                     value = in_values if in_values else value
+                
+#                 filters.append({
+#                     'raw_condition': condition
+#                 })
+            
+#             # Handle BETWEEN
+#             elif 'BETWEEN' in condition.upper():
+#                 between_match = re.match(r'(\w+)\s+BETWEEN\s+(.+?)\s+AND\s+(.+)', condition, re.IGNORECASE)
+#                 if between_match:
+#                     filters.append({
+#                         'raw_condition': condition
+#                     })
+            
+#             # Handle IS NULL / IS NOT NULL
+#             elif 'IS NULL' in condition.upper() or 'IS NOT NULL' in condition.upper():
+#                 null_match = re.match(r'(\w+)\s+(IS NULL|IS NOT NULL)', condition, re.IGNORECASE)
+#                 if null_match:
+#                     filters.append({
+#                         'raw_condition': condition
+#                     })
+    
+#     except Exception as e:
+#         print(f"Error extracting filters: {e}")
+    
+#     return filters
+
 def extract_filters_from_sql(sql_query):
     """
     Extract filter conditions from WHERE clause in SQL query
+    Returns filters in format: {"column_name": ["value1", "value2"]}
     """
     import re
     
-    filters = []
+    filters = {}
     
     try:
         # Convert to uppercase for parsing
@@ -18830,45 +18906,65 @@ def extract_filters_from_sql(sql_query):
         for condition in conditions:
             condition = condition.strip()
             
-            # Parse different types of conditions
-            # Pattern: column operator value
-            comparison_match = re.match(r'(\w+)\s*(=|!=|<>|>|<|>=|<=|LIKE|IN|NOT IN)\s*(.+)', condition, re.IGNORECASE)
-            
-            if comparison_match:
-                column = comparison_match.group(1)
-                operator = comparison_match.group(2).upper()
-                value = comparison_match.group(3).strip().strip("'\"")
+            # Handle IN clause - multiple values
+            in_match = re.match(r'(\w+)\s+(?:NOT\s+)?IN\s*\((.+?)\)', condition, re.IGNORECASE)
+            if in_match:
+                column = in_match.group(1)
+                values_str = in_match.group(2)
+                # Extract values from IN clause (handles both quoted and unquoted)
+                values = re.findall(r"'([^']*)'|\"([^\"]*)\"|(\w+)", values_str)
+                # Flatten the tuple results and filter out empty strings
+                values = [v for group in values for v in group if v]
                 
-                # Handle IN clause
-                if operator in ['IN', 'NOT IN']:
-                    # Extract values from IN clause
-                    in_values = re.findall(r"'([^']*)'", comparison_match.group(3))
-                    value = in_values if in_values else value
+                if column not in filters:
+                    filters[column] = []
+                filters[column].extend(values)
+                continue
+            
+            # Handle equality - single value
+            eq_match = re.match(r'(\w+)\s*=\s*[\'"]?([^\'"]+)[\'"]?', condition, re.IGNORECASE)
+            if eq_match:
+                column = eq_match.group(1)
+                value = eq_match.group(2).strip().strip("'\"")
                 
-                filters.append({
-                    'raw_condition': condition
-                })
+                if column not in filters:
+                    filters[column] = []
+                if value not in filters[column]:
+                    filters[column].append(value)
+                continue
             
-            # Handle BETWEEN
-            elif 'BETWEEN' in condition.upper():
-                between_match = re.match(r'(\w+)\s+BETWEEN\s+(.+?)\s+AND\s+(.+)', condition, re.IGNORECASE)
-                if between_match:
-                    filters.append({
-                        'raw_condition': condition
-                    })
+            # Handle LIKE clause
+            like_match = re.match(r'(\w+)\s+LIKE\s+[\'"](.+)[\'"]', condition, re.IGNORECASE)
+            if like_match:
+                column = like_match.group(1)
+                value = like_match.group(2).strip('%')  # Remove wildcards
+                
+                if column not in filters:
+                    filters[column] = []
+                if value not in filters[column]:
+                    filters[column].append(value)
+                continue
             
-            # Handle IS NULL / IS NOT NULL
-            elif 'IS NULL' in condition.upper() or 'IS NOT NULL' in condition.upper():
-                null_match = re.match(r'(\w+)\s+(IS NULL|IS NOT NULL)', condition, re.IGNORECASE)
-                if null_match:
-                    filters.append({
-                        'raw_condition': condition
-                    })
+            # Handle BETWEEN - extract range values
+            between_match = re.match(r'(\w+)\s+BETWEEN\s+[\'"]?(.+?)[\'"]?\s+AND\s+[\'"]?(.+?)[\'"]?', condition, re.IGNORECASE)
+            if between_match:
+                column = between_match.group(1)
+                start_val = between_match.group(2).strip().strip("'\"")
+                end_val = between_match.group(3).strip().strip("'\"")
+                
+                if column not in filters:
+                    filters[column] = []
+                # For BETWEEN, you might want to store as range
+                filters[column].append(f"{start_val} to {end_val}")
+                continue
     
     except Exception as e:
         print(f"Error extracting filters: {e}")
+        import traceback
+        print(traceback.format_exc())
     
     return filters
+
 
 
 # @app.route('/api/query', methods=['POST'])
