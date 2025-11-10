@@ -113,6 +113,8 @@ from bar_chart import (
     perform_calculation
 )
 from bar_chart import global_df,global_column_names
+from license_routes import license_bp
+
 
 # ==============================
 # Configurations
@@ -4279,6 +4281,8 @@ def login():
         
         if usersdata:
             company_from_db = usersdata.get("company_name")
+            companyid=usersdata.get('company_id')
+            print("companyid",companyid)
 
             user_data = {
                 'user_id': usersdata.get('user_id') or usersdata.get('id'),
@@ -4286,7 +4290,9 @@ def login():
                 'user_type': 'user',
                 'permissions': usersdata.get('permissions', []),
                 'company': None,
-                'role_id': usersdata.get('role_id')
+                'role_id': usersdata.get('role_id'),
+                'company_id':usersdata.get('company_id')
+
             }
             
             tokens = JWTManager.generate_tokens(user_data, 'user')
@@ -4320,6 +4326,48 @@ def login():
         
         if employeedata:
             user_info = employeedata['user']
+            company_id=employeedata['company_id']
+            conn=get_db_connection()
+            cur = conn.cursor()
+            cur.execute("""
+                SELECT  p.id,p.plan_name,p.storage_limit, cl.start_date, cl.end_date, cl.is_active
+                FROM organization_license cl
+                JOIN license_plan p ON cl.plan_id = p.id
+                WHERE cl.company_id = %s AND cl.is_active = TRUE
+            """, (company_id,))
+            active_plan = cur.fetchone()
+            print("active_plan",active_plan)
+            
+
+            if not active_plan:
+                cur.close()
+                conn.close()
+                return jsonify({
+                    'message': f"Login failed. No active plan found for company '{company}'. Please contact your admin."
+                }), 403
+
+            plan_id = active_plan[0]
+            plan_name = active_plan[1]
+            storage_limit=active_plan[2]
+            start_date = active_plan[3]
+            end_date = active_plan[4]
+
+            # ✅ Fetch all enabled features for this plan
+            cur.execute("""
+                SELECT feature_name, is_enabled
+                FROM license_features
+                WHERE plan_id = %s
+            """, (plan_id,))
+            features = cur.fetchall()
+
+            cur.close()
+            conn.close()
+
+            # Convert features to list of dicts
+            features_list = [
+                {"feature_name": f[0], "is_enabled": f[1]} for f in features
+            ]
+
             user_data = {
                 'employee_id': user_info[0],  # employee_id
                 'user_id': user_info[0],
@@ -4340,7 +4388,14 @@ def login():
                 'access_token': tokens['access_token'],
                 'refresh_token': tokens['refresh_token'],
                 'expires_in': tokens['expires_in'],
-                'user_data': employeedata
+                'user_data': employeedata,
+                'active_plan': {
+                    'plan_name': plan_name,
+                    'start_date': start_date,
+                    'end_date': end_date,
+                    'storage_limit':storage_limit
+                },
+                'features': features_list
             }), 200
     
     return jsonify({'message': 'Invalid credentials'}), 401
@@ -11634,6 +11689,407 @@ def get_user_management_logs():
 # @app.route('/static/<path:filename>')
 # def serve_static(filename):
 #     return send_file(os.path.join('static', filename))
+
+def create_license_tables():
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+
+        cur.execute("""
+        CREATE TABLE IF NOT EXISTS license_plan (
+            id SERIAL PRIMARY KEY,
+            plan_name VARCHAR(100) UNIQUE NOT NULL,
+            description TEXT,
+            storage_limit INTEGER,
+            price DECIMAL(10,2),
+            duration_days INTEGER DEFAULT 30,
+            employee_limit INTEGER,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        """)
+
+        cur.execute("""
+        CREATE TABLE IF NOT EXISTS license_features (
+            id SERIAL PRIMARY KEY,
+            plan_id INTEGER REFERENCES license_plan(id) ON DELETE CASCADE,
+            feature_name VARCHAR(100) NOT NULL,
+            is_enabled BOOLEAN DEFAULT TRUE
+        );
+        """)
+
+        cur.execute("""
+        CREATE TABLE IF NOT EXISTS organization_license (
+            id SERIAL PRIMARY KEY,
+            company_id INTEGER REFERENCES organizationdatatest(id) ON DELETE CASCADE,
+            plan_id INTEGER REFERENCES license_plan(id) ON DELETE CASCADE,
+            start_date DATE NOT NULL,
+            end_date DATE NOT NULL,
+            is_active BOOLEAN DEFAULT TRUE
+        );
+        """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS project_features (
+                id SERIAL PRIMARY KEY,
+                feature_name VARCHAR(100) UNIQUE NOT NULL,
+                description TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        """)
+
+        # ✅ Insert Default Features
+        default_features = [
+            ('share_dashboard', 'Allows users to share dashboards with others'),
+            ('AI_Analytics', 'Provides AI-powered analytics insights'),
+            ('custom_theme', 'Enables users to customize chart and UI themes'),
+            ('live_update', 'Allows real-time data updates in dashboards')
+        ]
+
+        for feature_name, description in default_features:
+            cur.execute("""
+                INSERT INTO project_features (feature_name, description)
+                VALUES (%s, %s)
+                ON CONFLICT (feature_name) DO NOTHING;
+            """, (feature_name, description))
+
+
+        conn.commit()
+        cur.close()
+        conn.close()
+
+        return jsonify({'message': 'License-related tables created successfully ✅'}), 200
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+# ==========================================================
+# ➕ Add License Plan
+# ==========================================================
+@app.route('/add_license_plan', methods=['POST'])
+def add_license_plan():
+    create_license_tables()
+    data = request.json
+    plan_name = data.get('plan_name')
+    description = data.get('description', '')
+    storage_limit = data.get('storage_limit', 0)
+    price = data.get('price', 0)
+    duration_days = data.get('duration_days', 30)
+    employee_required=data.get('employee_limit', None)
+
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO license_plan (plan_name, description, storage_limit, price,duration_days,employee_limit)
+            VALUES (%s, %s, %s, %s,%s,%s)
+        """, (plan_name, description, storage_limit, price,duration_days,employee_required))
+        conn.commit()
+        cur.close()
+        conn.close()
+        return jsonify({'message': 'License plan added successfully ✅'}), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+# ==========================================================
+# ➕ Add Feature to Plan
+# ==========================================================
+@app.route('/add_license_feature', methods=['POST'])
+def add_license_feature():
+    data = request.json
+    plan_id = data.get('plan_id')
+    feature_name = data.get('feature_name')
+    is_enabled = data.get('is_enabled', True)
+
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO license_features (plan_id, feature_name, is_enabled)
+            VALUES (%s, %s, %s)
+        """, (plan_id, feature_name, is_enabled))
+        conn.commit()
+        cur.close()
+        conn.close()
+        return jsonify({'message': 'Feature added successfully ✅'}), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+# ==========================================================
+# 📦 Get All Plans with Features
+# ==========================================================
+@app.route('/get_all_plans', methods=['GET'])
+def get_all_plans():
+    try:
+        create_license_tables()
+        conn = get_db_connection()
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute("""
+            SELECT lp.id, lp.plan_name, lp.description, lp.storage_limit, lp.price,lp.duration_days,lp.employee_limit,
+                   json_agg(json_build_object('feature_name', lf.feature_name, 'is_enabled', lf.is_enabled))
+                   AS features
+            FROM license_plan lp
+            LEFT JOIN license_features lf ON lp.id = lf.plan_id
+            GROUP BY lp.id
+            ORDER BY lp.id;
+        """)
+        plans = cur.fetchall()
+        cur.close()
+        conn.close()
+        return jsonify({'message': 'License plans fetched successfully ✅', 'data': plans}), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+# ==========================================================
+# 🏢 Assign License to Organization
+# ==========================================================
+@app.route('/assign_license', methods=['POST'])
+def assign_license():
+    data = request.json
+    organization_id = data.get('organization_id')
+    plan_id = data.get('plan_id')
+    start_date = data.get('start_date')
+    end_date = data.get('end_date')
+
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO organization_license (organization_id, plan_id, start_date, end_date)
+            VALUES (%s, %s, %s, %s)
+        """, (organization_id, plan_id, start_date, end_date))
+        conn.commit()
+        cur.close()
+        conn.close()
+        return jsonify({'message': 'License assigned successfully ✅'}), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+# ==========================================================
+# 🔍 Get Organization License Status
+# ==========================================================
+@app.route('/get_org_license_status', methods=['POST'])
+def get_org_license_status():
+    data = request.json
+    organization_id = data.get('organization_id')
+
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute("""
+            SELECT ol.id, ol.organization_id, lp.plan_name, lp.price,lp.duration_days,lp.employee_limit,
+                   ol.start_date, ol.end_date,
+                   CASE WHEN ol.end_date >= CURRENT_DATE THEN 'Active'
+                        ELSE 'Expired' END AS status
+            FROM organization_license ol
+            JOIN license_plan lp ON ol.plan_id = lp.id
+            WHERE ol.organization_id = %s
+            ORDER BY ol.end_date DESC
+            LIMIT 1;
+        """, (organization_id,))
+        result = cur.fetchone()
+        cur.close()
+        conn.close()
+
+        if result:
+            return jsonify({'message': 'License status fetched successfully ✅', 'data': result}), 200
+        else:
+            return jsonify({'message': 'No license assigned yet ⚠️'}), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+# @app.route("/check_company_plan/<int:company_id>", methods=["GET"])
+# def check_company_plan(company_id):
+#     conn = get_db_connection()
+#     cur = conn.cursor()
+
+#     cur.execute("""
+#         SELECT p.plan_name, cl.start_date, cl.end_date, cl.is_active
+#         FROM organization_license cl
+#         JOIN license_plan p ON cl.plan_id = p.id
+#         WHERE cl.company_id = %s AND cl.is_active = TRUE
+#     """, (company_id,))
+
+#     plan = cur.fetchone()
+#     cur.close()
+#     conn.close()
+
+#     if plan:
+#         return jsonify({
+#             "active": True,
+#             "plan_name": plan[0],
+#             "start_date": plan[1],
+#             "end_date": plan[2]
+#         })
+#     else:
+#         return jsonify({"active": False})
+@app.route("/check_company_plan/<int:company_id>", methods=["GET"])
+def check_company_plan(company_id):
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    # 1️⃣ First, deactivate expired plans
+    today = datetime.now().date()
+    cur.execute("""
+        UPDATE organization_license
+        SET is_active = FALSE
+        WHERE company_id = %s AND end_date < %s AND is_active = TRUE
+    """, (company_id, today))
+    conn.commit()
+
+    # 2️⃣ Then fetch the active plan (if any)
+    cur.execute("""
+        SELECT p.plan_name,p.employee_limit, cl.start_date, cl.end_date, cl.is_active
+        FROM organization_license cl
+        JOIN license_plan p ON cl.plan_id = p.id
+        WHERE cl.company_id = %s AND cl.is_active = TRUE
+    """, (company_id,))
+
+    plan = cur.fetchone()
+    cur.close()
+    conn.close()
+
+    if plan:
+        plan_name,employee_limit, start_date, end_date, is_active = plan
+        return jsonify({
+            "active": True,
+            "plan_name": plan_name,
+            "employee_limit": employee_limit,
+            "start_date": start_date,
+            "end_date": end_date
+        })
+    else:
+        return jsonify({"active": False})
+
+@app.route("/activate_plan", methods=["POST"])
+def activate_plan():
+    data = request.json
+    company_id = data.get("company_id")
+    plan_id = data.get("plan_id")
+    print("plan",data)
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    # Fetch plan details
+    cur.execute("SELECT plan_name, duration_days,employee_limit FROM license_plan WHERE id = %s", (plan_id,))
+    plan = cur.fetchone()
+    if not plan:
+        return jsonify({"message": "Invalid plan ID"}), 400
+
+    plan_name, duration_days = plan
+    end_date = datetime.now() + timedelta(days=duration_days)
+
+    # Restrict Free plan to one-time use
+    if plan_name.lower() == "free":
+        cur.execute("""
+            SELECT 1 FROM organization_license cl
+            JOIN license_plan p ON cl.plan_id = p.id
+            WHERE cl.company_id = %s AND LOWER(p.plan_name) = 'free'
+        """, (company_id,))
+        if cur.fetchone():
+            return jsonify({"message": "Free plan already used once"}), 403
+
+    # Deactivate any old active plans
+    cur.execute("UPDATE organization_license SET is_active = FALSE WHERE company_id = %s", (company_id,))
+
+    # Insert new plan
+    cur.execute("""
+        INSERT INTO organization_license (company_id, plan_id, start_date, end_date, is_active)
+        VALUES (%s, %s, %s, %s, TRUE)
+    """, (company_id, plan_id, datetime.now(), end_date))
+
+    conn.commit()
+    cur.close()
+    conn.close()
+    return jsonify({"message": f"{plan_name} plan activated successfully ✅"})
+
+@app.route("/get_company_licenses", methods=["GET"])
+def get_company_licenses():
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT o.id, o.organizationname, lp.plan_name, ol.start_date, ol.end_date,
+                   ol.is_active,lp.employee_limit
+            FROM organization_license ol
+            JOIN license_plan lp ON ol.plan_id = lp.id
+            JOIN organizationdatatest o ON ol.company_id = o.id
+            ORDER BY o.organizationname;
+        """)
+        rows = cur.fetchall()
+        result = [
+            {
+                "company_id": r[0],
+                "company_name": r[1],
+                "plan_name": r[2],
+                "start_date": str(r[3]),
+                "end_date": str(r[4]),
+                "is_active": r[5],
+                "employee_limit": r[6],
+            }
+            for r in rows
+        ]
+        cur.close()
+        conn.close()
+        return jsonify({"data": result}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+@app.route('/get_project_features', methods=['GET'])
+def get_project_features():
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("SELECT id, feature_name FROM project_features ORDER BY id ASC;")
+        features = [{"id": f[0], "feature_name": f[1]} for f in cur.fetchall()]
+        cur.close()
+        conn.close()
+        return jsonify({"status": "success", "data": features})
+    except Exception as e:
+        print("Error fetching project features:", e)
+        return jsonify({"status": "error", "message": str(e)})
+
+@app.route('/update_license_plan/<int:plan_id>', methods=['PUT'])
+def update_license_plan(plan_id):
+    try:
+        data = request.json
+        conn = get_db_connection()
+        cur = conn.cursor()
+
+        cur.execute("""
+            UPDATE license_plan
+            SET plan_name = %s,
+                description = %s,
+                storage_limit = %s,
+                price = %s,
+                duration_days = %s,
+                employee_limit = %s
+            WHERE id = %s
+            RETURNING *;
+        """, (
+            data.get('plan_name'),
+            data.get('description'),
+            data.get('storage_limit'),
+            data.get('price'),
+            data.get('duration_days'),
+            data.get('employee_limit'),
+            plan_id
+        ))
+
+        updated_plan = cur.fetchone()
+        conn.commit()
+        cur.close()
+        conn.close()
+
+        if updated_plan:
+            return jsonify({'message': 'Plan updated successfully ✅', 'data': updated_plan}), 200
+        else:
+            return jsonify({'error': 'Plan not found ❌'}), 404
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+# app.register_blueprint(license_bp)
+
 @app.route('/static/<path:filename>')
 def serve_static(filename):
     # send_file will automatically look within the configured static_folder

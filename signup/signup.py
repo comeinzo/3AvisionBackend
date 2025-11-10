@@ -58,6 +58,32 @@ def create_database(organizationName):
 
 
 
+# def create_table_if_not_exists(cursor):
+#     # Create table if it doesn't exist
+#     cursor.execute("""
+#     CREATE TABLE IF NOT EXISTS organizationdatatest (
+#         id SERIAL PRIMARY KEY,
+#         organizationName VARCHAR(255) NOT NULL,
+#         email VARCHAR(255) NOT NULL,
+#         userName VARCHAR(255) NOT NULL,
+#         password VARCHAR(255) NOT NULL
+#     );
+#     """)
+
+#     # Check if 'logo' column exists
+#     cursor.execute("""
+#     SELECT column_name 
+#     FROM information_schema.columns 
+#     WHERE table_name = 'organizationdatatest' AND column_name = 'logo';
+#     """)
+#     column_exists = cursor.fetchone()
+
+#     # If not, add the column
+#     if not column_exists:
+#         cursor.execute("""
+#         ALTER TABLE organizationdatatest ADD COLUMN logo VARCHAR(255);
+#         """)
+
 def create_table_if_not_exists(cursor):
     # Create table if it doesn't exist
     cursor.execute("""
@@ -70,20 +96,27 @@ def create_table_if_not_exists(cursor):
     );
     """)
 
-    # Check if 'logo' column exists
-    cursor.execute("""
-    SELECT column_name 
-    FROM information_schema.columns 
-    WHERE table_name = 'organizationdatatest' AND column_name = 'logo';
-    """)
-    column_exists = cursor.fetchone()
+    # Ensure all required columns exist
+    columns_to_add = {
+        "logo": "VARCHAR(255)",
+        "status": "VARCHAR(50) DEFAULT 'active'",
+        "created_at": "TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
+        "updated_at": "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
+    }
 
-    # If not, add the column
-    if not column_exists:
+    for column_name, column_type in columns_to_add.items():
         cursor.execute("""
-        ALTER TABLE organizationdatatest ADD COLUMN logo VARCHAR(255);
-        """)
+        SELECT column_name 
+        FROM information_schema.columns 
+        WHERE table_name = 'organizationdatatest' AND column_name = %s;
+        """, (column_name,))
+        column_exists = cursor.fetchone()
 
+        if not column_exists:
+            cursor.execute(f"""
+            ALTER TABLE organizationdatatest ADD COLUMN {column_name} {column_type};
+            """)
+            print(f"✅ Added missing column: {column_name}")
 def insert_user_data(organizationName, email, userName, password,logo_filename):
     try:
         create_database(organizationName)  # Assuming this creates the database if needed
@@ -97,10 +130,10 @@ def insert_user_data(organizationName, email, userName, password,logo_filename):
         # Insert data into table
         cursor.execute(
             """
-            INSERT INTO organizationdatatest (organizationName, email, userName, password,logo)
-            VALUES (%s, %s, %s, %s,%s)
+            INSERT INTO organizationdatatest (organizationName, email, userName, password,logo, status, created_at, updated_at)
+            VALUES (%s, %s, %s, %s,%s,%s, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
             """,
-            (organizationName, email, userName, password,logo_filename)
+            (organizationName, email, userName, password,logo_filename,'active')
         )
         conn.commit()
         logging.info(f"User data inserted for {organizationName}")
@@ -148,10 +181,12 @@ def fetch_login_data(email, password):
 
     logo_path = None
     company_name = None
+    company_id=None
     if user and user[5]:  # Assuming user[5] is the column containing logo path
         logo_path = user[5].replace("\\", "/")  # Normalize path for URL
     if user and user[1]:  # Assuming user[5] is the column containing logo path
         company_name = user[1]
+        company_id=user[0]
        
 
     cursor.close()
@@ -160,7 +195,8 @@ def fetch_login_data(email, password):
     return {
         "user": user,
         "logo_url": f"http://localhost:5000/static/{logo_path}" if logo_path else None,
-        "company_name": company_name
+        "company_name": company_name,
+        "company_id":company_id
     }
 
 
@@ -173,7 +209,7 @@ def fetch_company_login_data(email, password, company):
     cursor1 = conne.cursor()
     role_conn = None  # Initialize role_conn outside the try block
     role_cursor = None # Initialize role_cursor outside the try block
-
+    company_id = None 
     # First query to fetch the user details (except password)
     cursor.execute("SELECT employee_id, employee_name, role_id, email FROM employee_list WHERE email = %s", (email,))
     user = cursor.fetchone()
@@ -213,9 +249,12 @@ def fetch_company_login_data(email, password, company):
                         """)
                         conne.commit()
 
-                    cursor1.execute("SELECT logo FROM organizationdatatest WHERE organizationname = %s", (company,))
+                    cursor1.execute("SELECT logo,id FROM organizationdatatest WHERE organizationname = %s", (company,))
                     logo_row = cursor1.fetchone()
-                    logo_path = logo_row[0] if logo_row else None
+                    # logo_path = logo_row[0] if logo_row else None
+                    # company_id=logo_row[1]
+                    if logo_row:
+                        logo_path, company_id = logo_row[0], logo_row[1]
 
                     # Get all table names except system tables
                     cursor.execute("""
@@ -236,7 +275,8 @@ def fetch_company_login_data(email, password, company):
                         "user": user,
                         "permissions": permissions,
                         "tables": tables,
-                        "logo_url": f"http://localhost:5000/static/{logo_path}" if logo_path else None
+                        "logo_url": f"http://localhost:5000/static/{logo_path}" if logo_path else None,
+                        "company_id":company_id
                     }
 
                 except Exception as e:
