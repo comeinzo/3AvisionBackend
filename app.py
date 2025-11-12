@@ -238,7 +238,50 @@ def jwt_required(f):
         return f(*args, **kwargs)
     
     return decorated_function
+def token_required(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        token = request.headers.get('Authorization')
+        if not token:
+            return jsonify({'message': 'Token missing'}), 401
 
+        token = token.replace('Bearer ', '')
+        payload = JWTManager.decode_token(token)
+
+        if 'error' in payload:
+            return jsonify({'message': payload['error']}), 401
+
+        login_id = payload.get('login_id')
+        if not login_id:
+            return jsonify({'message': 'Invalid token: missing login_id'}), 401
+
+        try:
+            conn = get_db_connection()
+            cur = conn.cursor()
+            cur.execute("""
+                SELECT login_status 
+                FROM login_history 
+                WHERE login_id = %s
+            """, (login_id,))
+            result = cur.fetchone()
+            cur.close()
+            conn.close()
+
+            print(f"🪶 [TokenCheck] login_id={login_id}, DB result={result}")
+
+            # ✅ Normalize and check case-insensitively
+            if not result or (result[0] and result[0].lower() == 'logout'):
+                print(f"⚠️ [Session Expired] login_status={result[0] if result else None}")
+                return jsonify({'message': 'Session expired. Please log in again.'}), 401
+
+        except Exception as e:
+            print("❌ Database error in token_required:", e)
+            return jsonify({'message': 'Internal server error'}), 500
+
+        # Attach user info
+        request.current_user = payload
+        return f(*args, **kwargs)
+    return decorated
 def employee_required(f):
     """Decorator to require employee privileges (admin or employee)"""
     @wraps(f)
@@ -380,6 +423,8 @@ def test_db():
 
 @app.route('/uploadexcel', methods=['POST'])
 @employee_required
+@token_required
+
 def upload_file_excel():
     try:
         create_table()
@@ -498,6 +543,8 @@ def upload_file_excel():
 
 @app.route('/uploadcsv', methods=['POST'])
 @employee_required
+@token_required
+
 def upload_file_csv():
     try:
         create_table()  # Ensure table structure exists
@@ -595,6 +642,7 @@ def upload_file_csv():
 
 @app.route('/upload-json', methods=['POST'])
 @employee_required
+@token_required
 def upload_file_json():
     try:
         database_name = request.form.get('company_database')
@@ -655,6 +703,7 @@ def upload_file_json():
         return jsonify({'message': f"Internal Server Error: {str(e)}"}), 500
 
 @app.route('/load-data', methods=['POST'])
+@token_required
 def load_data():
     database_name = request.json['databaseName']
     checked_paths = request.json['checkedPaths']
@@ -663,6 +712,7 @@ def load_data():
     return jsonify({'message': 'Data loaded successfully'})
 
 @app.route('/ai_ml_filter_chartdata', methods=['POST'])
+@token_required
 def ai_ml_filter_chart_data():
     try:
         # Extract data from the POST request
@@ -691,6 +741,8 @@ def ai_ml_filter_chart_data():
 
 @app.route('/api/table_names')
 @employee_required
+@token_required
+
 def get_table_names():
     db_name = request.args.get('databaseName')
     # print("db name",db_name)
@@ -702,6 +754,8 @@ def get_table_names():
     return jsonify(table_names)
 
 @app.route('/column_names/<table_name>',methods=['GET'] )
+@token_required
+
 def get_columns(table_name):
     db_name= request.args.get('databaseName')
     connectionType= request.args.get('connectionType')
@@ -713,6 +767,8 @@ def get_columns(table_name):
     return jsonify(column_names)
 
 @app.route('/api/columns', methods=['GET'])
+@token_required
+
 def get_chart_columns():
     chart_name = request.args.get('chart')
     company_name=request.args.get('company_name')
@@ -766,6 +822,8 @@ def get_chart_db_details(chart_name,company_name):
         return {"error": str(e)}
 
 @app.route('/api/column_values', methods=['GET'])
+@token_required
+
 def get_column_values():
     chart_name = request.args.get('chart')
     column_name = request.args.get('column')
@@ -832,6 +890,8 @@ def get_column_values():
         return jsonify({"error": str(e)}), 500
     
 @app.route('/get_charts', methods=['GET'])
+@token_required
+
 def get_charts():
     chart_name = request.args.get('chart_name')
     company_name=request.args.get('company_name')
@@ -889,6 +949,8 @@ def column_exists(cur, table_name, column_name):
     return cur.fetchone() is not None
 
 @app.route("/api/update_filters", methods=["POST"])
+@token_required
+
 def update_filters():
     data = request.json
     chart_name = data.get("sourceChart")
@@ -1049,6 +1111,8 @@ def update_filters():
             conn.close()
 
 @app.route('/join-tables', methods=['POST'])
+@token_required
+
 def join_tables():
     data = request.json
     print("data__________",data)
@@ -1434,9 +1498,10 @@ def fetch_data_for_ts_decomposition(table_name, x_axis_columns, filter_options, 
     #     )
 
     #     print("✅ External PostgreSQL connection established successfully!")
-    connection = get_db_connection_or_path(selectedUser, DB_NAME)
+    connection = get_db_connection_or_path(selectedUser, db_name)
 
     cur = connection.cursor()
+    print("connection established",connection)
     query = f"SELECT * FROM {table_name}"
     cur.execute(query)
     data = cur.fetchall()
@@ -1751,6 +1816,8 @@ def fetch_data_for_ts_decomposition(table_name, x_axis_columns, filter_options, 
     return temp_df[[x_axis_columns[0], y_axis_column[0]]] if x_axis_columns and y_axis_column else temp_df
 
 @app.route('/plot_chart', methods=['POST', 'GET'])
+@token_required
+
 def get_bar_chart_route(): 
     
     
@@ -2661,6 +2728,8 @@ def update_category(categories, category_key, y_axis_value, aggregation):
             categories[category_key] = [float(y_axis_value), float(y_axis_value) ** 2, 1]  # Initialize list for sum, sum of squares, and count
 
 @app.route('/edit_plot_chart', methods=['POST', 'GET'])
+@token_required
+
 def get_edit_chart_route():
     df = bc.global_df
     data = request.json
@@ -3216,6 +3285,8 @@ def edit_update_category(categories, category_key, y_axis_value, aggregation):
         categories[category_key] += 1
 
 @app.route('/your-backend-endpoint', methods=['POST','GET'])
+@token_required
+
 def handle_bar_click():
     # conn = psycopg2.connect("dbname=datasource user=postgres password=Gayu@123 host=localhost")
     conn = connect_to_db()
@@ -3258,6 +3329,8 @@ def handle_bar_click():
     return jsonify({"categories": labels, "values": y_axis_values, "aggregation": aggregation})
 
 @app.route('/plot_chart/<selectedTable>/<columnName>', methods=['POST', 'GET'])
+@token_required
+
 def get_filter_options(selectedTable, columnName):
     table_name = selectedTable
     column_name = columnName
@@ -3296,11 +3369,15 @@ def fetch_column_name_with_cache(table_name, column_name, db_name, selectedUser,
     return fetch_column_name(table_name, column_name, db_name,calculation_expr,calc_column,selectedUser)
 
 @app.route('/clear_cache', methods=['POST'])
+@token_required
+
 def clear_cache():
     fetch_column_name_with_cache.cache_clear()
     return jsonify({"message": "Cache cleared!"})
 
 @app.route('/save_data', methods=['POST'])
+@token_required
+
 def save_data():
     data = request.json
     user_id=data['user_id']
@@ -3442,6 +3519,8 @@ def save_data():
         return jsonify({'error': str(e)})
     
 @app.route('/update_data', methods=['POST'])
+@token_required
+
 def update_data():
     data = request.json
     print("Received data for update:", data)
@@ -3694,6 +3773,8 @@ def get_chart_names_Edit(user_id, database_name):
     return dashboard_structure
 
 @app.route('/total_rows_Edit', methods=['GET'])
+@token_required
+
 def chart_names_Edit():
     user_id = request.args.get('user_id')
     database_name = request.args.get('company')  # Getting the database_name
@@ -3723,6 +3804,8 @@ def chart_names_Edit():
     
 @app.route('/total_rows', methods=['GET'])
 @employee_required
+@token_required
+
 def chart_names():
     user_id = request.args.get('user_id')
     database_name = request.args.get('company')  # Getting the database_name
@@ -3775,6 +3858,8 @@ def get_chart_data(chart_name,company_name,user_id):
         return None
 
 @app.route('/chart_data/<chart_name>/<company_name>', methods=['GET'])
+@token_required
+
 def chart_data(chart_name,company_name):
     # user_id = request.args.get('user_id')
     user_id, chart_name = chart_name.split(",", 1)  # Split only once
@@ -3787,6 +3872,8 @@ def chart_data(chart_name,company_name):
         return jsonify({'error': 'Failed to fetch data for Chart {}'.format(chart_name)})
 
 @app.route('/list-excel-files', methods=['GET'])
+@token_required
+
 def list_files():
     directory_structure = {}
     for root, dirs, files in os.walk(BASE_DIR):
@@ -3797,6 +3884,8 @@ def list_files():
     return jsonify(directory_structure)
 
 @app.route('/list-csv-files', methods=['GET'])
+@token_required
+
 def list_csv_files():
     directory_structure = {}
 
@@ -3809,6 +3898,8 @@ def list_csv_files():
     return jsonify(directory_structure)
 
 @app.route('/save_all_chart_details', methods=['POST'])
+@token_required
+
 @employee_required
 def save_all_chart_details():
     data = request.get_json()
@@ -3990,6 +4081,8 @@ def fetch_filter_data(conn, chart_ids):
     return filter_data
 
 @app.route('/plot_dual_axis_chart', methods=['POST','GET'])
+@token_required
+
 def get_duel_chart_route():
     data = request.json
     table_name = data['selectedTable']
@@ -4040,6 +4133,8 @@ def update_category(categories, category_key, y_axis_value, aggregation):
         categories[category_key] += 1
 
 @app.route('/upload_audio_file', methods=['POST'])
+@token_required
+
 def upload_file():
     if 'file' not in request.files:
         return jsonify({'error': 'No file part'}), 400
@@ -4057,6 +4152,8 @@ def upload_file():
         return jsonify({'error': 'Invalid file type'}), 400
 
 @app.route('/api/calculation', methods=['POST'])
+@token_required
+
 def handle_calculation():
     data = request.json
     columnName = data.get('columnName')
@@ -4089,6 +4186,8 @@ def handle_calculation():
         return jsonify({'error': 'Error processing dataframe'}), 500
     
 @app.route('/api/signup', methods=['POST'])
+@token_required
+
 def signup():
     # data = request.json
     # print("data",data)
@@ -4120,19 +4219,21 @@ def signup():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/signUP_username', methods=['GET'])
+
 def get_userdata():
     usersdata = fetch_usersdata()
     return jsonify(usersdata)
 
 class JWTManager:
     @staticmethod
-    def generate_tokens(user_data, user_type='user'):
+    def generate_tokens(user_data,login_id=None, user_type='user'):
         """Generate both access and refresh tokens"""
         now = datetime.utcnow()
         
         # Access Token Payload
         access_payload = {
             'user_id': user_data.get('user_id') or user_data.get('employee_id'),
+            'login_id': login_id,
             'user_type': user_type,  # 'admin', 'user', 'employee'
             'email': user_data.get('email'),
             'permissions': user_data.get('permissions'),
@@ -4195,6 +4296,7 @@ class JWTManager:
         }
         
         return JWTManager.generate_tokens(user_data, payload.get('user_type'))
+
 
 def admin_required(f):
     """Decorator to require admin privileges"""
@@ -4345,6 +4447,25 @@ def insert_login_history(employee_id, company_id, login_device, login_ip, login_
             updated_login_id = result[0]
 
     else:
+        if employee_id is not None:
+            cur.execute("""
+                UPDATE login_history
+                SET logout_time = %s, login_status = 'logout'
+                WHERE employee_id = %s AND company_id = %s AND login_status = 'login';
+            """, (datetime.now(), employee_id, company_id))
+            print(f"🧹 Previous active sessions for employee_id={employee_id} closed.")
+        else:
+            # Anonymous or admin login — close previous anonymous logins
+            cur.execute("""
+                UPDATE login_history
+                SET logout_time = %s, login_status = 'logout'
+                WHERE employee_id IS NULL
+                AND company_id = %s
+                AND login_status = 'login';
+            """, (datetime.now(), company_id))
+            print(f"🧹 Previous active anonymous sessions for company_id={company_id} closed.")
+
+
         # ✅ Insert new login entry and return login_id
         cur.execute("""
             INSERT INTO login_history 
@@ -4430,10 +4551,9 @@ def login():
                 'company_id':usersdata.get('company_id')
 
             }
-            
-            tokens = JWTManager.generate_tokens(user_data, 'user')
-            print("Cleent user Token------",tokens)
             login_id =insert_login_history(None, companyid, login_device, login_ip, 'login')
+            tokens = JWTManager.generate_tokens(user_data,login_id, 'user')
+            print("Cleent user Token------",tokens)
             
             # log_activity(email, 'login', f'User {email} logged in')
 
@@ -4516,9 +4636,9 @@ def login():
                 'company': company,
                 'role_id': user_info[2]  # role_id
             }
-            
-            tokens = JWTManager.generate_tokens(user_data, 'employee')
             login_id =insert_login_history(user_info[0], company_id, login_device, login_ip, 'login')
+           
+            tokens = JWTManager.generate_tokens(user_data,login_id, 'employee')
             print("Employee Token------------------",tokens)
             log_activity(email, 'login', f'Employee {email} logged into {company}', company_name=company)
             
@@ -4543,6 +4663,7 @@ def login():
 
 # Token Refresh Route
 @app.route('/api/refresh', methods=['POST'])
+
 def refresh_token():
     data = request.get_json()
     refresh_token = data.get('refresh_token')
@@ -4623,6 +4744,8 @@ def logout():
 
 # Protected Route Examples
 @app.route('/api/profile', methods=['GET'])
+@token_required
+
 @jwt_required
 def get_profile():
     user = request.current_user
@@ -4635,12 +4758,16 @@ def get_profile():
     }), 200
 
 @app.route('/api/admin/users', methods=['GET'])
+@token_required
+
 @admin_required
 def get_all_userss():
     # Admin only route
     return jsonify({'message': 'Admin access granted', 'users': []}), 200
 
 @app.route('/api/employee/users', methods=['GET'])
+@token_required
+
 @employee_required
 def get_empployees():
     try:
@@ -4672,12 +4799,15 @@ def get_empployees():
         }), 500
 
 @app.route('/api/data/sensitive', methods=['GET'])
+@token_required
+
 @permission_required(['read_sensitive_data'])
 def get_sensitive_data():
     # Route that requires specific permission
     return jsonify({'message': 'Sensitive data access granted'}), 200
 
 @app.route('/api/singlevalue_text_chart', methods=['POST'])
+@token_required
 def receive_single_value_chart_data():
     data = request.get_json()
     print("data====================",data)
@@ -4720,6 +4850,7 @@ def receive_single_value_chart_data():
                      "message": "Data received successfully!"})
 
 @app.route('/api/text_chart', methods=['POST'])
+@token_required
 def receive_chart_data():
     data = request.get_json()
     print("data====================",data)
@@ -4748,6 +4879,7 @@ def receive_chart_data():
                      "message": "Data received successfully!"})
 
 @app.route('/api/text_chart_view', methods=['POST'])
+@token_required
 def receive_view_chart_data():
     data = request.get_json()
     print("data====================",data)
@@ -4788,6 +4920,7 @@ def receive_view_chart_data():
 
 
 @app.route('/api/handle-clicked-category',methods=['POST'])
+@token_required
 def handle_clicked_category():
     data=request.json
     category = data.get('category')
@@ -5021,6 +5154,7 @@ def apply_calculation_to_df(df, calculation_data_list, x_axis=None, y_axis=None)
     return df, x_axis, y_axis
 
 @app.route('/api/send-chart-details', methods=['POST'])
+@token_required
 def receive_chart_details():  
     data = request.get_json()
     print("Received data:", data)
@@ -5862,6 +5996,7 @@ def get_dashboard_data(dashboard_name, company_name,user_id):
         return None
 
 @app.route('/Dashboard_data/<dashboard_name>/<company_name>', methods=['GET'])
+@token_required
 def dashboard_data(dashboard_name,company_name):
     user_id, dashboard_name = dashboard_name.split(",", 1)  # Split only once
     # user_id = request.args.get('user_id')
@@ -5995,6 +6130,7 @@ def dashboard_data(dashboard_name,company_name):
     
 
 @app.route('/saved_dashboard_total_rows', methods=['GET'])
+@token_required
 def saved_dashboard_names():
     database_name = request.args.get('company')  # Getting the database_name
     project=request.args.get("project_name")
@@ -6014,6 +6150,7 @@ def saved_dashboard_names():
         return jsonify({'error': 'Failed to fetch chart names'})
 
 @app.route('/project_names', methods=['GET'])
+@token_required
 @employee_required
 def get_project_names_route():
     database_name = request.args.get('company')
@@ -6030,6 +6167,7 @@ def get_project_names_route():
         return jsonify({'error': 'Failed to fetch project names'}), 500
     
 @app.route('/saved_Editdashboard_total_rows', methods=['GET'])
+@token_required
 def saved_Editdashboard_names():
     database_name = request.args.get('company')  # Getting the database_name
     print(f"Received user_id:",database_name)
@@ -6048,6 +6186,7 @@ def saved_Editdashboard_names():
         return jsonify({'error': 'Failed to fetch chart names'})
     
 @app.route('/api/usersignup', methods=['POST'])
+@token_required
 def usersignup():
     data = request.json
     print("Received Data:", data)
@@ -6079,6 +6218,7 @@ def get_db_connection(dbname=DB_NAME):
     return conn
 
 @app.route('/api/companies', methods=['GET'])
+
 def get_companies():
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -6091,6 +6231,7 @@ def get_companies():
     return jsonify(company_list)
 
 @app.route('/api/roles', methods=['GET'])
+@token_required
 def get_roles(): 
     company_name = request.args.get('companyName')
     if not company_name:
@@ -6110,6 +6251,7 @@ def get_roles():
         return jsonify({'message': 'Failed to fetch roles'}), 500
 
 @app.route('/fetchglobeldataframe', methods=['GET'])
+@token_required
 def get_hello_data():
     dataframe = bc.global_df
     print("dataframe........................", dataframe)
@@ -6120,12 +6262,14 @@ def get_hello_data():
     return jsonify({"data frame": dataframe_dict})
 
 @app.route('/aichartdata', methods=['GET'])
+@token_required
 def ai_barchart():
     dataframe = bc.global_df  # Assuming bc.global_df is your DataFrame
     histogram_details = generate_histogram_details(dataframe)
     return jsonify({"histogram_details": histogram_details})
 
 @app.route('/boxplotchartdata', methods=['GET'])
+@token_required
 def ai_boxPlotChart():
     dataframe = bc.global_df  # Assuming bc.global_df is your DataFrame
     # axes = dataframe.hist()
@@ -6156,6 +6300,7 @@ def ai_boxPlotChart():
     })
 
 @app.route('/api/fetch_categories', methods=['GET'])
+@token_required
 def fetch_categories():
     company_name = request.args.get('companyName')
     try:
@@ -6172,6 +6317,7 @@ def fetch_categories():
         return jsonify({'message': 'Error fetching categories'}),500
 
 @app.route('/api/users', methods=['GET'])
+@token_required
 def get_all_users():
     company_name = request.args.get('companyName')
     print("company_name====================",company_name)
@@ -6228,6 +6374,7 @@ def get_all_users():
             conn.close()
 
 @app.route('/api/fetch_user_data', methods=['POST'])
+@token_required
 def fetch_user_data():
     data = request.json
     print("data",data)
@@ -6309,6 +6456,7 @@ def fetch_user_data():
         conn.close()
 
 @app.route('/api/update_user_details', methods=['POST'])
+@token_required
 def update_user_details():
     data = request.json
     print("data......",data)
@@ -6361,6 +6509,7 @@ def update_user_details():
         conn.close()
 
 @app.route('/api/user/<username>', methods=['PUT'])
+@token_required
 def update_user(username):
     data = request.get_json()
     company_name = data.get('company_name')
@@ -6389,6 +6538,7 @@ def update_user(username):
 
 from predictions import load_and_predict  
 @app.route('/api/predictions', methods=['GET','POST'])
+@token_required
 def get_predictions():
     data = request.json
     x_axis = data.get('xAxis')
@@ -6404,6 +6554,7 @@ def get_predictions():
     return jsonify(prediction_data)  # Return data as JSON
 
 @app.route('/Hierarchial-backend-endpoint', methods=['POST', 'GET'])
+@token_required
 def handle_hierarchical_bar_click():
     global global_df
 
@@ -6485,6 +6636,7 @@ def extract_chart_details_spacy(text, COLUMN_NAME_MAP):
     return {"chart_type": chart_type, "columns": None, "rows": None}
 
 @app.route('/nlp_upload_audio', methods=['POST'])
+@token_required
 def nlp_upload_audio():
     global global_column_names
     audio = request.files.get('audio')
@@ -6553,6 +6705,7 @@ def nlp_upload_audio():
     })
 
 @app.route('/api/charts/<string:chart_name>', methods=['DELETE'])
+@token_required
 def delete_chart(chart_name):
     conn = get_db_connection()
     if conn is None:
@@ -6581,6 +6734,7 @@ def delete_chart(chart_name):
         return jsonify({"error": "Failed to delete chart"}), 500
 
 @app.route('/delete-chart', methods=['DELETE'])
+@token_required
 def delete_dashboard_name():
     # chart_name = request.args.get('chart_name')  # Get the chart_name from JSON body
     chart_name = request.args.getlist('chart_name[]')  
@@ -6644,6 +6798,7 @@ def delete_dashboard_name():
         return jsonify({"error": f"Error: {str(e)}"}), 500
 
 @app.route('/api/are-charts-in-dashboard', methods=['POST'])
+@token_required
 @employee_required
 def are_charts_in_dashboard():
     data = request.get_json()
@@ -6704,6 +6859,7 @@ def are_charts_in_dashboard():
         return jsonify({"error": "Server error"}), 500
     
 @app.route('/api/table-columns/<table_name>', methods=['GET'])
+@token_required
 def api_get_table_columns(table_name):
     try:
         # Get the company name from the query parameters
@@ -6720,6 +6876,7 @@ def api_get_table_columns(table_name):
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/employees', methods=['GET'])
+@token_required
 def get_employees():
     company = request.args.get('company')  # Get company name from query parameter
     print("company", company)
@@ -6761,6 +6918,7 @@ def get_employees():
         return jsonify({"error": "An error occurred while fetching employees"}), 500
     
 @app.route('/api/checkTableUsage', methods=['GET'])
+@token_required
 def check_table_usage():
     table_name = request.args.get('tableName')
 
@@ -6779,6 +6937,7 @@ def check_table_usage():
     return jsonify({"isInUse": is_in_use})
 
 @app.route('/api/fetchTableDetailsexcel', methods=['GET'])
+@token_required
 def get_table_data_excel():
     company_name = request.args.get('databaseName')  # Get company name from the query
     table_name = request.args.get('selectedTable')  # Get the table name from the query
@@ -6838,6 +6997,7 @@ from load import (
 
 
 @app.route('/api/fetchTableDetails', methods=['GET'])
+@token_required
 def get_table_data():
     """API endpoint to fetch table data with caching, column selection, and column conditions"""
     try:
@@ -6882,6 +7042,7 @@ def get_table_data():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/fetchTableColumnsWithTypes', methods=['GET'])
+@token_required
 def get_table_columns_with_types_api():
     """API endpoint to fetch all column names with their data types from a table"""
     try:
@@ -6901,6 +7062,7 @@ def get_table_columns_with_types_api():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/fetchTableColumnsWithTypesdb', methods=['GET'])
+@token_required
 def get_table_columns_with_types_apidb():
     """API endpoint to fetch all column names with their data types from a table"""
     try:
@@ -6920,6 +7082,7 @@ def get_table_columns_with_types_apidb():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/fetchTableColumns', methods=['GET'])
+@token_required
 def get_table_columns_api():
     """API endpoint to fetch all column names from a table"""
     try:
@@ -6939,6 +7102,7 @@ def get_table_columns_api():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/fetchDateColumns', methods=['GET'])
+@token_required
 def get_date_columns():
     """API endpoint to fetch date/datetime columns from a table"""
     company_name = request.args.get('databaseName')
@@ -7135,6 +7299,7 @@ def get_db_connectiondb(company_name, selected_user=None):
 
     return connection
 @app.route('/api/fetchDateColumnsdb', methods=['GET'])
+@token_required
 def get_date_columnsdb():
     """API endpoint to fetch date/datetime columns from a table"""
     company_name = request.args.get('databaseName')
@@ -7172,6 +7337,7 @@ def get_date_columnsdb():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/clearCache', methods=['POST'])
+@token_required
 def clear_dataFrame_cache():
     """Clear all cached data"""
     try:
@@ -7182,6 +7348,7 @@ def clear_dataFrame_cache():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/getCacheInfo', methods=['GET'])
+@token_required
 def get_cache_info():
     """Get information about cached data"""
     try:
@@ -7191,6 +7358,7 @@ def get_cache_info():
         print(f"Error getting cache info: {e}")
         return jsonify({'error': str(e)}), 500
 @app.route('/api/checkViewExists', methods=['GET'])
+@token_required
 def check_view_exists_api():
     """API endpoint to check if a view name already exists"""
     try:
@@ -7207,6 +7375,7 @@ def check_view_exists_api():
         print(f"Error checking view exists: {str(e)}")
         return jsonify({'error': str(e)}), 500
 @app.route('/api/checkViewExistsdb', methods=['GET'])
+@token_required
 def check_view_exists_apidb():
     """API endpoint to check if a view name already exists"""
     try:
@@ -7224,6 +7393,7 @@ def check_view_exists_apidb():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/createView', methods=['POST'])
+@token_required
 def create_view_api():
     """API endpoint to create a database view"""
     try:
@@ -7251,6 +7421,7 @@ def create_view_api():
 
 
 @app.route('/api/createViewdb', methods=['POST'])
+@token_required
 def create_view_apidb():
     """API endpoint to create a database view"""
     try:
@@ -7278,6 +7449,7 @@ def create_view_apidb():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/getUserViews', methods=['GET'])
+@token_required
 def get_user_views_api():
     """API endpoint to get all user-created views"""
     try:
@@ -7294,6 +7466,7 @@ def get_user_views_api():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/dropView', methods=['DELETE'])
+@token_required
 def drop_view_api():
     """API endpoint to drop a database view"""
     try:
@@ -7399,6 +7572,7 @@ def create_connection( db_name=DB_NAME,
 
 
 @app.route('/save_connection', methods=['POST'])
+@token_required
 def save_connection():
     data = request.json
     print("Received Data:", data)
@@ -8073,6 +8247,7 @@ import paramiko
 #             print("🔒 SSH Tunnel closed.")
 
 @app.route('/connect', methods=['POST'])
+@token_required
 def connect_and_fetch_tables():
     data = request.json
     dbType = data.get('dbType')
@@ -8471,6 +8646,7 @@ def fetch_table_names_from_external_db(db_details):
 #     else:
 #         return jsonify({"error": "Could not retrieve external database connection details"}), 500
 @app.route('/external-db/tables', methods=['GET'])
+@token_required
 def get_external_db_table_names():
     company_name = request.args.get('databaseName')
     savename = request.args.get('user')
@@ -8580,6 +8756,7 @@ def get_external_db_table_names():
 #         if 'conn' in locals():
 #             conn.close()
 @app.route('/external-db/tables/<table_name>', methods=['GET'])
+@token_required
 def get_externaltable_data(table_name):
     company_name = request.args.get('databaseName')
     savename = request.args.get('user')
@@ -8766,6 +8943,7 @@ def fetch_data_from_table(db_details, table_name):
 
 
 @app.route('/api/dbusers', methods=['GET'])
+@token_required
 def fetch_saved_names():
     company_name = request.args.get('databaseName')  # Get the company name from the request
     print("Received databaseName:", company_name)  # Debugging
@@ -8809,6 +8987,7 @@ def fetch_saved_names():
 
 
 @app.route('/ai_ml_chartdata', methods=['GET'])
+@token_required
 def ai_ml_charts():
     dataframe = bc.global_df  # Assuming bc.global_df is your DataFrame
     ai_ml_charts_details = analyze_data(dataframe)
@@ -8817,6 +8996,7 @@ def ai_ml_charts():
 
 
 @app.route('/boxplot-data', methods=['POST'])
+@token_required
 def boxplot_data():
     try:
         data = request.json
@@ -8925,6 +9105,7 @@ def boxplot_data():
 
    
 @app.route('/api/checkSaveName', methods=['POST'])
+@token_required
 def check_save_name():
     data = request.get_json()
     save_name = data.get('saveName')
@@ -8959,6 +9140,7 @@ def check_save_name():
 
 
 @app.route('/check_filename/<fileName>/<company_name>', methods=['GET'])
+@token_required
 def check_filename(fileName, company_name):
     user_id = request.args.get('user_id')  # Use query param for GET
 
@@ -8992,6 +9174,7 @@ import binascii
 
 
 @app.route('/api/validate_user', methods=['GET'])
+
 def validate_user():
     email = request.args.get('email')
     password = request.args.get('password')
@@ -9108,6 +9291,7 @@ def create_roles_table():
 #         logging.error(f"Error adding role: {str(e)}")
 #         return jsonify({"error": str(e)}), 500
 @app.route('/updateroles', methods=['POST'])
+@token_required
 def add_role():
     try:
         data = request.json
@@ -9189,6 +9373,7 @@ def add_role():
 
 
 @app.route('/api/update-chart-position', methods=['POST'])
+@token_required
 def update_chart_position():
     data = request.get_json()
     chart_ids = data.get('chart_id')
@@ -9244,6 +9429,7 @@ def dashboard_wallpapers_table(conn):
     """)
     conn.commit()
 @app.route('/api/saveDashboard', methods=['POST'])
+@token_required
 def save_dashboard():
     data = request.json
     user_id = data['user_id']
@@ -9523,6 +9709,7 @@ if not os.path.exists('static'):
     os.makedirs('static')
 
 @app.route('/api/generate-dashboard', methods=['GET'])
+@token_required
 def generate_dashboard():
     try:
         db_name = request.args.get('db_name')
@@ -9570,6 +9757,7 @@ def generate_dashboard():
 
 
 @app.route('/dbconnect', methods=['POST'])
+@token_required
 def connect_and_fetch_dbtables():
     data = request.json
     db_type = data.get('dbType')
@@ -10116,6 +10304,7 @@ Regards,
 #             send_notification_email(email, "Data Transfer Scheduling Failed", error_msg)
 #         return jsonify({"success": False, "error": error_msg}), 500
 @app.route('/api/transfer_data', methods=['POST'])
+@token_required
 def transfer_and_verify_data():
     data = request.get_json()
     source_config = data.get('source')
@@ -10344,6 +10533,7 @@ Regards,
 #     )
 
 @app.route('/get_tables', methods=['POST'])
+@token_required
 def get_tables():
     data = request.get_json()
     db_type = data.get('dbType')
@@ -10395,6 +10585,7 @@ def get_tables():
 
 
 @app.route('/api/get_table_columns', methods=['POST'])
+@token_required
 def get_table_column():
     data = request.get_json()
     source_config = data.get('source')
@@ -10409,6 +10600,7 @@ def get_table_column():
     return jsonify({"success": True, "columns": columns})
     
 @app.route('/api/create-view', methods=['POST'])
+@token_required
 def create_single_table_view():
     data = request.json
     print("Received data for view creation:", data)
@@ -10505,6 +10697,7 @@ def create_single_table_view():
             print("Database connection closed.")
 
 @app.route("/upload_logo", methods=["POST"])
+@token_required
 def upload_logo():
     logo = request.files.get("logo")
     organizationName = request.form.get("organizationName")
@@ -10625,6 +10818,7 @@ def save_logo(logo, organizationName, db_cursor, db_conn):
 #         return jsonify({'error': str(e)}), 500
     
 @app.route('/api/calculation-suggestions', methods=['GET'])
+@token_required
 def get_calculation_suggestions():
     try:
         conn = psycopg2.connect(
@@ -10692,6 +10886,7 @@ def get_calculation_suggestions():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/get_role_permissions/<role_code>/<company>', methods=['GET'])
+@token_required
 def get_role_permissions(role_code,company):
     
     if not role_code or not company:
@@ -10729,6 +10924,7 @@ def get_role_permissions(role_code,company):
         return jsonify({'error': str(e)}), 500
 # Example Flask endpoint
 @app.route('/delete_table', methods=['POST'])
+@token_required
 def delete_table():
     data = request.json
     database = data.get('database')
@@ -10826,6 +11022,7 @@ def delete_table():
 
 
 @app.route('/api/get_all_users', methods=['GET'])
+@token_required
 def get_all_user_id():
     company_name = request.args.get('company_name')
     user_id = request.args.get('user_id')
@@ -10888,6 +11085,7 @@ def safe_json(value):
     return value
 
 @app.route('/api/share_dashboard', methods=['POST'])
+@token_required
 def share_dashboard():
     conn = None 
     try:
@@ -11158,6 +11356,7 @@ def share_dashboard():
         if conn:
             conn.close()
 @app.route('/api/getUserDashboards', methods=['GET'])
+@token_required
 def get_user_dashboards():
     conn = None
     try:
@@ -11236,6 +11435,7 @@ from datetime import datetime, timedelta
 
 # ---------------- REQUEST RESET ----------------
 @app.route('/api/request_password_reset', methods=['POST'])
+@token_required
 def request_password_reset():
     try:
         data = request.json
@@ -11298,6 +11498,7 @@ def request_password_reset():
 
 # ---------------- RESET PASSWORD ----------------
 @app.route('/api/reset_password', methods=['POST'])
+@token_required
 def reset_password():
     try:
         data = request.json
@@ -11404,6 +11605,7 @@ import requests
 
 
 @app.route('/fetch-api', methods=['POST'])
+@token_required
 def fetch_api_data():
     try:
         data = request.json
@@ -11490,6 +11692,7 @@ def fetch_api_data():
 #         return jsonify({"error": str(e)}), 500
 
 @app.route('/save-api-data', methods=['POST'])
+@token_required
 def save_api_data():
     try:
         import tempfile, os, json
@@ -11621,6 +11824,7 @@ def save_api_data():
 #         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/system_summary', methods=['GET'])
+@token_required
 def system_summary():
     try:
         company_name = request.args.get('company_name')
@@ -11816,6 +12020,7 @@ def log_activity(user_email, action_type, description, table_name=None, company_
         if conn:
             conn.close()
 @app.route('/api/get_activity_logs', methods=['GET'])
+@token_required
 def get_activity_logs():
     company_name = request.args.get("company_name")
 
@@ -11852,6 +12057,7 @@ def get_activity_logs():
         print("❌ Error fetching activity logs:", e)
         return jsonify({"error": str(e)}), 500
 @app.route('/api/user_management_logs', methods=['GET'])
+@token_required
 def get_user_management_logs():
     company_name = request.args.get('company_name')
     
@@ -11954,6 +12160,7 @@ def create_license_tables():
 # ➕ Add License Plan
 # ==========================================================
 @app.route('/add_license_plan', methods=['POST'])
+@token_required
 def add_license_plan():
     create_license_tables()
     data = request.json
@@ -11983,6 +12190,7 @@ def add_license_plan():
 # ➕ Add Feature to Plan
 # ==========================================================
 @app.route('/add_license_feature', methods=['POST'])
+@token_required
 def add_license_feature():
     data = request.json
     plan_id = data.get('plan_id')
@@ -12060,6 +12268,7 @@ def assign_license():
 # 🔍 Get Organization License Status
 # ==========================================================
 @app.route('/get_org_license_status', methods=['POST'])
+@token_required
 def get_org_license_status():
     data = request.json
     organization_id = data.get('organization_id')
@@ -12114,6 +12323,7 @@ def get_org_license_status():
 #     else:
 #         return jsonify({"active": False})
 @app.route("/check_company_plan/<int:company_id>", methods=["GET"])
+@token_required
 def check_company_plan(company_id):
     conn = get_db_connection()
     cur = conn.cursor()
@@ -12152,6 +12362,7 @@ def check_company_plan(company_id):
         return jsonify({"active": False})
 
 @app.route("/activate_plan", methods=["POST"])
+@token_required
 def activate_plan():
     data = request.json
     company_id = data.get("company_id")
@@ -12166,7 +12377,7 @@ def activate_plan():
     if not plan:
         return jsonify({"message": "Invalid plan ID"}), 400
 
-    plan_name, duration_days = plan
+    plan_name, duration_days, employee_limit = plan
     end_date = datetime.now() + timedelta(days=duration_days)
 
     # Restrict Free plan to one-time use
@@ -12278,6 +12489,7 @@ def update_license_plan(plan_id):
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 @app.route("/api/get_organization", methods=["GET"])
+
 def get_organization():
     conn = get_db_connection()
     cur = conn.cursor()
@@ -12333,6 +12545,66 @@ def get_login_history(company_id):
         })
     return jsonify(history)
 
+@app.route('/api/check-status', methods=['POST'])
+
+def check_login_status_route():
+    """
+    Flask route to handle the status check request from the frontend.
+    It checks the login_status in the login_history table based on login_id.
+    """
+    conn = None
+    cur = None
+    try:
+        data = request.get_json()
+        
+        # 1. Extract required parameters
+        # user_id is passed but not strictly needed for this specific query, 
+        # but login_id is mandatory.
+        login_id = data.get('login_id')
+        
+        if not login_id:
+            # If login_id is missing, assume the session is invalid
+            return jsonify({"status": "logout", "message": "Missing login ID"}), 200
+
+        # 2. Establish database connection and cursor
+        # NOTE: Replace get_db_connection() with your actual function if needed
+        conn = get_db_connection() 
+        cur = conn.cursor()
+        
+        # SQL to retrieve the current login_status
+        query = """
+            SELECT login_status 
+            FROM login_history 
+            WHERE login_id = %s;
+        """
+        
+        # 3. Execute the query
+        # Use a list/tuple for parameters to prevent SQL injection
+        cur.execute(query, (login_id,))
+        
+        # 4. Fetch the result
+        result = cur.fetchone()
+        
+        status = 'logout'
+        if result:
+            # result is a tuple (login_status,), grab the first element
+            status = result[0]
+        # If no result is found, 'logout' is returned by default (initialized above)
+        
+        # 5. Return the status to the frontend
+        return jsonify({"status": status}), 200
+        
+    except Exception as e:
+        print(f"Error checking login status: {e}")
+        # Default to 'active' on server error to prevent accidental lockout
+        return jsonify({"status": "active", "error": str(e)}), 500
+        
+    finally:
+        # 6. Ensure cursor and connection are always closed
+        if cur:
+            cur.close()
+        if conn:
+            conn.close()
 
 # app.register_blueprint(license_bp)
 
