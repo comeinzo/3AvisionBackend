@@ -119,7 +119,7 @@ def create_table_if_not_exists(cursor):
             print(f"✅ Added missing column: {column_name}")
 def insert_user_data(organizationName, email, userName, password,logo_filename):
     try:
-        create_database(organizationName)  # Assuming this creates the database if needed
+        # create_database(organizationName)  # Assuming this creates the database if needed
         conn = get_db_connection()
         cursor = conn.cursor()
 
@@ -127,13 +127,14 @@ def insert_user_data(organizationName, email, userName, password,logo_filename):
         create_table_if_not_exists(cursor)
         print("organizationName",organizationName)
         organizationName = organizationName.lower() 
+        hash_password=encrypt_password(password)
         # Insert data into table
         cursor.execute(
             """
             INSERT INTO organizationdatatest (organizationName, email, userName, password,logo, status, created_at, updated_at)
             VALUES (%s, %s, %s, %s,%s,%s, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
             """,
-            (organizationName, email, userName, password,logo_filename,'active')
+            (organizationName, email, userName, hash_password,logo_filename,'active')
         )
         conn.commit()
         logging.info(f"User data inserted for {organizationName}")
@@ -170,34 +171,93 @@ def fetch_usersdata():
 
 
 
+# def fetch_login_data(email, password):
+#     conn = get_db_connection()
+#     cursor = conn.cursor()
+#     create_table_if_not_exists(cursor)
+
+#     # SQL query to check if email and password match
+#     cursor.execute("SELECT * FROM organizationdatatest WHERE email = %s AND password = %s", (email, password))
+#     user = cursor.fetchone()
+
+#     logo_path = None
+#     company_name = None
+#     company_id=None
+#     if user and user[5]:  # Assuming user[5] is the column containing logo path
+#         logo_path = user[5].replace("\\", "/")  # Normalize path for URL
+#     if user and user[1]:  # Assuming user[5] is the column containing logo path
+#         company_name = user[1]
+#         company_id=user[0]
+       
+
+#     cursor.close()
+#     conn.close()
+
+#     return {
+#         "user": user,
+#         "logo_url": f"http://localhost:5000/static/{logo_path}" if logo_path else None,
+#         "company_name": company_name,
+#         "company_id":company_id
+#     }
+
+
 def fetch_login_data(email, password):
     conn = get_db_connection()
     cursor = conn.cursor()
     create_table_if_not_exists(cursor)
 
-    # SQL query to check if email and password match
-    cursor.execute("SELECT * FROM organizationdatatest WHERE email = %s AND password = %s", (email, password))
-    user = cursor.fetchone()
+    try:
+        # ✅ Step 1: Fetch user by email only
+        cursor.execute("SELECT * FROM organizationdatatest WHERE email = %s", (email,))
+        user = cursor.fetchone()
 
-    logo_path = None
-    company_name = None
-    company_id=None
-    if user and user[5]:  # Assuming user[5] is the column containing logo path
-        logo_path = user[5].replace("\\", "/")  # Normalize path for URL
-    if user and user[1]:  # Assuming user[5] is the column containing logo path
-        company_name = user[1]
-        company_id=user[0]
-       
+        if not user:
+            logging.warning(f"❌ No user found with email: {email}")
+            return {"status": "error", "message": "User not found"}
 
-    cursor.close()
-    conn.close()
+        stored_hashed_password = user[4]  # 4th column is password (hashed)
 
-    return {
-        "user": user,
-        "logo_url": f"http://localhost:5000/static/{logo_path}" if logo_path else None,
-        "company_name": company_name,
-        "company_id":company_id
-    }
+        stored_hash_bytes = binascii.unhexlify(stored_hashed_password.replace('\\x', ''))
+        print("------------------------------------",stored_hash_bytes)    
+        # Check if the password matches the hashed password
+        if bcrypt.checkpw(password.encode('utf-8'), stored_hash_bytes):
+
+        # ✅ Step 2: Check password using bcrypt
+        # if bcrypt.checkpw(plain_password.encode('utf-8'), stored_hashed_password.encode('utf-8')):
+            logging.info(f"✅ Password match for {email}")
+
+            logo_path = None
+            company_name = None
+            company_id = None
+
+            # Assuming user[5] = logo, user[1] = organization name, user[0] = company id
+            if user[5]:
+                logo_path = user[5].replace("\\", "/")
+            if user[1]:
+                company_name = user[1]
+                company_id = user[0]
+
+            return {
+                "status": "success",
+                "message": "Login successful",
+                "user": user,
+                "logo_url": f"http://localhost:5000/static/{logo_path}" if logo_path else None,
+                "company_name": company_name,
+                "company_id": company_id,
+            }
+
+        else:
+            logging.warning(f"❌ Invalid password for {email}")
+            return {"status": "error", "message": "Invalid password"}
+
+    except Exception as e:
+        logging.error(f"Error in fetch_login_data: {str(e)}")
+        raise e
+
+    finally:
+        cursor.close()
+        conn.close()
+
 
 
 

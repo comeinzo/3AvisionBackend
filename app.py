@@ -113,9 +113,19 @@ from bar_chart import (
     perform_calculation
 )
 from bar_chart import global_df,global_column_names
-from license_routes import license_bp
+# from license_routes import license_bp
 
-
+from model import LoginHistoryTable
+from schema import create_schema
+import datetime
+# ==================================
+# ✅ Initialize required DB schema
+# ==================================
+try:
+    create_schema()
+    print("✅ Database schema initialized successfully.")
+except Exception as e:
+    print("⚠️ Error initializing schema:", e)
 # ==============================
 # Configurations
 # ==============================
@@ -4225,6 +4235,131 @@ def permission_required(required_permissions):
             return f(*args, **kwargs)
         return decorated_function
     return decorator
+# def insert_login_history(employee_id, company_id, login_device, login_ip, login_status):
+#     conn = get_db_connection()
+#     cur = conn.cursor()
+#     login_id = None 
+#     # Use the LoginHistoryTable class to ensure table exists
+#     # login_history_table = LoginHistoryTable(cur)
+#     # login_history_table.setup()
+#     # cur.execute("""
+#     #     INSERT INTO login_history (employee_id, company_id, login_device, login_ip, login_time, login_status)
+#     #     VALUES (%s, %s, %s, %s, %s, %s)
+#     # """, (employee_id, company_id, login_device, login_ip, datetime.now(), login_status))
+#     if login_status == 'logout':
+#         if employee_id is None:
+#             # ✅ Logout for anonymous or undefined employee
+#             cur.execute("""
+#                 UPDATE login_history
+#                 SET logout_time = %s, login_status = 'logout'
+#                 WHERE login_id = (
+#                     SELECT login_id FROM login_history
+#                     WHERE employee_id IS NULL 
+#                     AND company_id = %s
+#                     AND login_status = 'login'
+#                     ORDER BY login_time DESC
+#                     LIMIT 1
+#                 )
+#             """, (datetime.now(), company_id, login_ip, login_device))
+#         else:
+#             # ✅ Normal employee logout (matching by ID, IP, and device)
+#             cur.execute("""
+#                 UPDATE login_history
+#                 SET logout_time = %s, login_status = 'logout'
+#                 WHERE login_id = (
+#                     SELECT login_id FROM login_history
+#                     WHERE employee_id = %s 
+#                     AND company_id = %s
+#                     AND login_ip = %s
+#                     AND login_device = %s
+#                     AND login_status = 'login'
+#                     ORDER BY login_time DESC
+#                     LIMIT 1
+#                 )
+#             """, (datetime.now(), employee_id, company_id, login_ip, login_device))
+#         result = cur.fetchone()
+#         if result:
+#             login_id = result[0]
+
+#     else:
+#         # ✅ Insert new login entry
+#         cur.execute("""
+#             INSERT INTO login_history 
+#             (employee_id, company_id, login_device, login_ip, login_time, login_status)
+#             VALUES (%s, %s, %s, %s, %s, %s)
+#         """, (employee_id, company_id, login_device, login_ip, datetime.now(), 'login'))
+        
+#     conn.commit()
+#     cur.close()
+#     conn.close()
+#     return login_id
+def insert_login_history(employee_id, company_id, login_device, login_ip, login_status, login_id=None):
+    conn = get_db_connection()
+    cur = conn.cursor()
+    updated_login_id = None
+
+    if login_status == 'logout':
+        if login_id:
+            # ✅ Direct logout using known login_id
+            cur.execute("""
+                UPDATE login_history
+                SET logout_time = %s, login_status = 'logout'
+                WHERE login_id = %s
+                RETURNING login_id;
+            """, (datetime.now(), login_id))
+        elif employee_id is None:
+            # ✅ Logout for anonymous or undefined employee
+            cur.execute("""
+                UPDATE login_history
+                SET logout_time = %s, login_status = 'logout'
+                WHERE login_id = (
+                    SELECT login_id FROM login_history
+                    WHERE employee_id IS NULL 
+                    AND company_id = %s
+                    AND login_status = 'login'
+                    ORDER BY login_time DESC
+                    LIMIT 1
+                )
+                RETURNING login_id;
+            """, (datetime.now(), company_id))
+        else:
+            # ✅ Normal employee logout (matching last login)
+            cur.execute("""
+                UPDATE login_history
+                SET logout_time = %s, login_status = 'logout'
+                WHERE login_id = (
+                    SELECT login_id FROM login_history
+                    WHERE employee_id = %s 
+                    AND company_id = %s
+                    AND login_ip = %s
+                    AND login_device = %s
+                    AND login_status = 'login'
+                    ORDER BY login_time DESC
+                    LIMIT 1
+                )
+                RETURNING login_id;
+            """, (datetime.now(), employee_id, company_id, login_ip, login_device))
+
+        result = cur.fetchone()
+        if result:
+            updated_login_id = result[0]
+
+    else:
+        # ✅ Insert new login entry and return login_id
+        cur.execute("""
+            INSERT INTO login_history 
+            (employee_id, company_id, login_device, login_ip, login_time, login_status)
+            VALUES (%s, %s, %s, %s, %s, %s)
+            RETURNING login_id;
+        """, (employee_id, company_id, login_device, login_ip, datetime.now(), 'login'))
+        updated_login_id = cur.fetchone()[0]
+
+    conn.commit()
+    cur.close()
+    conn.close()
+    return updated_login_id
+
+
 
 # Updated Login Route
 @app.route('/api/login', methods=['POST'])
@@ -4274,7 +4409,8 @@ def login():
     # Regular User/Employee Login
     usersdata = None
     employeedata = None
-    
+    login_device = request.user_agent.string
+    login_ip = request.remote_addr
     if company is None:
         usersdata = fetch_login_data(email, password)
         print("usersdata", usersdata)
@@ -4297,6 +4433,8 @@ def login():
             
             tokens = JWTManager.generate_tokens(user_data, 'user')
             print("Cleent user Token------",tokens)
+            login_id =insert_login_history(None, companyid, login_device, login_ip, 'login')
+            
             # log_activity(email, 'login', f'User {email} logged in')
 
             if company_from_db:
@@ -4318,7 +4456,8 @@ def login():
                 'access_token': tokens['access_token'],
                 'refresh_token': tokens['refresh_token'],
                 'expires_in': tokens['expires_in'],
-                'user_data': usersdata
+                'user_data': usersdata,
+                'login_id':login_id
             }), 200
     else:
         employeedata = fetch_company_login_data(email, password, company)
@@ -4379,6 +4518,7 @@ def login():
             }
             
             tokens = JWTManager.generate_tokens(user_data, 'employee')
+            login_id =insert_login_history(user_info[0], company_id, login_device, login_ip, 'login')
             print("Employee Token------------------",tokens)
             log_activity(email, 'login', f'Employee {email} logged into {company}', company_name=company)
             
@@ -4395,7 +4535,8 @@ def login():
                     'end_date': end_date,
                     'storage_limit':storage_limit
                 },
-                'features': features_list
+                'features': features_list,
+                'login_id':login_id
             }), 200
     
     return jsonify({'message': 'Invalid credentials'}), 401
@@ -4422,14 +4563,63 @@ def refresh_token():
     }), 200
 
 # Logout Route (Token Revocation)
+# @app.route('/api/logout', methods=['POST'])
+# @jwt_required
+# def logout():
+#     data = request.get_json()
+#     user_id = data.get('user_id')
+#     company_id = data.get('company_id')  # optional for superadmin
+    
+
+#     if not user_id:
+#         return jsonify({'message': 'user_id is required'}), 400
+
+#     login_device = request.user_agent.string
+#     login_ip = request.remote_addr
+
+#     # Log the logout
+#     logout_history(user_id, company_id, login_device, login_ip)
+    
+#     return jsonify({'message': 'Logged out successfully'}), 200
 @app.route('/api/logout', methods=['POST'])
 @jwt_required
 def logout():
-    # In a production environment, you would add the token to a blacklist
-    # stored in Redis or database with expiration time
-    # For now, we'll just return success
-    
+    data = request.get_json()
+    user_id = data.get('user_id')
+    company_id = data.get('company_id')  # optional for superadmin
+    user_role=data.get('user_role')
+    login_id = data.get('login_id')
+    print("data====================",data)
+
+    login_device = request.user_agent.string
+    login_ip = request.remote_addr
+    # try:
+    #     user_id = int(data.get('user_id'))  # convert to int
+    # except (TypeError, ValueError):
+    #     user_id = None
+
+
+    # # Only log if user_id is provided
+    # if user_id:
+    #     # logout_history(user_id, company_id, login_device, login_ip)
+    #     print("user_id====================",user_id,company_id,login_device,login_ip)
+    #     insert_login_history(user_id, company_id, login_device, login_ip, 'logout')
+    try:
+        user_id_int = int(user_id)
+    except (TypeError, ValueError):
+        user_id_int = None
+
+    if str(user_id).lower() == "superadmin":
+        print("🛑 Skipped logout logging for superadmin.")
+    else:
+        # ✅ Always log logout, even if user_id is None
+        print("📥 Logging logout:", user_id_int, company_id, login_device, login_ip,login_id)
+        insert_login_history(user_id_int, company_id, login_device, login_ip, 'logout',login_id)
+
+            
+
     return jsonify({'message': 'Logged out successfully'}), 200
+
 
 # Protected Route Examples
 @app.route('/api/profile', methods=['GET'])
@@ -12087,6 +12277,62 @@ def update_license_plan(plan_id):
 
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+@app.route("/api/get_organization", methods=["GET"])
+def get_organization():
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        # Fetch all organizations
+        cur.execute("SELECT * FROM organizationdatatest")
+        organizations = cur.fetchall()
+
+        org_list = []
+        for org in organizations:
+            org_list.append({
+                "id": org[0],
+                "organizationName": org[1],
+                "email": org[2],
+                "userName": org[3],
+                "status": org[6],
+                "updatedAt": org[8]
+            })
+
+        return jsonify(org_list)
+
+    except Exception as e:
+        print("Error fetching organizations:", e)
+        return jsonify({"error": "Failed to fetch organizations"}), 500
+
+    finally:
+        cur.close()
+        conn.close()
+@app.route("/api/get_login_history/<int:company_id>", methods=["GET"])
+def get_login_history(company_id):
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT employee_id, company_id, login_device, login_ip, login_time,logout_time, login_status
+        FROM login_history
+        WHERE company_id = %s
+        ORDER BY login_time DESC
+    """, (company_id,))
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+    history = []
+    for row in rows:
+        history.append({
+            "employee_id": row[0],
+            "company_id": row[1],
+            "login_device": row[2],
+            "login_ip": row[3],
+            "login_time": row[4].strftime("%Y-%m-%d %H:%M:%S"),
+            "logout_time": row[5].strftime("%Y-%m-%d %H:%M:%S") if row[5] else None,
+            "login_status": row[6]
+        })
+    return jsonify(history)
+
 
 # app.register_blueprint(license_bp)
 
