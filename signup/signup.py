@@ -119,7 +119,7 @@ def create_table_if_not_exists(cursor):
             print(f"✅ Added missing column: {column_name}")
 def insert_user_data(organizationName, email, userName, password,logo_filename):
     try:
-        # create_database(organizationName)  # Assuming this creates the database if needed
+        create_database(organizationName)  # Assuming this creates the database if needed
         conn = get_db_connection()
         cursor = conn.cursor()
 
