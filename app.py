@@ -81,7 +81,7 @@ from signup.signup import (
     fetch_company_login_data,
     fetch_login_data,
     fetch_usersdata,
-    insert_user_data,
+    insert_user_data,create_table_if_not_exists
 )
 from TransferData import fetch_data_with_columns, fetch_table_details, insert_dataframe_with_upsert
 from upload import is_table_used_in_charts
@@ -395,6 +395,7 @@ def create_table():
         print("Error in create-------------:", e)
 
 create_table()
+create_table_if_not_exists()
 
 @app.route('/', methods=['GET'])
 def index():

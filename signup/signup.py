@@ -82,41 +82,81 @@ def create_database(organizationName):
 #     if not column_exists:
 #         cursor.execute("""
 #         ALTER TABLE organizationdatatest ADD COLUMN logo VARCHAR(255);
-#         """)
+# #         """)
 
-def create_table_if_not_exists(cursor):
-    # Create table if it doesn't exist
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS organizationdatatest (
-        id SERIAL PRIMARY KEY,
-        organizationName VARCHAR(255) NOT NULL,
-        email VARCHAR(255) NOT NULL,
-        userName VARCHAR(255) NOT NULL,
-        password VARCHAR(255) NOT NULL
-    );
-    """)
+# def create_table_if_not_exists():
+#     # Create table if it doesn't exist
+#     conn = get_db_connection()
+#     cursor = conn.cursor()
+#     cursor.execute("""
+#     CREATE TABLE IF NOT EXISTS organizationdatatest (
+#         id SERIAL PRIMARY KEY,
+#         organizationName VARCHAR(255) NOT NULL,
+#         email VARCHAR(255) NOT NULL,
+#         userName VARCHAR(255) NOT NULL,
+#         password VARCHAR(255) NOT NULL
+#     );
+#     """)
 
-    # Ensure all required columns exist
-    columns_to_add = {
-        "logo": "VARCHAR(255)",
-        "status": "VARCHAR(50) DEFAULT 'active'",
-        "created_at": "TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
-        "updated_at": "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
-    }
+#     # Ensure all required columns exist
+#     columns_to_add = {
+#         "logo": "VARCHAR(255)",
+#         "status": "VARCHAR(50) DEFAULT 'active'",
+#         "created_at": "TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
+#         "updated_at": "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
+#     }
 
-    for column_name, column_type in columns_to_add.items():
+#     for column_name, column_type in columns_to_add.items():
+#         cursor.execute("""
+#         SELECT column_name 
+#         FROM information_schema.columns 
+#         WHERE table_name = 'organizationdatatest' AND column_name = %s;
+#         """, (column_name,))
+#         column_exists = cursor.fetchone()
+
+#         if not column_exists:
+#             cursor.execute(f"""
+#             ALTER TABLE organizationdatatest ADD COLUMN {column_name} {column_type};
+#             """)
+#             print(f"✅ Added missing column: {column_name}")
+
+def create_table_if_not_exists():
+    conn = None
+    cursor = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        # Create base table with all columns
         cursor.execute("""
-        SELECT column_name 
-        FROM information_schema.columns 
-        WHERE table_name = 'organizationdatatest' AND column_name = %s;
-        """, (column_name,))
-        column_exists = cursor.fetchone()
+        CREATE TABLE IF NOT EXISTS organizationdatatest (
+            id SERIAL PRIMARY KEY,
+            organizationName VARCHAR(255) NOT NULL,
+            email VARCHAR(255) NOT NULL,
+            userName VARCHAR(255) NOT NULL,
+            password VARCHAR(255) NOT NULL,
+            logo VARCHAR(255),
+            status VARCHAR(50) DEFAULT 'active',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        """)
+        print("✅ Table 'organizationdatatest' created or already exists with all required columns.")
 
-        if not column_exists:
-            cursor.execute(f"""
-            ALTER TABLE organizationdatatest ADD COLUMN {column_name} {column_type};
-            """)
-            print(f"✅ Added missing column: {column_name}")
+        conn.commit()
+
+    except Exception as e:
+        if conn:
+            conn.rollback()
+        print(f"❌ Error in create_table_if_not_exists: {e}")
+        raise
+    finally:
+        if cursor:
+            cursor.close()
+        if conn:
+            conn.close()
+        print("🔒 Database connection closed.")
+
 def insert_user_data(organizationName, email, userName, password,logo_filename):
     try:
         create_database(organizationName)  # Assuming this creates the database if needed
@@ -124,7 +164,7 @@ def insert_user_data(organizationName, email, userName, password,logo_filename):
         cursor = conn.cursor()
 
         # Create table if it does not exist
-        create_table_if_not_exists(cursor)
+        create_table_if_not_exists()
         print("organizationName",organizationName)
         organizationName = organizationName.lower() 
         hash_password=encrypt_password(password)
@@ -204,7 +244,7 @@ def fetch_usersdata():
 def fetch_login_data(email, password):
     conn = get_db_connection()
     cursor = conn.cursor()
-    create_table_if_not_exists(cursor)
+    create_table_if_not_exists()
 
     try:
         # ✅ Step 1: Fetch user by email only
