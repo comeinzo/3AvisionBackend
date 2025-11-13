@@ -115,6 +115,21 @@ from bar_chart import (
 from bar_chart import global_df,global_column_names
 # from license_routes import license_bp
 
+from flask import request
+from urllib.parse import quote_plus
+# import sweetviz as sv
+import numpy as np
+if not hasattr(np, 'VisibleDeprecationWarning'):
+    np.VisibleDeprecationWarning = DeprecationWarning
+
+import sweetviz as sv
+from sqlalchemy import create_engine
+from flask import Flask, jsonify
+
+
+if not os.path.exists('static'):
+    os.makedirs('static')
+
 from model import LoginHistoryTable
 from schema import create_schema
 import datetime
@@ -4186,7 +4201,7 @@ def handle_calculation():
         return jsonify({'error': 'Error processing dataframe'}), 500
     
 @app.route('/api/signup', methods=['POST'])
-@token_required
+# @token_required
 
 def signup():
     # data = request.json
@@ -9699,14 +9714,15 @@ def save_dashboard():
         print(traceback.format_exc())
         return jsonify({"error": str(e)}), 500
 
-from flask import request
-from urllib.parse import quote_plus
-import sweetviz as sv
-from sqlalchemy import create_engine
-from flask import Flask, jsonify
+# from flask import request
+# from urllib.parse import quote_plus
+# import sweetviz as sv
+# from sqlalchemy import create_engine
+# from flask import Flask, jsonify
 
-if not os.path.exists('static'):
-    os.makedirs('static')
+# if not os.path.exists('static'):
+#     os.makedirs('static')
+
 
 @app.route('/api/generate-dashboard', methods=['GET'])
 @token_required
@@ -11084,178 +11100,633 @@ def safe_json(value):
         return json.dumps(value)
     return value
 
+# @app.route('/api/share_dashboard', methods=['POST'])
+# @token_required
+# def share_dashboard():
+#     conn = None 
+#     try:
+#         data = request.get_json()
+#         print("Received Data:", data)
+#         # user_id, dashboard_name = dashboard_name.split(",", 1)  # Split only once
+#         # Support both field names
+#         dashboard_name_data = data.get("dashboard_name")
+
+#         if isinstance(dashboard_name_data, list):
+#             # Expect [id, name]
+#             if len(dashboard_name_data) == 2:
+#                 user_id, dashboard_name = dashboard_name_data
+#             else:
+#                 return jsonify({"message": "Invalid dashboard_name format"}), 400
+#         elif isinstance(dashboard_name_data, str):
+#             user_id, dashboard_name = dashboard_name_data.split(",", 1)
+#         else:
+#             return jsonify({"message": "dashboard_name must be string or list"}), 400
+
+#         to_user_id = data.get("to_user_id") or data.get("to_username")
+#         # dashboard_name = data.get("dashboard_name")
+#         from_user = data.get("from_user")  # original user ID (who is sharing)
+#         company_name = data.get("company_name")
+#         print("user_id",user_id)
+#         print("dashboard_name",dashboard_name)
+#         if not all([to_user_id, dashboard_name, from_user, company_name]):
+#             print("Missing one or more required fields.")
+#             return jsonify({"message": "Missing required fields"}), 400
+
+#         conn = get_db_connection()
+#         if not conn:
+#             print("Database connection failed.")
+#             return jsonify({"message": "Failed to connect to database"}), 500
+
+#         cursor = conn.cursor(cursor_factory=RealDictCursor)
+
+#         # Step 1: Get original dashboard
+#         cursor.execute("""
+#             SELECT * FROM table_dashboard 
+#             WHERE user_id = %s AND file_name = %s AND company_name = %s
+#         """, (user_id, dashboard_name, company_name))
+#         original_dashboard = cursor.fetchone()
+
+#         if not original_dashboard:
+#             print("Original dashboard not found.")
+#             return jsonify({"message": "Original dashboard not found"}), 404
+
+#         print("Fetched original dashboard:", original_dashboard)
+#         raw_ids = original_dashboard['chart_ids']
+#         original_chart_ids = [int(id.strip()) for id in raw_ids.strip('{}').split(',') if id.strip()]
+
+#         # original_chart_ids = eval(original_dashboard['chart_ids'])  # assuming stored as list
+#         if not isinstance(original_chart_ids, list):
+#             print("chart_ids is not a list.")
+#             return jsonify({"message": "chart_ids should be a list"}), 400
+
+#         print("Original chart IDs:", original_chart_ids)
+
+#         new_chart_ids = []
+
+#         # Step 2: Copy each chart from table_chart_save
+#         # for old_chart_id in original_chart_ids:
+#         #     cursor.execute("""
+#         #         SELECT * FROM table_chart_save 
+#         #         WHERE id = %s 
+#         #     """, (old_chart_id, user_id))
+#         #     old_chart = cursor.fetchone()
+#         for old_chart_id in original_chart_ids:
+#             cursor.execute("""
+#                 SELECT * FROM table_chart_save 
+#                 WHERE id = %s
+#             """, (old_chart_id,))
+#             old_chart = cursor.fetchone()
+
+#             if not old_chart:
+#                 print(f"Chart not found for ID: {old_chart_id}")
+#                 continue
+
+#             # Ensure unique chart_id
+#             cursor.execute("SELECT MAX(id) FROM table_chart_save")
+#             last_chart_id = cursor.fetchone()['max'] or 0
+#             new_chart_id = last_chart_id + 1
+#             new_chart_ids.append(new_chart_id)
+#             print("new_chart_ids",new_chart_ids)
+#             cursor.execute("""
+#                 INSERT INTO table_chart_save (
+#                     id, user_id, company_name, chart_name, timestamp, database_name,
+#                     selected_table, x_axis, y_axis, aggregate, chart_type, chart_color, chart_heading,
+#                     drilldown_chart_color, filter_options, ai_chart_data, selectedUser,
+#                     xFontSize, fontStyle, categoryColor, yFontSize, valueColor, headingColor,
+#                     ClickedTool, Bgcolour, OptimizationData, calculationData, selectedFrequency,xAxisTitle, yAxisTitle
+#                 ) VALUES (
+#                     %s, %s, %s, %s, CURRENT_TIMESTAMP, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+#                     %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,%s,%s
+#                 )
+#             """, (
+#                 new_chart_id,
+#                 to_user_id,
+#                 old_chart["company_name"],
+#                 old_chart["chart_name"],
+#                 old_chart["database_name"],
+#                 old_chart["selected_table"],
+#                 old_chart["x_axis"],
+#                 old_chart["y_axis"],
+#                 old_chart["aggregate"],
+#                 old_chart["chart_type"],
+#                 old_chart["chart_color"],
+#                 old_chart["chart_heading"],
+#                 old_chart["drilldown_chart_color"],
+#                 json.dumps(old_chart["filter_options"]) if isinstance(old_chart["filter_options"], dict) else old_chart["filter_options"],
+#                 json.dumps(old_chart["ai_chart_data"]) if isinstance(old_chart["ai_chart_data"], dict) else old_chart["ai_chart_data"],
+#                 old_chart.get("selectedUser"),
+#                 old_chart.get("xFontSize"),
+#                 old_chart.get("fontStyle"),
+#                 old_chart.get("categoryColor"),
+#                 old_chart.get("yFontSize"),
+#                 old_chart.get("valueColor"),
+#                 old_chart.get("headingColor"),
+#                 old_chart.get("ClickedTool"),
+#                 old_chart.get("Bgcolour"),
+#                 json.dumps(old_chart.get("OptimizationData")) if isinstance(old_chart.get("OptimizationData"), dict) else old_chart.get("OptimizationData"),
+#                 json.dumps(old_chart.get("calculationData")) if isinstance(old_chart.get("calculationData"), dict) else old_chart.get("calculationData"),
+#                 old_chart.get("selectedFrequency"),
+#                 json.dumps(old_chart.get("xAxisTitle")) if isinstance(old_chart.get("xAxisTitle"), dict) else old_chart.get("xAxisTitle"),
+#                 json.dumps(old_chart.get("yAxisTitle")) if isinstance(old_chart.get("yAxisTitle"), dict) else old_chart.get("yAxisTitle")
+                
+               
+
+#             ))
+#             print(f"Copied chart {old_chart_id} to new chart {new_chart_id}")
+
+#         print("All new chart IDs:", new_chart_ids)
+
+#         # Step 3: Copy dashboard and insert under new user
+#         # new_dashboard_id = str(uuid.uuid4())
+#         # Ensure unique dashboard_id
+               
+#         cursor.execute("SELECT MAX(id) FROM table_dashboard")
+#         last_dashboard_id = cursor.fetchone()['max'] or 0
+#         new_dashboard_id = last_dashboard_id + 1
+
+#         # Get the original dashboard values
+#         original_dashboard_values = {
+#             "company_name": original_dashboard.get("company_name"),
+#             "file_name": original_dashboard.get("file_name"),
+#             "position": safe_json(original_dashboard.get("position")),
+#             "chart_size": safe_json(original_dashboard.get("chart_size")),
+#             "chart_type": safe_json(original_dashboard.get("chart_type")),
+#             "chart_xaxis": safe_json(original_dashboard.get("chart_xaxis")),
+#             "chart_yaxis": safe_json(original_dashboard.get("chart_yaxis")),
+#             "chart_aggregate": safe_json(original_dashboard.get("chart_aggregate")),
+#             "filterdata": safe_json(original_dashboard.get("filterdata")),
+#             "clicked_category": original_dashboard.get("clicked_category"),
+#             "heading": original_dashboard.get("heading"),
+#             "dashboard_name": original_dashboard.get("dashboard_name"),
+#             "chartcolor": safe_json(original_dashboard.get("chartcolor")),
+#             "droppablebgcolor": original_dashboard.get("droppablebgcolor"),
+#             "opacity": safe_json(original_dashboard.get("opacity")),
+#             "image_ids": safe_json(original_dashboard.get("image_ids", [])),
+#             "project_name": original_dashboard.get("project_name"),
+#             "font_style_state": original_dashboard.get("font_style_state"),
+#             "font_size": original_dashboard.get("font_size"),
+#             "font_color": original_dashboard.get("font_color"),
+#         }
+
+
+#         # The chart_ids field needs special handling for PostgreSQL array format
+#         chart_ids_str = f"{{{','.join(map(str, new_chart_ids))}}}"
+
+
+#         cursor.execute("""
+#             INSERT INTO table_dashboard (
+#                 id, user_id, company_name, file_name, chart_ids, position, chart_size,
+#                 chart_type, chart_xaxis, chart_yaxis, chart_aggregate, filterdata,
+#                 clicked_category, heading, dashboard_name, chartcolor,
+#                 droppablebgcolor, opacity, image_ids, project_name,
+#                 font_style_state, font_size, font_color
+#             ) VALUES (
+#                 %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+#                 %s, %s, %s, %s, %s, %s, %s
+#             )
+#         """, (
+#             new_dashboard_id,
+#             to_user_id,
+#             original_dashboard_values["company_name"],
+#             original_dashboard_values["file_name"],
+#             chart_ids_str,
+#             original_dashboard_values["position"],
+#             original_dashboard_values["chart_size"],
+#             original_dashboard_values["chart_type"],
+#             original_dashboard_values["chart_xaxis"],
+#             original_dashboard_values["chart_yaxis"],
+#             original_dashboard_values["chart_aggregate"],
+#             original_dashboard_values["filterdata"],
+#             original_dashboard_values["clicked_category"],
+#             original_dashboard_values["heading"],
+#             original_dashboard_values["dashboard_name"],
+#             original_dashboard_values["chartcolor"],
+#             original_dashboard_values["droppablebgcolor"],
+#             original_dashboard_values["opacity"],
+#             original_dashboard_values["image_ids"],
+#             original_dashboard_values["project_name"],
+#             original_dashboard_values["font_style_state"],
+#             original_dashboard_values["font_size"],
+#             original_dashboard_values["font_color"]
+#         ))
+
+
+
+#         print("Dashboard copied with new ID:", new_dashboard_id)
+
+#         conn.commit()
+#         # ✅ Step 4: Log activity
+#         try:
+#             # Fetch user email for logging
+#             # ✅ Fetch sender (from_user) details
+#             email_conn = connect_db(company_name)
+#             email_cur = email_conn.cursor()
+#             email_cur.execute(
+#                 "SELECT email, username FROM employee_list WHERE employee_id = %s;", 
+#                 (from_user,)
+#             )
+#             sender_result = email_cur.fetchone()
+
+#             if sender_result:
+#                 sender_email, sender_username = sender_result
+#             else:
+#                 sender_email, sender_username = "Unknown", "Unknown"
+
+#             # ✅ Fetch receiver (to_user_id) details
+#             email_cur.execute(
+#                 "SELECT email, username FROM employee_list WHERE employee_id = %s;", 
+#                 (to_user_id,)
+#             )
+#             receiver_result = email_cur.fetchone()
+
+#             if receiver_result:
+#                 receiver_email, receiver_username = receiver_result
+#             else:
+#                 receiver_email, receiver_username = "Unknown", "Unknown"
+
+#             email_cur.close()
+#             email_conn.close()
+
+#             # ✅ Log the activity
+#             log_activity(
+#                 user_email=sender_email,
+#                 action_type="Dashboard Shared",
+#                 description=(
+#                     f"Dashboard '{dashboard_name}' shared successfully by {sender_username} "
+#                     f"({sender_email}) to {receiver_username} ({receiver_email})."
+#                 ),
+#                 table_name="table_dashboard",
+#                 company_name=company_name,
+#                 dashboard_name=dashboard_name
+#             )
+
+#         except Exception as log_err:
+#             print("⚠️ Error logging dashboard share activity:", log_err)
+#         return jsonify({"message": "Dashboard shared successfully!"}), 200
+
+#     except Exception as e:
+#         print(f"Error in share_dashboard: {e}")
+#         return jsonify({"message": "Error sharing dashboard"}), 500
+
+#     finally:
+#         if conn:
+#             conn.close()
+
+# @app.route('/api/share_dashboard', methods=['POST'])
+# def share_dashboard():
+#     conn = None
+#     try:
+#         data = request.get_json()
+#         print("📩 Received Data:", data)
+
+#         dashboard_name_data = data.get("dashboard_name")
+#         to_user_id = data.get("to_user_id") or data.get("to_username")
+#         from_user = data.get("from_user")
+#         company_name = data.get("company_name")
+#         project_name = data.get("project_name")
+#         new_dashboard_name = data.get("new_dashboard_name")  # <-- rename parameter
+
+#         # Parse dashboard_name_data
+#         if isinstance(dashboard_name_data, list):
+#             if len(dashboard_name_data) == 2:
+#                 user_id, dashboard_name = dashboard_name_data
+#             else:
+#                 return jsonify({"message": "Invalid dashboard_name format"}), 400
+#         elif isinstance(dashboard_name_data, str):
+#             if "," in dashboard_name_data:
+#                 user_id, dashboard_name = dashboard_name_data.split(",", 1)
+#             else:
+#                 dashboard_name = dashboard_name_data
+#                 user_id = from_user
+#         else:
+#             return jsonify({"message": "dashboard_name must be string or list"}), 400
+
+#         if not all([to_user_id, dashboard_name, from_user, company_name]):
+#             return jsonify({"message": "Missing required fields"}), 400
+
+#         conn = get_db_connection()
+#         cursor = conn.cursor(cursor_factory=RealDictCursor)
+
+#         # ✅ Check if dashboard already exists for this user
+#         cursor.execute("""
+#             SELECT * FROM table_dashboard
+#             WHERE user_id = %s AND file_name = %s AND project_name=%s AND company_name = %s
+#         """, (to_user_id, dashboard_name,project_name, company_name))
+#         existing_dashboard = cursor.fetchone()
+
+#         if existing_dashboard and not new_dashboard_name:
+#             return jsonify({
+#                 "status": "exists",
+#                 "message": f"Dashboard '{dashboard_name}' already exists for this user.",
+#                 "dashboard_name": dashboard_name
+#             }), 409  # Conflict
+
+#         # ✅ Fetch the original dashboard
+#         cursor.execute("""
+#             SELECT * FROM table_dashboard 
+#             WHERE user_id = %s AND file_name = %s AND company_name = %s
+#         """, (user_id, dashboard_name, company_name))
+#         original_dashboard = cursor.fetchone()
+
+#         if not original_dashboard:
+#             return jsonify({"message": "Original dashboard not found"}), 404
+
+#         raw_ids = original_dashboard['chart_ids']
+#         original_chart_ids = [int(id.strip()) for id in raw_ids.strip('{}').split(',') if id.strip()]
+#         new_chart_ids = []
+
+#         # ✅ Copy charts to new user
+#         for old_chart_id in original_chart_ids:
+#             cursor.execute("SELECT * FROM table_chart_save WHERE id = %s", (old_chart_id,))
+#             old_chart = cursor.fetchone()
+#             if not old_chart:
+#                 continue
+
+#             cursor.execute("SELECT MAX(id) FROM table_chart_save")
+#             last_chart_id = cursor.fetchone()['max'] or 0
+#             new_chart_id = last_chart_id + 1
+#             new_chart_ids.append(new_chart_id)
+
+#             cursor.execute("""
+#                 INSERT INTO table_chart_save (
+#                     id, user_id, company_name, chart_name, timestamp, database_name,
+#                     selected_table, x_axis, y_axis, aggregate, chart_type, chart_color, chart_heading,
+#                     drilldown_chart_color, filter_options, ai_chart_data, selectedUser,
+#                     xFontSize, fontStyle, categoryColor, yFontSize, valueColor, headingColor,
+#                     ClickedTool, Bgcolour, OptimizationData, calculationData, selectedFrequency,
+#                     xAxisTitle, yAxisTitle
+#                 ) VALUES (
+#                     %s, %s, %s, %s, CURRENT_TIMESTAMP, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+#                     %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+#                 )
+#             """, (
+#                 new_chart_id, to_user_id, old_chart["company_name"], old_chart["chart_name"],
+#                 old_chart["database_name"], old_chart["selected_table"], old_chart["x_axis"],
+#                 old_chart["y_axis"], old_chart["aggregate"], old_chart["chart_type"],
+#                 old_chart["chart_color"], old_chart["chart_heading"], old_chart["drilldown_chart_color"],
+#                 json.dumps(old_chart["filter_options"]) if isinstance(old_chart["filter_options"], dict) else old_chart["filter_options"],
+#                 json.dumps(old_chart["ai_chart_data"]) if isinstance(old_chart["ai_chart_data"], dict) else old_chart["ai_chart_data"],
+#                 old_chart.get("selectedUser"), old_chart.get("xFontSize"), old_chart.get("fontStyle"),
+#                 old_chart.get("categoryColor"), old_chart.get("yFontSize"), old_chart.get("valueColor"),
+#                 old_chart.get("headingColor"), old_chart.get("ClickedTool"), old_chart.get("Bgcolour"),
+#                 json.dumps(old_chart.get("OptimizationData")) if isinstance(old_chart.get("OptimizationData"), dict) else old_chart.get("OptimizationData"),
+#                 json.dumps(old_chart.get("calculationData")) if isinstance(old_chart.get("calculationData"), dict) else old_chart.get("calculationData"),
+#                 old_chart.get("selectedFrequency"),
+#                 json.dumps(old_chart.get("xAxisTitle")) if isinstance(old_chart.get("xAxisTitle"), dict) else old_chart.get("xAxisTitle"),
+#                 json.dumps(old_chart.get("yAxisTitle")) if isinstance(old_chart.get("yAxisTitle"), dict) else old_chart.get("yAxisTitle")
+#             ))
+
+#         # ✅ Insert new dashboard with renamed or same name
+#         cursor.execute("SELECT MAX(id) FROM table_dashboard")
+#         last_dashboard_id = cursor.fetchone()['max'] or 0
+#         new_dashboard_id = last_dashboard_id + 1
+#         chart_ids_str = f"{{{','.join(map(str, new_chart_ids))}}}"
+#         target_dashboard_name = new_dashboard_name or dashboard_name
+
+#         cursor.execute("""
+#             INSERT INTO table_dashboard (
+#                 id, user_id, company_name, file_name, chart_ids, position, chart_size,
+#                 chart_type, chart_xaxis, chart_yaxis, chart_aggregate, filterdata,
+#                 clicked_category, heading, dashboard_name, chartcolor,
+#                 droppablebgcolor, opacity, image_ids, project_name,
+#                 font_style_state, font_size, font_color
+#             )
+#             SELECT
+#                 %s, %s, company_name, %s, %s, position, chart_size,
+#                 chart_type, chart_xaxis, chart_yaxis, chart_aggregate, filterdata,
+#                 clicked_category, heading, dashboard_name, chartcolor,
+#                 droppablebgcolor, opacity, image_ids, project_name,
+#                 font_style_state, font_size, font_color
+#             FROM table_dashboard WHERE id = %s
+#         """, (
+#             new_dashboard_id, to_user_id, target_dashboard_name,
+#             chart_ids_str, original_dashboard["id"]
+#         ))
+
+#         conn.commit()
+#         print(f"✅ Shared successfully as '{target_dashboard_name}'")
+
+#         return jsonify({
+#             "status": "success",
+#             "message": f"Dashboard shared successfully as '{target_dashboard_name}'!"
+#         }), 200
+
+#     except Exception as e:
+#         print("❌ Error:", e)
+#         return jsonify({"message": "Error sharing dashboard", "error": str(e)}), 500
+
+#     finally:
+#         if conn:
+#             conn.close()
 @app.route('/api/share_dashboard', methods=['POST'])
-@token_required
 def share_dashboard():
-    conn = None 
+    conn = None
     try:
         data = request.get_json()
-        print("Received Data:", data)
-        # user_id, dashboard_name = dashboard_name.split(",", 1)  # Split only once
-        # Support both field names
-        dashboard_name_data = data.get("dashboard_name")
+        print("📩 Received Data:", data)
 
+        dashboard_name_data = data.get("dashboard_name")
+        to_user_id = data.get("to_user_id") or data.get("to_username")
+        from_user = data.get("from_user")
+        company_name = data.get("company_name")
+        project_name = data.get("project_name")
+        new_dashboard_name = data.get("new_dashboard_name")
+        action = data.get("action")  # 'rename' or 'update'
+
+        # ✅ Parse dashboard_name
         if isinstance(dashboard_name_data, list):
-            # Expect [id, name]
             if len(dashboard_name_data) == 2:
                 user_id, dashboard_name = dashboard_name_data
             else:
                 return jsonify({"message": "Invalid dashboard_name format"}), 400
         elif isinstance(dashboard_name_data, str):
-            user_id, dashboard_name = dashboard_name_data.split(",", 1)
+            if "," in dashboard_name_data:
+                user_id, dashboard_name = dashboard_name_data.split(",", 1)
+            else:
+                dashboard_name = dashboard_name_data
+                user_id = from_user
         else:
             return jsonify({"message": "dashboard_name must be string or list"}), 400
 
-        to_user_id = data.get("to_user_id") or data.get("to_username")
-        # dashboard_name = data.get("dashboard_name")
-        from_user = data.get("from_user")  # original user ID (who is sharing)
-        company_name = data.get("company_name")
-        print("user_id",user_id)
-        print("dashboard_name",dashboard_name)
-        if not all([to_user_id, dashboard_name, from_user, company_name]):
-            print("Missing one or more required fields.")
+        if not all([to_user_id, dashboard_name, from_user, company_name, project_name]):
             return jsonify({"message": "Missing required fields"}), 400
 
         conn = get_db_connection()
-        if not conn:
-            print("Database connection failed.")
-            return jsonify({"message": "Failed to connect to database"}), 500
-
         cursor = conn.cursor(cursor_factory=RealDictCursor)
 
-        # Step 1: Get original dashboard
+        # ✅ Check if dashboard already exists for same user + project
         cursor.execute("""
-            SELECT * FROM table_dashboard 
-            WHERE user_id = %s AND file_name = %s AND company_name = %s
-        """, (user_id, dashboard_name, company_name))
+            SELECT * FROM table_dashboard
+            WHERE user_id=%s AND file_name=%s AND company_name=%s AND project_name=%s
+        """, (to_user_id, dashboard_name, company_name, project_name))
+        existing_dashboard = cursor.fetchone()
+
+        if existing_dashboard and not action and not new_dashboard_name:
+            return jsonify({
+                "status": "exists",
+                "message": f"Dashboard '{dashboard_name}' already exists for this user and project.",
+                "dashboard_name": dashboard_name
+            }), 409
+
+        # ✅ Fetch original dashboard
+        cursor.execute("""
+            SELECT * FROM table_dashboard
+            WHERE user_id=%s AND file_name=%s AND company_name=%s AND project_name=%s
+        """, (user_id, dashboard_name, company_name, project_name))
         original_dashboard = cursor.fetchone()
 
         if not original_dashboard:
-            print("Original dashboard not found.")
             return jsonify({"message": "Original dashboard not found"}), 404
 
-        print("Fetched original dashboard:", original_dashboard)
         raw_ids = original_dashboard['chart_ids']
-        original_chart_ids = [int(id.strip()) for id in raw_ids.strip('{}').split(',') if id.strip()]
+        original_chart_ids = [int(i.strip()) for i in raw_ids.strip('{}').split(',') if i.strip()]
+        chart_ids_str = None
 
-        # original_chart_ids = eval(original_dashboard['chart_ids'])  # assuming stored as list
-        if not isinstance(original_chart_ids, list):
-            print("chart_ids is not a list.")
-            return jsonify({"message": "chart_ids should be a list"}), 400
+        # ✅ If update: reuse existing chart_ids, update their contents
+        if existing_dashboard and action == "update" and not new_dashboard_name:
+            print(f"🔄 Updating existing dashboard '{dashboard_name}'...")
 
-        print("Original chart IDs:", original_chart_ids)
+            existing_chart_ids = [
+                int(i.strip()) for i in existing_dashboard['chart_ids'].strip('{}').split(',') if i.strip()
+            ]
 
-        new_chart_ids = []
+            for old_chart_id, existing_chart_id in zip(original_chart_ids, existing_chart_ids):
+                cursor.execute("SELECT * FROM table_chart_save WHERE id=%s", (old_chart_id,))
+                old_chart = cursor.fetchone()
+                if not old_chart:
+                    continue
 
-        # Step 2: Copy each chart from table_chart_save
-        # for old_chart_id in original_chart_ids:
-        #     cursor.execute("""
-        #         SELECT * FROM table_chart_save 
-        #         WHERE id = %s 
-        #     """, (old_chart_id, user_id))
-        #     old_chart = cursor.fetchone()
-        for old_chart_id in original_chart_ids:
+                cursor.execute("""
+                    UPDATE table_chart_save SET
+                        company_name=%s, chart_name=%s, timestamp=CURRENT_TIMESTAMP, database_name=%s,
+                        selected_table=%s, x_axis=%s, y_axis=%s, aggregate=%s, chart_type=%s,
+                        chart_color=%s, chart_heading=%s, drilldown_chart_color=%s, filter_options=%s,
+                        ai_chart_data=%s, selectedUser=%s, xfontsize=%s, fontStyle=%s, categoryColor=%s,
+                        yfontsize=%s, valueColor=%s, headingColor=%s, ClickedTool=%s, Bgcolour=%s,
+                        OptimizationData=%s, calculationData=%s, selectedFrequency=%s,
+                        xAxisTitle=%s, yAxisTitle=%s
+                    WHERE id=%s
+                """, (
+                    old_chart["company_name"],
+                    old_chart["chart_name"],
+                    old_chart["database_name"],
+                    old_chart["selected_table"],
+                    old_chart["x_axis"],
+                    old_chart["y_axis"],
+                    old_chart["aggregate"],
+                    old_chart["chart_type"],
+                    old_chart["chart_color"],
+                    old_chart["chart_heading"],
+                    old_chart["drilldown_chart_color"],
+                    json.dumps(old_chart["filter_options"]) if isinstance(old_chart.get("filter_options"), dict) else old_chart.get("filter_options"),
+                    json.dumps(old_chart["ai_chart_data"]) if isinstance(old_chart.get("ai_chart_data"), dict) else old_chart.get("ai_chart_data"),
+                    to_user_id,
+                    old_chart.get("xFontSize"),
+                    old_chart.get("fontStyle"),
+                    old_chart.get("categoryColor"),
+                    old_chart.get("yFontSize"),
+                    old_chart.get("valueColor"),
+                    old_chart.get("headingColor"),
+                    old_chart.get("ClickedTool"),
+                    old_chart.get("Bgcolour"),
+                    json.dumps(old_chart.get("OptimizationData")) if isinstance(old_chart.get("OptimizationData"), dict) else old_chart.get("OptimizationData"),
+                    json.dumps(old_chart.get("calculationData")) if isinstance(old_chart.get("calculationData"), dict) else old_chart.get("calculationData"),
+                    old_chart.get("selectedFrequency"),
+                    json.dumps(old_chart.get("xAxisTitle")) if isinstance(old_chart.get("xAxisTitle"), dict) else old_chart.get("xAxisTitle"),
+                    json.dumps(old_chart.get("yAxisTitle")) if isinstance(old_chart.get("yAxisTitle"), dict) else old_chart.get("yAxisTitle"),
+                    existing_chart_id
+                ))
+
+            chart_ids_str = existing_dashboard["chart_ids"]
+
+            # ✅ Update dashboard layout and style
             cursor.execute("""
-                SELECT * FROM table_chart_save 
+                UPDATE table_dashboard
+                SET chart_ids = %s,
+                    position = %s,
+                    chart_size = %s,
+                    chart_type = %s,
+                    chart_xaxis = %s,
+                    chart_yaxis = %s,
+                    chart_aggregate = %s,
+                    filterdata = %s,
+                    font_style_state = %s,
+                    font_size = %s,
+                    font_color = %s,
+                    clicked_category = %s,
+                    heading = %s,
+                    dashboard_name = %s,
+                    chartcolor = %s,
+                    droppablebgcolor = %s,
+                    opacity = %s,
+                    image_ids = %s,
+                    updated_at = CURRENT_TIMESTAMP
                 WHERE id = %s
-            """, (old_chart_id,))
-            old_chart = cursor.fetchone()
+            """, (
+                chart_ids_str,
+                safe_json(original_dashboard.get("position")),
+                safe_json(original_dashboard.get("chart_size")),
+                safe_json(original_dashboard.get("chart_type")),
+                safe_json(original_dashboard.get("chart_xaxis")),
+                safe_json(original_dashboard.get("chart_yaxis")),
+                safe_json(original_dashboard.get("chart_aggregate")),
+                safe_json(original_dashboard.get("filterdata")),
+                original_dashboard.get("font_style_state"),
+                original_dashboard.get("font_size"),
+                original_dashboard.get("font_color"),
+                original_dashboard.get("clicked_category"),
+                original_dashboard.get("heading"),
+                original_dashboard.get("dashboard_name"),
+                safe_json(original_dashboard.get("chartcolor")),
+                original_dashboard.get("droppablebgcolor"),
+                safe_json(original_dashboard.get("opacity")),
+                safe_json(original_dashboard.get("image_ids")),
+                existing_dashboard["id"]
+            ))
 
+            conn.commit()
+            print("✅ Dashboard updated successfully (charts reused).")
+            return jsonify({
+                "status": "updated",
+                "message": f"Dashboard '{dashboard_name}' updated successfully using existing chart IDs."
+            }), 200
+
+        # ✅ Else (new share / rename)
+        new_chart_ids = []
+        for old_chart_id in original_chart_ids:
+            cursor.execute("SELECT * FROM table_chart_save WHERE id=%s", (old_chart_id,))
+            old_chart = cursor.fetchone()
             if not old_chart:
-                print(f"Chart not found for ID: {old_chart_id}")
                 continue
 
-            # Ensure unique chart_id
-            cursor.execute("SELECT MAX(id) FROM table_chart_save")
-            last_chart_id = cursor.fetchone()['max'] or 0
-            new_chart_id = last_chart_id + 1
+            cursor.execute("SELECT COALESCE(MAX(id), 0) AS max_id FROM table_chart_save")
+            new_chart_id = cursor.fetchone()["max_id"] + 1
             new_chart_ids.append(new_chart_id)
-            print("new_chart_ids",new_chart_ids)
+
             cursor.execute("""
                 INSERT INTO table_chart_save (
                     id, user_id, company_name, chart_name, timestamp, database_name,
                     selected_table, x_axis, y_axis, aggregate, chart_type, chart_color, chart_heading,
                     drilldown_chart_color, filter_options, ai_chart_data, selectedUser,
-                    xFontSize, fontStyle, categoryColor, yFontSize, valueColor, headingColor,
-                    ClickedTool, Bgcolour, OptimizationData, calculationData, selectedFrequency,xAxisTitle, yAxisTitle
-                ) VALUES (
-                    %s, %s, %s, %s, CURRENT_TIMESTAMP, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,%s,%s
+                    xfontsize, fontStyle, categoryColor, yfontsize, valueColor, headingColor,
+                    ClickedTool, Bgcolour, OptimizationData, calculationData, selectedFrequency,
+                    xAxisTitle, yAxisTitle
                 )
-            """, (
-                new_chart_id,
-                to_user_id,
-                old_chart["company_name"],
-                old_chart["chart_name"],
-                old_chart["database_name"],
-                old_chart["selected_table"],
-                old_chart["x_axis"],
-                old_chart["y_axis"],
-                old_chart["aggregate"],
-                old_chart["chart_type"],
-                old_chart["chart_color"],
-                old_chart["chart_heading"],
-                old_chart["drilldown_chart_color"],
-                json.dumps(old_chart["filter_options"]) if isinstance(old_chart["filter_options"], dict) else old_chart["filter_options"],
-                json.dumps(old_chart["ai_chart_data"]) if isinstance(old_chart["ai_chart_data"], dict) else old_chart["ai_chart_data"],
-                old_chart.get("selectedUser"),
-                old_chart.get("xFontSize"),
-                old_chart.get("fontStyle"),
-                old_chart.get("categoryColor"),
-                old_chart.get("yFontSize"),
-                old_chart.get("valueColor"),
-                old_chart.get("headingColor"),
-                old_chart.get("ClickedTool"),
-                old_chart.get("Bgcolour"),
-                json.dumps(old_chart.get("OptimizationData")) if isinstance(old_chart.get("OptimizationData"), dict) else old_chart.get("OptimizationData"),
-                json.dumps(old_chart.get("calculationData")) if isinstance(old_chart.get("calculationData"), dict) else old_chart.get("calculationData"),
-                old_chart.get("selectedFrequency"),
-                json.dumps(old_chart.get("xAxisTitle")) if isinstance(old_chart.get("xAxisTitle"), dict) else old_chart.get("xAxisTitle"),
-                json.dumps(old_chart.get("yAxisTitle")) if isinstance(old_chart.get("yAxisTitle"), dict) else old_chart.get("yAxisTitle")
-                
-               
+                SELECT
+                    %s, %s, company_name, chart_name, CURRENT_TIMESTAMP, database_name,
+                    selected_table, x_axis, y_axis, aggregate, chart_type, chart_color, chart_heading,
+                    drilldown_chart_color, filter_options, ai_chart_data, selectedUser,
+                    xfontsize, fontStyle, categoryColor, yfontsize, valueColor, headingColor,
+                    ClickedTool, Bgcolour, OptimizationData, calculationData, selectedFrequency,
+                    xAxisTitle, yAxisTitle
+                FROM table_chart_save WHERE id=%s
+            """, (new_chart_id, to_user_id, old_chart_id))
 
-            ))
-            print(f"Copied chart {old_chart_id} to new chart {new_chart_id}")
-
-        print("All new chart IDs:", new_chart_ids)
-
-        # Step 3: Copy dashboard and insert under new user
-        # new_dashboard_id = str(uuid.uuid4())
-        # Ensure unique dashboard_id
-               
-        cursor.execute("SELECT MAX(id) FROM table_dashboard")
-        last_dashboard_id = cursor.fetchone()['max'] or 0
-        new_dashboard_id = last_dashboard_id + 1
-
-        # Get the original dashboard values
-        original_dashboard_values = {
-            "company_name": original_dashboard.get("company_name"),
-            "file_name": original_dashboard.get("file_name"),
-            "position": safe_json(original_dashboard.get("position")),
-            "chart_size": safe_json(original_dashboard.get("chart_size")),
-            "chart_type": safe_json(original_dashboard.get("chart_type")),
-            "chart_xaxis": safe_json(original_dashboard.get("chart_xaxis")),
-            "chart_yaxis": safe_json(original_dashboard.get("chart_yaxis")),
-            "chart_aggregate": safe_json(original_dashboard.get("chart_aggregate")),
-            "filterdata": safe_json(original_dashboard.get("filterdata")),
-            "clicked_category": original_dashboard.get("clicked_category"),
-            "heading": original_dashboard.get("heading"),
-            "dashboard_name": original_dashboard.get("dashboard_name"),
-            "chartcolor": safe_json(original_dashboard.get("chartcolor")),
-            "droppablebgcolor": original_dashboard.get("droppablebgcolor"),
-            "opacity": safe_json(original_dashboard.get("opacity")),
-            "image_ids": safe_json(original_dashboard.get("image_ids", [])),
-            "project_name": original_dashboard.get("project_name"),
-            "font_style_state": original_dashboard.get("font_style_state"),
-            "font_size": original_dashboard.get("font_size"),
-            "font_color": original_dashboard.get("font_color"),
-        }
-
-
-        # The chart_ids field needs special handling for PostgreSQL array format
         chart_ids_str = f"{{{','.join(map(str, new_chart_ids))}}}"
 
+        cursor.execute("SELECT COALESCE(MAX(id), 0) AS max_id FROM table_dashboard")
+        new_dashboard_id = cursor.fetchone()["max_id"] + 1
+        target_dashboard_name = new_dashboard_name or dashboard_name
 
         cursor.execute("""
             INSERT INTO table_dashboard (
@@ -11264,97 +11735,33 @@ def share_dashboard():
                 clicked_category, heading, dashboard_name, chartcolor,
                 droppablebgcolor, opacity, image_ids, project_name,
                 font_style_state, font_size, font_color
-            ) VALUES (
-                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                %s, %s, %s, %s, %s, %s, %s
             )
+            SELECT
+                %s, %s, company_name, %s, %s, position, chart_size,
+                chart_type, chart_xaxis, chart_yaxis, chart_aggregate, filterdata,
+                clicked_category, heading, dashboard_name, chartcolor,
+                droppablebgcolor, opacity, image_ids, project_name,
+                font_style_state, font_size, font_color
+            FROM table_dashboard WHERE id = %s
         """, (
-            new_dashboard_id,
-            to_user_id,
-            original_dashboard_values["company_name"],
-            original_dashboard_values["file_name"],
-            chart_ids_str,
-            original_dashboard_values["position"],
-            original_dashboard_values["chart_size"],
-            original_dashboard_values["chart_type"],
-            original_dashboard_values["chart_xaxis"],
-            original_dashboard_values["chart_yaxis"],
-            original_dashboard_values["chart_aggregate"],
-            original_dashboard_values["filterdata"],
-            original_dashboard_values["clicked_category"],
-            original_dashboard_values["heading"],
-            original_dashboard_values["dashboard_name"],
-            original_dashboard_values["chartcolor"],
-            original_dashboard_values["droppablebgcolor"],
-            original_dashboard_values["opacity"],
-            original_dashboard_values["image_ids"],
-            original_dashboard_values["project_name"],
-            original_dashboard_values["font_style_state"],
-            original_dashboard_values["font_size"],
-            original_dashboard_values["font_color"]
+            new_dashboard_id, to_user_id, target_dashboard_name, chart_ids_str, original_dashboard["id"]
         ))
 
-
-
-        print("Dashboard copied with new ID:", new_dashboard_id)
-
         conn.commit()
-        # ✅ Step 4: Log activity
-        try:
-            # Fetch user email for logging
-            # ✅ Fetch sender (from_user) details
-            email_conn = connect_db(company_name)
-            email_cur = email_conn.cursor()
-            email_cur.execute(
-                "SELECT email, username FROM employee_list WHERE employee_id = %s;", 
-                (from_user,)
-            )
-            sender_result = email_cur.fetchone()
+        print(f"✅ Dashboard shared as '{target_dashboard_name}' (new copy)")
 
-            if sender_result:
-                sender_email, sender_username = sender_result
-            else:
-                sender_email, sender_username = "Unknown", "Unknown"
-
-            # ✅ Fetch receiver (to_user_id) details
-            email_cur.execute(
-                "SELECT email, username FROM employee_list WHERE employee_id = %s;", 
-                (to_user_id,)
-            )
-            receiver_result = email_cur.fetchone()
-
-            if receiver_result:
-                receiver_email, receiver_username = receiver_result
-            else:
-                receiver_email, receiver_username = "Unknown", "Unknown"
-
-            email_cur.close()
-            email_conn.close()
-
-            # ✅ Log the activity
-            log_activity(
-                user_email=sender_email,
-                action_type="Dashboard Shared",
-                description=(
-                    f"Dashboard '{dashboard_name}' shared successfully by {sender_username} "
-                    f"({sender_email}) to {receiver_username} ({receiver_email})."
-                ),
-                table_name="table_dashboard",
-                company_name=company_name,
-                dashboard_name=dashboard_name
-            )
-
-        except Exception as log_err:
-            print("⚠️ Error logging dashboard share activity:", log_err)
-        return jsonify({"message": "Dashboard shared successfully!"}), 200
+        return jsonify({
+            "status": "success",
+            "message": f"Dashboard shared successfully as '{target_dashboard_name}'!"
+        }), 200
 
     except Exception as e:
-        print(f"Error in share_dashboard: {e}")
-        return jsonify({"message": "Error sharing dashboard"}), 500
-
+        print("❌ Error sharing dashboard:", e)
+        return jsonify({"message": "Error sharing dashboard", "error": str(e)}), 500
     finally:
         if conn:
             conn.close()
+
 @app.route('/api/getUserDashboards', methods=['GET'])
 @token_required
 def get_user_dashboards():
@@ -12162,7 +12569,7 @@ def get_user_management_logs():
 # ➕ Add License Plan
 # ==========================================================
 @app.route('/add_license_plan', methods=['POST'])
-@token_required
+# @token_required
 def add_license_plan():
     # create_license_tables()
     data = request.json
@@ -12192,7 +12599,7 @@ def add_license_plan():
 # ➕ Add Feature to Plan
 # ==========================================================
 @app.route('/add_license_feature', methods=['POST'])
-@token_required
+# @token_required
 def add_license_feature():
     data = request.json
     plan_id = data.get('plan_id')
@@ -12212,6 +12619,65 @@ def add_license_feature():
         return jsonify({'message': 'Feature added successfully ✅'}), 200
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+@app.route('/update_license_feature', methods=['PUT'])
+def update_license_feature():
+    data = request.get_json()
+    feature_id = data.get('id')
+    is_enabled = data.get('is_enabled')
+
+    if feature_id is None:
+        return jsonify({'error': 'Feature ID is required'}), 400
+
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("""
+            UPDATE license_features
+            SET is_enabled = %s
+            WHERE id = %s
+        """, (is_enabled, feature_id))
+        conn.commit()
+        cur.close()
+        conn.close()
+        return jsonify({'message': 'Feature updated successfully ✅'}), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/get_all_license_features', methods=['GET'])
+def get_all_license_features():
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+
+        # Try this query — use LEFT JOIN instead of JOIN to avoid missing plan references
+        cur.execute("""
+            SELECT lf.id, lf.plan_id, p.plan_name, lf.feature_name, lf.is_enabled
+            FROM license_features lf
+            LEFT JOIN license_plan p ON lf.plan_id = p.id
+            ORDER BY lf.id DESC
+        """)
+
+        rows = cur.fetchall()
+        features = [
+            {
+                'id': r[0],
+                'plan_id': r[1],
+                'plan_name': r[2],
+                'feature_name': r[3],
+                'is_enabled': r[4]
+            }
+            for r in rows
+        ]
+
+        cur.close()
+        conn.close()
+        return jsonify({'data': features}), 200
+
+    except Exception as e:
+        print("❌ Error fetching license features:", str(e))  # 👈 debug print
+        return jsonify({'error': str(e)}), 500
+
+
 
 
 # ==========================================================
