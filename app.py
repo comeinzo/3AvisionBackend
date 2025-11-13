@@ -4985,7 +4985,7 @@ def handle_clicked_category():
            
             print("x_axis====================",x_axis)
             print("x_axis====================",x_axis)
-            chart_data = filter_chart_data(database_name, table_name, x_axis, y_axis, aggregate,clicked_catagory_Xaxis,category,chart_id,calculationData)
+            chart_data = filter_chart_data(database_name, table_name, x_axis, y_axis, aggregate,clicked_catagory_Xaxis,category,chart_id,calculationData,chart_type)
             chart_data_list.append({
                 "chart_id": chart_id,
                 "data": chart_data
@@ -11583,6 +11583,256 @@ def share_dashboard():
         chart_ids_str = None
 
         # ✅ If update: reuse existing chart_ids, update their contents
+        # if existing_dashboard and action == "update" and not new_dashboard_name:
+        #     print(f"🔄 Updating existing dashboard '{dashboard_name}'...")
+
+        #     existing_chart_ids = [
+        #         int(i.strip()) for i in existing_dashboard['chart_ids'].strip('{}').split(',') if i.strip()
+        #     ]
+
+        #     for old_chart_id, existing_chart_id in zip(original_chart_ids, existing_chart_ids):
+        #         cursor.execute("SELECT * FROM table_chart_save WHERE id=%s", (old_chart_id,))
+        #         old_chart = cursor.fetchone()
+        #         if not old_chart:
+        #             continue
+
+        #         cursor.execute("""
+        #             UPDATE table_chart_save SET
+        #                 company_name=%s, chart_name=%s, timestamp=CURRENT_TIMESTAMP, database_name=%s,
+        #                 selected_table=%s, x_axis=%s, y_axis=%s, aggregate=%s, chart_type=%s,
+        #                 chart_color=%s, chart_heading=%s, drilldown_chart_color=%s, filter_options=%s,
+        #                 ai_chart_data=%s, selectedUser=%s, xfontsize=%s, fontStyle=%s, categoryColor=%s,
+        #                 yfontsize=%s, valueColor=%s, headingColor=%s, ClickedTool=%s, Bgcolour=%s,
+        #                 OptimizationData=%s, calculationData=%s, selectedFrequency=%s,
+        #                 xAxisTitle=%s, yAxisTitle=%s
+        #             WHERE id=%s
+        #         """, (
+        #             old_chart["company_name"],
+        #             old_chart["chart_name"],
+        #             old_chart["database_name"],
+        #             old_chart["selected_table"],
+        #             old_chart["x_axis"],
+        #             old_chart["y_axis"],
+        #             old_chart["aggregate"],
+        #             old_chart["chart_type"],
+        #             old_chart["chart_color"],
+        #             old_chart["chart_heading"],
+        #             old_chart["drilldown_chart_color"],
+        #             json.dumps(old_chart["filter_options"]) if isinstance(old_chart.get("filter_options"), dict) else old_chart.get("filter_options"),
+        #             json.dumps(old_chart["ai_chart_data"]) if isinstance(old_chart.get("ai_chart_data"), dict) else old_chart.get("ai_chart_data"),
+        #             old_chart.get("selectedUser"),
+        #             old_chart.get("xFontSize"),
+        #             old_chart.get("fontStyle"),
+        #             old_chart.get("categoryColor"),
+        #             old_chart.get("yFontSize"),
+        #             old_chart.get("valueColor"),
+        #             old_chart.get("headingColor"),
+        #             old_chart.get("ClickedTool"),
+        #             old_chart.get("Bgcolour"),
+        #             json.dumps(old_chart.get("OptimizationData")) if isinstance(old_chart.get("OptimizationData"), dict) else old_chart.get("OptimizationData"),
+        #             json.dumps(old_chart.get("calculationData")) if isinstance(old_chart.get("calculationData"), dict) else old_chart.get("calculationData"),
+        #             old_chart.get("selectedFrequency"),
+        #             json.dumps(old_chart.get("xAxisTitle")) if isinstance(old_chart.get("xAxisTitle"), dict) else old_chart.get("xAxisTitle"),
+        #             json.dumps(old_chart.get("yAxisTitle")) if isinstance(old_chart.get("yAxisTitle"), dict) else old_chart.get("yAxisTitle"),
+        #             existing_chart_id
+        #         ))
+
+        #     chart_ids_str = existing_dashboard["chart_ids"]
+
+        #     # ✅ Update dashboard layout and style
+        #     cursor.execute("""
+        #         UPDATE table_dashboard
+        #         SET chart_ids = %s,
+        #             position = %s,
+        #             chart_size = %s,
+        #             chart_type = %s,
+        #             chart_xaxis = %s,
+        #             chart_yaxis = %s,
+        #             chart_aggregate = %s,
+        #             filterdata = %s,
+        #             font_style_state = %s,
+        #             font_size = %s,
+        #             font_color = %s,
+        #             clicked_category = %s,
+        #             heading = %s,
+        #             dashboard_name = %s,
+        #             chartcolor = %s,
+        #             droppablebgcolor = %s,
+        #             opacity = %s,
+        #             image_ids = %s,
+        #             updated_at = CURRENT_TIMESTAMP
+        #         WHERE id = %s
+        #     """, (
+        #         chart_ids_str,
+        #         safe_json(original_dashboard.get("position")),
+        #         safe_json(original_dashboard.get("chart_size")),
+        #         safe_json(original_dashboard.get("chart_type")),
+        #         safe_json(original_dashboard.get("chart_xaxis")),
+        #         safe_json(original_dashboard.get("chart_yaxis")),
+        #         safe_json(original_dashboard.get("chart_aggregate")),
+        #         safe_json(original_dashboard.get("filterdata")),
+        #         original_dashboard.get("font_style_state"),
+        #         original_dashboard.get("font_size"),
+        #         original_dashboard.get("font_color"),
+        #         original_dashboard.get("clicked_category"),
+        #         original_dashboard.get("heading"),
+        #         original_dashboard.get("dashboard_name"),
+        #         safe_json(original_dashboard.get("chartcolor")),
+        #         original_dashboard.get("droppablebgcolor"),
+        #         safe_json(original_dashboard.get("opacity")),
+        #         safe_json(original_dashboard.get("image_ids")),
+        #         existing_dashboard["id"]
+        #     ))
+
+        #     conn.commit()
+        #     print("✅ Dashboard updated successfully (charts reused).")
+        #     return jsonify({
+        #         "status": "updated",
+        #         "message": f"Dashboard '{dashboard_name}' updated successfully using existing chart IDs."
+        #     }), 200
+        # ✅ If update: reuse existing chart_ids, update their contents
+        # if existing_dashboard and action == "update" and not new_dashboard_name:
+        #     print(f"🔄 Updating existing dashboard '{dashboard_name}'...")
+
+        #     existing_chart_ids = [
+        #         int(i.strip()) for i in existing_dashboard['chart_ids'].strip('{}').split(',') if i.strip()
+        #     ]
+
+        #     # --- Case 1: Update charts that exist in both original and target ---
+        #     for old_chart_id, existing_chart_id in zip(original_chart_ids[:len(existing_chart_ids)], existing_chart_ids):
+        #         cursor.execute("SELECT * FROM table_chart_save WHERE id=%s", (old_chart_id,))
+        #         old_chart = cursor.fetchone()
+        #         if not old_chart:
+        #             continue
+
+        #         cursor.execute("""
+        #             UPDATE table_chart_save SET
+        #                 company_name=%s, chart_name=%s, timestamp=CURRENT_TIMESTAMP, database_name=%s,
+        #                 selected_table=%s, x_axis=%s, y_axis=%s, aggregate=%s, chart_type=%s,
+        #                 chart_color=%s, chart_heading=%s, drilldown_chart_color=%s, filter_options=%s,
+        #                 ai_chart_data=%s, selectedUser=%s, xfontsize=%s, fontStyle=%s, categoryColor=%s,
+        #                 yfontsize=%s, valueColor=%s, headingColor=%s, ClickedTool=%s, Bgcolour=%s,
+        #                 OptimizationData=%s, calculationData=%s, selectedFrequency=%s,
+        #                 xAxisTitle=%s, yAxisTitle=%s
+        #             WHERE id=%s
+        #         """, (
+        #             old_chart["company_name"],
+        #             old_chart["chart_name"],
+        #             old_chart["database_name"],
+        #             old_chart["selected_table"],
+        #             old_chart["x_axis"],
+        #             old_chart["y_axis"],
+        #             old_chart["aggregate"],
+        #             old_chart["chart_type"],
+        #             old_chart["chart_color"],
+        #             old_chart["chart_heading"],
+        #             old_chart["drilldown_chart_color"],
+        #             json.dumps(old_chart["filter_options"]) if isinstance(old_chart.get("filter_options"), dict) else old_chart.get("filter_options"),
+        #             json.dumps(old_chart["ai_chart_data"]) if isinstance(old_chart.get("ai_chart_data"), dict) else old_chart.get("ai_chart_data"),
+        #             old_chart.get("selectedUser"),
+        #             old_chart.get("xfontsize"),
+        #             old_chart.get("fontStyle"),
+        #             old_chart.get("categoryColor"),
+        #             old_chart.get("yfontsize"),
+        #             old_chart.get("valueColor"),
+        #             old_chart.get("headingColor"),
+        #             old_chart.get("ClickedTool"),
+        #             old_chart.get("Bgcolour"),
+        #             json.dumps(old_chart.get("OptimizationData")) if isinstance(old_chart.get("OptimizationData"), dict) else old_chart.get("OptimizationData"),
+        #             json.dumps(old_chart.get("calculationData")) if isinstance(old_chart.get("calculationData"), dict) else old_chart.get("calculationData"),
+        #             old_chart.get("selectedFrequency"),
+        #             json.dumps(old_chart.get("xAxisTitle")) if isinstance(old_chart.get("xAxisTitle"), dict) else old_chart.get("xAxisTitle"),
+        #             json.dumps(old_chart.get("yAxisTitle")) if isinstance(old_chart.get("yAxisTitle"), dict) else old_chart.get("yAxisTitle"),
+        #             existing_chart_id
+        #         ))
+
+        #     # --- Case 2: Original dashboard has extra charts (create new ones) ---
+        #     if len(original_chart_ids) > len(existing_chart_ids):
+        #         print("➕ Original dashboard has new charts, copying extra ones...")
+        #         for old_chart_id in original_chart_ids[len(existing_chart_ids):]:
+        #             cursor.execute("SELECT * FROM table_chart_save WHERE id=%s", (old_chart_id,))
+        #             old_chart = cursor.fetchone()
+        #             if not old_chart:
+        #                 continue
+
+        #             cursor.execute("SELECT COALESCE(MAX(id), 0) AS max_id FROM table_chart_save")
+        #             new_chart_id = cursor.fetchone()["max_id"] + 1
+
+        #             cursor.execute("""
+        #                 INSERT INTO table_chart_save (
+        #                     id, user_id, company_name, chart_name, timestamp, database_name,
+        #                     selected_table, x_axis, y_axis, aggregate, chart_type, chart_color, chart_heading,
+        #                     drilldown_chart_color, filter_options, ai_chart_data, selectedUser,
+        #                     xfontsize, fontStyle, categoryColor, yfontsize, valueColor, headingColor,
+        #                     ClickedTool, Bgcolour, OptimizationData, calculationData, selectedFrequency,
+        #                     xAxisTitle, yAxisTitle
+        #                 )
+        #                 SELECT
+        #                     %s, %s, company_name, chart_name, CURRENT_TIMESTAMP, database_name,
+        #                     selected_table, x_axis, y_axis, aggregate, chart_type, chart_color, chart_heading,
+        #                     drilldown_chart_color, filter_options, ai_chart_data, selectedUser,
+        #                     xfontsize, fontStyle, categoryColor, yfontsize, valueColor, headingColor,
+        #                     ClickedTool, Bgcolour, OptimizationData, calculationData, selectedFrequency,
+        #                     xAxisTitle, yAxisTitle
+        #                 FROM table_chart_save WHERE id=%s
+        #             """, (new_chart_id, to_user_id, old_chart_id))
+
+        #             existing_chart_ids.append(new_chart_id)  # append to list
+
+        #     # --- Update the dashboard record with all chart_ids (old + new) ---
+        #     chart_ids_str = f"{{{','.join(map(str, existing_chart_ids))}}}"
+
+        #     cursor.execute("""
+        #         UPDATE table_dashboard
+        #         SET chart_ids = %s,
+        #             position = %s,
+        #             chart_size = %s,
+        #             chart_type = %s,
+        #             chart_xaxis = %s,
+        #             chart_yaxis = %s,
+        #             chart_aggregate = %s,
+        #             filterdata = %s,
+        #             font_style_state = %s,
+        #             font_size = %s,
+        #             font_color = %s,
+        #             clicked_category = %s,
+        #             heading = %s,
+        #             dashboard_name = %s,
+        #             chartcolor = %s,
+        #             droppablebgcolor = %s,
+        #             opacity = %s,
+        #             image_ids = %s,
+        #             updated_at = CURRENT_TIMESTAMP
+        #         WHERE id = %s
+        #     """, (
+        #         chart_ids_str,
+        #         safe_json(original_dashboard.get("position")),
+        #         safe_json(original_dashboard.get("chart_size")),
+        #         safe_json(original_dashboard.get("chart_type")),
+        #         safe_json(original_dashboard.get("chart_xaxis")),
+        #         safe_json(original_dashboard.get("chart_yaxis")),
+        #         safe_json(original_dashboard.get("chart_aggregate")),
+        #         safe_json(original_dashboard.get("filterdata")),
+        #         original_dashboard.get("font_style_state"),
+        #         original_dashboard.get("font_size"),
+        #         original_dashboard.get("font_color"),
+        #         original_dashboard.get("clicked_category"),
+        #         original_dashboard.get("heading"),
+        #         original_dashboard.get("dashboard_name"),
+        #         safe_json(original_dashboard.get("chartcolor")),
+        #         original_dashboard.get("droppablebgcolor"),
+        #         safe_json(original_dashboard.get("opacity")),
+        #         safe_json(original_dashboard.get("image_ids")),
+        #         existing_dashboard["id"]
+        #     ))
+
+        #     conn.commit()
+        #     print("✅ Dashboard updated successfully (including new charts if any).")
+
+        #     return jsonify({
+        #         "status": "updated",
+        #         "message": f"Dashboard '{dashboard_name}' updated successfully (new charts added if any)."
+        #     }), 200
         if existing_dashboard and action == "update" and not new_dashboard_name:
             print(f"🔄 Updating existing dashboard '{dashboard_name}'...")
 
@@ -11590,56 +11840,131 @@ def share_dashboard():
                 int(i.strip()) for i in existing_dashboard['chart_ids'].strip('{}').split(',') if i.strip()
             ]
 
-            for old_chart_id, existing_chart_id in zip(original_chart_ids, existing_chart_ids):
-                cursor.execute("SELECT * FROM table_chart_save WHERE id=%s", (old_chart_id,))
-                old_chart = cursor.fetchone()
-                if not old_chart:
-                    continue
+            # ✅ CASE A: If existing dashboard has *more* charts than original → full reset
+            if len(existing_chart_ids) > len(original_chart_ids):
+                print("⚠️ Existing dashboard has extra charts — removing all and recreating fresh charts...")
 
-                cursor.execute("""
-                    UPDATE table_chart_save SET
-                        company_name=%s, chart_name=%s, timestamp=CURRENT_TIMESTAMP, database_name=%s,
-                        selected_table=%s, x_axis=%s, y_axis=%s, aggregate=%s, chart_type=%s,
-                        chart_color=%s, chart_heading=%s, drilldown_chart_color=%s, filter_options=%s,
-                        ai_chart_data=%s, selectedUser=%s, xfontsize=%s, fontStyle=%s, categoryColor=%s,
-                        yfontsize=%s, valueColor=%s, headingColor=%s, ClickedTool=%s, Bgcolour=%s,
-                        OptimizationData=%s, calculationData=%s, selectedFrequency=%s,
-                        xAxisTitle=%s, yAxisTitle=%s
-                    WHERE id=%s
-                """, (
-                    old_chart["company_name"],
-                    old_chart["chart_name"],
-                    old_chart["database_name"],
-                    old_chart["selected_table"],
-                    old_chart["x_axis"],
-                    old_chart["y_axis"],
-                    old_chart["aggregate"],
-                    old_chart["chart_type"],
-                    old_chart["chart_color"],
-                    old_chart["chart_heading"],
-                    old_chart["drilldown_chart_color"],
-                    json.dumps(old_chart["filter_options"]) if isinstance(old_chart.get("filter_options"), dict) else old_chart.get("filter_options"),
-                    json.dumps(old_chart["ai_chart_data"]) if isinstance(old_chart.get("ai_chart_data"), dict) else old_chart.get("ai_chart_data"),
-                    to_user_id,
-                    old_chart.get("xFontSize"),
-                    old_chart.get("fontStyle"),
-                    old_chart.get("categoryColor"),
-                    old_chart.get("yFontSize"),
-                    old_chart.get("valueColor"),
-                    old_chart.get("headingColor"),
-                    old_chart.get("ClickedTool"),
-                    old_chart.get("Bgcolour"),
-                    json.dumps(old_chart.get("OptimizationData")) if isinstance(old_chart.get("OptimizationData"), dict) else old_chart.get("OptimizationData"),
-                    json.dumps(old_chart.get("calculationData")) if isinstance(old_chart.get("calculationData"), dict) else old_chart.get("calculationData"),
-                    old_chart.get("selectedFrequency"),
-                    json.dumps(old_chart.get("xAxisTitle")) if isinstance(old_chart.get("xAxisTitle"), dict) else old_chart.get("xAxisTitle"),
-                    json.dumps(old_chart.get("yAxisTitle")) if isinstance(old_chart.get("yAxisTitle"), dict) else old_chart.get("yAxisTitle"),
-                    existing_chart_id
-                ))
+                # 1️⃣ Delete all existing chart records
+                cursor.execute("DELETE FROM table_chart_save WHERE id = ANY(%s)", (existing_chart_ids,))
 
-            chart_ids_str = existing_dashboard["chart_ids"]
+                # 2️⃣ Recreate all charts from original dashboard
+                new_chart_ids = []
+                for old_chart_id in original_chart_ids:
+                    cursor.execute("SELECT * FROM table_chart_save WHERE id=%s", (old_chart_id,))
+                    old_chart = cursor.fetchone()
+                    if not old_chart:
+                        continue
 
-            # ✅ Update dashboard layout and style
+                    cursor.execute("SELECT COALESCE(MAX(id), 0) + 1 AS new_id FROM table_chart_save")
+                    new_chart_id = cursor.fetchone()["new_id"]
+                    new_chart_ids.append(new_chart_id)
+
+                    cursor.execute("""
+                        INSERT INTO table_chart_save (
+                            id, user_id, company_name, chart_name, timestamp, database_name,
+                            selected_table, x_axis, y_axis, aggregate, chart_type, chart_color, chart_heading,
+                            drilldown_chart_color, filter_options, ai_chart_data, selectedUser,
+                            xfontsize, fontStyle, categoryColor, yfontsize, valueColor, headingColor,
+                            ClickedTool, Bgcolour, OptimizationData, calculationData, selectedFrequency,
+                            xAxisTitle, yAxisTitle
+                        )
+                        SELECT
+                            %s, %s, company_name, chart_name, CURRENT_TIMESTAMP, database_name,
+                            selected_table, x_axis, y_axis, aggregate, chart_type, chart_color, chart_heading,
+                            drilldown_chart_color, filter_options, ai_chart_data, selectedUser,
+                            xfontsize, fontStyle, categoryColor, yfontsize, valueColor, headingColor,
+                            ClickedTool, Bgcolour, OptimizationData, calculationData, selectedFrequency,
+                            xAxisTitle, yAxisTitle
+                        FROM table_chart_save WHERE id=%s
+                    """, (new_chart_id, to_user_id, old_chart_id))
+
+                chart_ids_str = f"{{{','.join(map(str, new_chart_ids))}}}"
+
+            else:
+                # ✅ CASE B: Update existing and add new ones if original added charts
+                for old_chart_id, existing_chart_id in zip(original_chart_ids[:len(existing_chart_ids)], existing_chart_ids):
+                    cursor.execute("SELECT * FROM table_chart_save WHERE id=%s", (old_chart_id,))
+                    old_chart = cursor.fetchone()
+                    if not old_chart:
+                        continue
+
+                    cursor.execute("""
+                        UPDATE table_chart_save SET
+                            company_name=%s, chart_name=%s, timestamp=CURRENT_TIMESTAMP, database_name=%s,
+                            selected_table=%s, x_axis=%s, y_axis=%s, aggregate=%s, chart_type=%s,
+                            chart_color=%s, chart_heading=%s, drilldown_chart_color=%s, filter_options=%s,
+                            ai_chart_data=%s, selectedUser=%s, xfontsize=%s, fontStyle=%s, categoryColor=%s,
+                            yfontsize=%s, valueColor=%s, headingColor=%s, ClickedTool=%s, Bgcolour=%s,
+                            OptimizationData=%s, calculationData=%s, selectedFrequency=%s,
+                            xAxisTitle=%s, yAxisTitle=%s
+                        WHERE id=%s
+                    """, (
+                        old_chart["company_name"],
+                        old_chart["chart_name"],
+                        old_chart["database_name"],
+                        old_chart["selected_table"],
+                        old_chart["x_axis"],
+                        old_chart["y_axis"],
+                        old_chart["aggregate"],
+                        old_chart["chart_type"],
+                        old_chart["chart_color"],
+                        old_chart["chart_heading"],
+                        old_chart["drilldown_chart_color"],
+                        json.dumps(old_chart["filter_options"]) if isinstance(old_chart.get("filter_options"), dict) else old_chart.get("filter_options"),
+                        json.dumps(old_chart["ai_chart_data"]) if isinstance(old_chart.get("ai_chart_data"), dict) else old_chart.get("ai_chart_data"),
+                        old_chart.get("selectedUser"),
+                        old_chart.get("xfontsize"),
+                        old_chart.get("fontStyle"),
+                        old_chart.get("categoryColor"),
+                        old_chart.get("yfontsize"),
+                        old_chart.get("valueColor"),
+                        old_chart.get("headingColor"),
+                        old_chart.get("ClickedTool"),
+                        old_chart.get("Bgcolour"),
+                        json.dumps(old_chart.get("OptimizationData")) if isinstance(old_chart.get("OptimizationData"), dict) else old_chart.get("OptimizationData"),
+                        json.dumps(old_chart.get("calculationData")) if isinstance(old_chart.get("calculationData"), dict) else old_chart.get("calculationData"),
+                        old_chart.get("selectedFrequency"),
+                        json.dumps(old_chart.get("xAxisTitle")) if isinstance(old_chart.get("xAxisTitle"), dict) else old_chart.get("xAxisTitle"),
+                        json.dumps(old_chart.get("yAxisTitle")) if isinstance(old_chart.get("yAxisTitle"), dict) else old_chart.get("yAxisTitle"),
+                        existing_chart_id
+                    ))
+
+                # Add new charts if original has more
+                if len(original_chart_ids) > len(existing_chart_ids):
+                    print("➕ Original dashboard has new charts, copying extra ones...")
+                    for old_chart_id in original_chart_ids[len(existing_chart_ids):]:
+                        cursor.execute("SELECT * FROM table_chart_save WHERE id=%s", (old_chart_id,))
+                        old_chart = cursor.fetchone()
+                        if not old_chart:
+                            continue
+
+                        cursor.execute("SELECT COALESCE(MAX(id), 0) + 1 AS new_id FROM table_chart_save")
+                        new_chart_id = cursor.fetchone()["new_id"]
+
+                        cursor.execute("""
+                            INSERT INTO table_chart_save (
+                                id, user_id, company_name, chart_name, timestamp, database_name,
+                                selected_table, x_axis, y_axis, aggregate, chart_type, chart_color, chart_heading,
+                                drilldown_chart_color, filter_options, ai_chart_data, selectedUser,
+                                xfontsize, fontStyle, categoryColor, yfontsize, valueColor, headingColor,
+                                ClickedTool, Bgcolour, OptimizationData, calculationData, selectedFrequency,
+                                xAxisTitle, yAxisTitle
+                            )
+                            SELECT
+                                %s, %s, company_name, chart_name, CURRENT_TIMESTAMP, database_name,
+                                selected_table, x_axis, y_axis, aggregate, chart_type, chart_color, chart_heading,
+                                drilldown_chart_color, filter_options, ai_chart_data, selectedUser,
+                                xfontsize, fontStyle, categoryColor, yfontsize, valueColor, headingColor,
+                                ClickedTool, Bgcolour, OptimizationData, calculationData, selectedFrequency,
+                                xAxisTitle, yAxisTitle
+                            FROM table_chart_save WHERE id=%s
+                        """, (new_chart_id, to_user_id, old_chart_id))
+
+                        existing_chart_ids.append(new_chart_id)
+
+                chart_ids_str = f"{{{','.join(map(str, existing_chart_ids))}}}"
+
+            # ✅ Finally update dashboard table
             cursor.execute("""
                 UPDATE table_dashboard
                 SET chart_ids = %s,
@@ -11685,10 +12010,11 @@ def share_dashboard():
             ))
 
             conn.commit()
-            print("✅ Dashboard updated successfully (charts reused).")
+            print("✅ Dashboard updated successfully (with sync logic).")
+
             return jsonify({
                 "status": "updated",
-                "message": f"Dashboard '{dashboard_name}' updated successfully using existing chart IDs."
+                "message": f"Dashboard '{dashboard_name}' updated successfully (synced with original)."
             }), 200
 
         # ✅ Else (new share / rename)
