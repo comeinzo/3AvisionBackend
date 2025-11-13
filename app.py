@@ -10714,8 +10714,6 @@ def fetch_data_for_ts_decomposition(table_name, x_axis_columns, filter_options, 
 
 @app.route('/plot_chart', methods=['POST', 'GET'])
 def get_bar_chart_route(): 
-    
-    
     # Safely access the global DataFrame
     df = bc.global_df
     data = request.json
@@ -10737,9 +10735,10 @@ def get_bar_chart_route():
     db_nameeee = data['databaseName']
     selectedUser = data['selectedUser']
     chart_data = data['chartType']
+    dateGranularity= data.get('dateGranularity', None)
 
-    
-    print("chart_data-----",data)
+    print("filter_options-----",filter_options)
+    print("dateGranularity-----",dateGranularity)
     
     # NEW: Get data limiting options and consent tracking
     data_limit_type = data.get('dataLimitType', None)  # 'top10', 'bottom10', 'both5'
@@ -11103,7 +11102,7 @@ def get_bar_chart_route():
     # Single Y-axis chart
     if len(y_axis_columns) == 1 and chart_data not in ["treeHierarchy", "tablechart","timeSeriesDecomposition"]:
         print("Single Y-axis chart")
-        data = fetch_data(table_name, x_axis_columns, filter_options, y_axis_columns, aggregation, db_nameeee, selectedUser,calculationData)
+        data = fetch_data(table_name, x_axis_columns, filter_options, y_axis_columns, aggregation, db_nameeee, selectedUser,calculationData,dateGranularity)
         # print(data)
         if aggregation == "count":
             array1 = [item[0] for item in data]
@@ -18761,6 +18760,11 @@ def process_query():
                 chart_type = 'line'
             elif 'pie' in question.lower():
                 chart_type = 'pie'
+            elif 'scatter' in question.lower():
+                chart_type = 'scatter'
+            elif 'scatter' in question.lower():
+                chart_type = 'scatter'
+                
             else:
                 chart_type = 'bar'  # Default to bar chart
             
@@ -19118,14 +19122,949 @@ def execute_custom_sql():
 
 
 
+# AGENTIC AI PART DEMO END
+# 
+# 
+# AGENTIC AI DASHBOARD PART START
+# 
+
+
+# Add these new endpoints to your existing Flask app
+
+# @app.route('/api/dashboard/<table_name>', methods=['GET'])
+# def get_dashboard_data(table_name):
+#     """Get comprehensive dashboard data for a specific table."""
+#     try:
+#         # Get table schema first
+#         schema = get_table_schema(table_name)
+#         if not schema:
+#             return jsonify({
+#                 'success': False,
+#                 'error': f'Table {table_name} not found'
+#             }), 404
+        
+#         # Get basic statistics
+#         stats_query = f"SELECT COUNT(*) as total_records FROM {table_name}"
+#         stats_df, error = execute_sql(stats_query)
+        
+#         if error:
+#             return jsonify({
+#                 'success': False,
+#                 'error': f'Error fetching statistics: {error}'
+#             }), 500
+        
+#         # Get sample data (first 100 rows)
+#         sample_query = f"SELECT * FROM {table_name} LIMIT 100"
+#         sample_df, error = execute_sql(sample_query)
+        
+#         if error:
+#             return jsonify({
+#                 'success': False,
+#                 'error': f'Error fetching sample data: {error}'
+#             }), 500
+        
+#         # Get column information
+#         columns = list(sample_df.columns) if sample_df is not None else []
+        
+#         # Identify numeric and categorical columns
+#         numeric_cols = []
+#         categorical_cols = []
+#         date_cols = []
+        
+#         if sample_df is not None:
+#             for col in sample_df.columns:
+#                 if pd.api.types.is_numeric_dtype(sample_df[col]):
+#                     numeric_cols.append(col)
+#                 elif pd.api.types.is_datetime64_any_dtype(sample_df[col]):
+#                     date_cols.append(col)
+#                 else:
+#                     categorical_cols.append(col)
+        
+#         return jsonify({
+#             'success': True,
+#             'table_name': table_name,
+#             'total_records': int(stats_df['total_records'].iloc[0]) if stats_df is not None else 0,
+#             'columns': columns,
+#             'numeric_columns': numeric_cols,
+#             'categorical_columns': categorical_cols,
+#             'date_columns': date_cols,
+#             'sample_data': sample_df.head(10).to_dict('records') if sample_df is not None else [],
+#             'schema': schema
+#         })
+        
+#     except Exception as e:
+#         print(f"Error in dashboard: {e}")
+#         print(traceback.format_exc())
+#         return jsonify({
+#             'success': False,
+#             'error': str(e)
+#         }), 500
+
+
+
+# def generate_data_summary(df):
+#     """Generate a statistical summary of the DataFrame."""
+#     summary = {
+#         'total_rows': len(df),
+#         'columns': list(df.columns),
+#         'numeric_stats': {},
+#         'categorical_stats': {}
+#     }
+    
+#     # Numeric column statistics
+#     numeric_cols = df.select_dtypes(include=['number']).columns
+#     for col in numeric_cols:
+#         summary['numeric_stats'][col] = {
+#             'mean': float(df[col].mean()),
+#             'median': float(df[col].median()),
+#             'min': float(df[col].min()),
+#             'max': float(df[col].max()),
+#             'std': float(df[col].std()) if df[col].std() == df[col].std() else 0  # Check for NaN
+#         }
+    
+#     # Categorical column statistics
+#     categorical_cols = df.select_dtypes(include=['object']).columns
+#     for col in categorical_cols:
+#         value_counts = df[col].value_counts().head(10)
+#         summary['categorical_stats'][col] = {
+#             'unique_values': int(df[col].nunique()),
+#             'top_values': value_counts.to_dict()
+#         }
+    
+#     return summary
 
 
 
 
+@app.route('/api/dashboard/<table_name>', methods=['GET'])
+def get_dashboard_data(table_name):
+    """Get comprehensive dashboard data for a specific table."""
+    try:
+        # Get table schema first
+        schema = get_table_schema(table_name)
+        if not schema:
+            return jsonify({
+                'success': False,
+                'error': f'Table {table_name} not found'
+            }), 404
+        
+        # Get basic statistics
+        stats_query = f"SELECT COUNT(*) as total_records FROM {table_name}"
+        stats_df, error = execute_sql(stats_query)
+        
+        if error:
+            return jsonify({
+                'success': False,
+                'error': f'Error fetching statistics: {error}'
+            }), 500
+        
+        # Get sample data (first 100 rows)
+        sample_query = f"SELECT * FROM {table_name} LIMIT 100"
+        sample_df, error = execute_sql(sample_query)
+        
+        if error:
+            return jsonify({
+                'success': False,
+                'error': f'Error fetching sample data: {error}'
+            }), 500
+        
+        # Get column information
+        columns = list(sample_df.columns) if sample_df is not None else []
+        
+        # Identify numeric and categorical columns
+        numeric_cols = []
+        categorical_cols = []
+        date_cols = []
+        
+        if sample_df is not None and not sample_df.empty:
+            # We make a copy to modify dtypes safely
+            sample_df = sample_df.copy()
+            
+            # --- FIX: Convert string/object columns to datetime if possible ---
+            for col in sample_df.select_dtypes(include=['object']).columns:
+                try:
+                    # Try to convert the column to datetime
+                    # We use infer_datetime_format for speed and flexibility
+                    converted_col = pd.to_datetime(sample_df[col], errors='coerce', infer_datetime_format=True)
+                    
+                    # If conversion succeeds (and isn't just all NaT)
+                    # update the column in our dataframe to the new datetime type
+                    if not converted_col.isnull().all():
+                        sample_df[col] = converted_col
+                except Exception:
+                    # If conversion fails for any reason, leave it as 'object'
+                    pass
+            # --- END OF FIX ---
+
+            # This classification loop will now correctly identify date columns
+            for col in sample_df.columns:
+                if pd.api.types.is_numeric_dtype(sample_df[col]):
+                    numeric_cols.append(col)
+                elif pd.api.types.is_datetime64_any_dtype(sample_df[col]):
+                    date_cols.append(col)
+                else:
+                    categorical_cols.append(col)
+        
+        # Prepare sample data for JSON (convert datetimes to ISO strings)
+        sample_data_list = []
+        if sample_df is not None:
+            # Make another copy for safe serialization
+            json_safe_df = sample_df.head(10).copy()
+            # Convert datetime columns to ISO 8601 strings
+            for col in date_cols:
+                if col in json_safe_df.columns:
+                    # json_safe_df[col] = json_safe_df[col].dt.isoformat()
+                    json_safe_df[col] = json_safe_df[col].apply(lambda x: x.isoformat() if pd.notnull(x) else None)
+            
+            sample_data_list = json_safe_df.to_dict('records')
+
+        return jsonify({
+            'success': True,
+            'table_name': table_name,
+            'total_records': int(stats_df['total_records'].iloc[0]) if stats_df is not None and not stats_df.empty else 0,
+            'columns': columns,
+            'numeric_columns': numeric_cols,
+            'categorical_columns': categorical_cols,
+            'date_columns': date_cols,
+            'sample_data': sample_data_list,
+            'schema': schema
+        })
+        
+    except Exception as e:
+        print(f"Error in dashboard: {e}")
+        print(traceback.format_exc())
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@app.route('/api/dashboard/insights/<table_name>', methods=['POST'])
+def get_ai_insights(table_name):
+    """Generate AI-powered insights and recommendations for the data."""
+    try:
+        data = request.json
+        focus_area = data.get('focus_area', 'general')  # Options: 'general', 'profit', 'market', 'sales', 'performance'
+        
+        # Get table schema
+        schema = get_table_schema(table_name)
+        if not schema:
+            return jsonify({
+                'success': False,
+                'error': f'Table {table_name} not found'
+            }), 404
+        
+        # Get summary statistics
+        summary_query = f"SELECT * FROM {table_name} LIMIT 1000"
+        summary_df, error = execute_sql(summary_query)
+        
+        if error or summary_df is None or len(summary_df) == 0:
+            return jsonify({
+                'success': False,
+                'error': 'Unable to fetch data for analysis'
+            }), 500
+        
+        # Generate statistical summary
+        stats_summary = generate_data_summary(summary_df)
+        
+        # Generate AI insights using OpenAI
+        insights = generate_business_insights(
+            table_name=table_name,
+            schema=schema,
+            data_summary=stats_summary,
+            focus_area=focus_area,
+            sample_data=summary_df.head(20).to_string()
+        )
+        
+        return jsonify({
+            'success': True,
+            'table_name': table_name,
+            'focus_area': focus_area,
+            'insights': insights,
+            'data_summary': stats_summary
+        })
+        
+    except Exception as e:
+        print(f"Error generating insights: {e}")
+        print(traceback.format_exc())
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+def generate_data_summary(df):
+    """Generate a statistical summary of the DataFrame."""
+    summary = {
+        'total_rows': len(df),
+        'columns': list(df.columns),
+        'numeric_stats': {},
+        'categorical_stats': {}
+    }
+    
+    # Numeric column statistics
+    numeric_cols = df.select_dtypes(include=['number']).columns
+    for col in numeric_cols:
+        std_val = df[col].std()
+        summary['numeric_stats'][col] = {
+            'mean': float(df[col].mean()),
+            'median': float(df[col].median()),
+            'min': float(df[col].min()),
+            'max': float(df[col].max()),
+            # Use pd.notna() to check for NaN, which is more robust
+            'std': float(std_val) if pd.notna(std_val) else 0.0 
+        }
+    
+    # Categorical column statistics
+    # This will also pick up date columns that are not 'datetime64' dtype
+    categorical_cols = df.select_dtypes(include=['object']).columns
+    for col in categorical_cols:
+        try:
+            value_counts = df[col].value_counts().head(10)
+            summary['categorical_stats'][col] = {
+                'unique_values': int(df[col].nunique()),
+                
+                # --- THIS IS THE FIX ---
+                # Convert keys (k) to str() and values (v) to int()
+                # This handles keys that are dates, Nones, or other objects
+                'top_values': {str(k): int(v) for k, v in value_counts.items()}
+            }
+        except Exception as e:
+            # Add error handling in case value_counts fails on a weird object type
+            print(f"Warning: Could not summarize column {col}. Error: {e}")
+            summary['categorical_stats'][col] = {
+                'unique_values': 0,
+                'top_values': {'Error': 'Could not be summarized'}
+            }
+    
+    return summary
 
 
 
 
+def generate_business_insights(table_name, schema, data_summary, focus_area, sample_data):
+    """Generate AI-powered business insights and recommendations."""
+    
+    prompt = f"""You are an expert business analyst and data scientist. Analyze the following database table and provide actionable insights.
+
+Table Name: {table_name}
+
+Schema:
+{schema}
+
+Data Summary:
+- Total Records: {data_summary['total_rows']}
+- Numeric Columns Stats: {json.dumps(data_summary['numeric_stats'], indent=2)}
+- Categorical Columns Stats: {json.dumps(data_summary['categorical_stats'], indent=2)}
+
+Sample Data Preview:
+{sample_data}
+
+Focus Area: {focus_area}
+
+Please provide:
+
+1. **Key Findings** (3-5 bullet points): Identify the most important patterns, trends, or anomalies in the data.
+
+2. **Actionable Recommendations** (3-5 specific actions): Based on the focus area "{focus_area}", provide concrete recommendations to:
+   - Increase revenue/profit (if applicable)
+   - Improve market performance
+   - Optimize operations
+   - Identify growth opportunities
+   - Mitigate risks
+
+3. **Data Quality Observations**: Any data quality issues or concerns you notice.
+
+4. **Suggested Metrics to Track**: What KPIs should be monitored based on this data?
+
+5. **Quick Wins**: 2-3 immediate actions that could provide quick results.
+
+Format your response as JSON with the following structure:
+{{
+  "key_findings": ["finding 1", "finding 2", ...],
+  "recommendations": [
+    {{"title": "Recommendation Title", "description": "Detailed description", "priority": "high|medium|low", "impact": "Description of expected impact"}},
+    ...
+  ],
+  "data_quality": ["observation 1", "observation 2", ...],
+  "suggested_metrics": ["metric 1", "metric 2", ...],
+  "quick_wins": [
+    {{"action": "Action description", "expected_outcome": "Expected result"}},
+    ...
+  ]
+}}
+
+Provide ONLY the JSON response, no additional text."""
+    
+    try:
+        response = openai_client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": "You are an expert business analyst who provides data-driven insights in JSON format only."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.7,
+            max_tokens=1500
+        )
+        
+        insights_text = response.choices[0].message.content.strip()
+        
+        # Clean up and parse JSON
+        insights_text = insights_text.replace('```json', '').replace('```', '').strip()
+        insights = json.loads(insights_text)
+        
+        return insights
+        
+    except json.JSONDecodeError as e:
+        print(f"JSON decode error: {e}")
+        return {
+            "key_findings": ["Unable to generate structured insights"],
+            "recommendations": [],
+            "data_quality": [],
+            "suggested_metrics": [],
+            "quick_wins": []
+        }
+    except Exception as e:
+        print(f"Error generating insights: {e}")
+        return {
+            "key_findings": [f"Error: {str(e)}"],
+            "recommendations": [],
+            "data_quality": [],
+            "suggested_metrics": [],
+            "quick_wins": []
+        }
+
+
+@app.route('/api/dashboard/chat', methods=['POST'])
+def dashboard_chat():
+    """Dynamic AI chat for dashboard - provides contextual tips and insights."""
+    try:
+        data = request.json
+        user_message = data.get('message')
+        table_name = data.get('table_name')
+        context = data.get('context', {})  # Current dashboard state/data
+        
+        if not user_message or not table_name:
+            return jsonify({
+                'success': False,
+                'error': 'Missing message or table_name'
+            }), 400
+        
+        # Get table schema and recent data
+        schema = get_table_schema(table_name)
+        sample_query = f"SELECT * FROM {table_name} LIMIT 100"
+        sample_df, _ = execute_sql(sample_query)
+        
+        # Generate context-aware response
+        ai_response = generate_contextual_chat_response(
+            user_message=user_message,
+            table_name=table_name,
+            schema=schema,
+            context=context,
+            sample_data=sample_df.head(10).to_string() if sample_df is not None else ""
+        )
+        
+        return jsonify({
+            'success': True,
+            'message': user_message,
+            'response': ai_response,
+            'timestamp': pd.Timestamp.now().isoformat()
+        })
+        
+    except Exception as e:
+        print(f"Error in dashboard chat: {e}")
+        print(traceback.format_exc())
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
+def generate_contextual_chat_response(user_message, table_name, schema, context, sample_data):
+    """Generate contextual AI responses for dashboard chat."""
+    
+    context_str = json.dumps(context, indent=2) if context else "No additional context"
+    
+    prompt = f"""You are an AI business advisor integrated into a data analytics dashboard. 
+
+Current Table: {table_name}
+
+Schema:
+{schema}
+
+Sample Data:
+{sample_data}
+
+Dashboard Context:
+{context_str}
+
+User Message: {user_message}
+
+Provide a helpful, actionable response that:
+1. Directly addresses the user's question or concern
+2. Provides specific, data-driven recommendations when appropriate
+3. Suggests SQL queries or visualizations if relevant
+4. Offers tips to increase profit, market share, or operational efficiency
+5. Is conversational and encouraging
+
+Keep your response concise (2-4 paragraphs) and actionable.
+
+Response:"""
+    
+    try:
+        response = openai_client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": "You are a helpful AI business advisor who provides data-driven insights and recommendations. You are encouraging, specific, and action-oriented."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.8,
+            max_tokens=500
+        )
+        
+        return response.choices[0].message.content.strip()
+        
+    except Exception as e:
+        print(f"Error generating chat response: {e}")
+        return "I apologize, but I'm having trouble generating a response right now. Please try again."
+
+
+
+@app.route('/api/dashboard/kpi/<table_name>', methods=['GET'])
+def generate_kpi_dashboard(table_name):
+    """Generate intelligent KPI dashboard based on AI analysis of table structure."""
+    try:
+        # Get table schema
+        schema = get_table_schema(table_name)
+        if not schema:
+            return jsonify({
+                'success': False,
+                'error': f'Table {table_name} not found'
+            }), 404
+        
+        # Get all data from table
+        full_data_query = f"SELECT * FROM {table_name}"
+        full_df, error = execute_sql(full_data_query)
+        
+        if error or full_df is None or len(full_df) == 0:
+            return jsonify({
+                'success': False,
+                'error': 'Unable to fetch data for KPI generation'
+            }), 500
+        
+        # Convert datetime columns to string for processing
+        for col in full_df.columns:
+            if pd.api.types.is_datetime64_any_dtype(full_df[col]):
+                full_df[col] = full_df[col].astype(str)
+        
+        # Generate comprehensive data profile
+        data_profile = generate_comprehensive_data_profile(full_df, table_name)
+        
+        # Use AI to determine appropriate KPIs
+        kpi_structure = generate_kpi_structure_with_ai(
+            table_name=table_name,
+            schema=schema,
+            data_profile=data_profile,
+            sample_data=full_df.head(50).to_string()
+        )
+        
+        # Calculate actual KPI values based on AI recommendations
+        kpi_values = calculate_kpis(full_df, kpi_structure)
+        
+        # Generate visualizations data
+        chart_data = generate_chart_data(full_df, kpi_structure)
+        
+        return jsonify({
+            'success': True,
+            'table_name': table_name,
+            'total_records': len(full_df),
+            'kpi_structure': kpi_structure,
+            'kpi_values': kpi_values,
+            'chart_data': chart_data,
+            'data_profile': data_profile
+        })
+        
+    except Exception as e:
+        print(f"Error generating KPI dashboard: {e}")
+        print(traceback.format_exc())
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
+def generate_comprehensive_data_profile(df, table_name):
+    """Generate a comprehensive profile of the data."""
+    profile = {
+        'table_name': table_name,
+        'total_rows': len(df),
+        'total_columns': len(df.columns),
+        'columns': {},
+        'relationships': []
+    }
+    
+    for col in df.columns:
+        col_info = {
+            'name': col,
+            'type': str(df[col].dtype),
+            'unique_count': int(df[col].nunique()),
+            'null_count': int(df[col].isnull().sum()),
+            'null_percentage': float(df[col].isnull().sum() / len(df) * 100)
+        }
+        
+        if pd.api.types.is_numeric_dtype(df[col]):
+            col_info['data_type'] = 'numeric'
+            col_info['min'] = float(df[col].min()) if pd.notna(df[col].min()) else None
+            col_info['max'] = float(df[col].max()) if pd.notna(df[col].max()) else None
+            col_info['mean'] = float(df[col].mean()) if pd.notna(df[col].mean()) else None
+            col_info['median'] = float(df[col].median()) if pd.notna(df[col].median()) else None
+            col_info['std'] = float(df[col].std()) if pd.notna(df[col].std()) else None
+        elif pd.api.types.is_datetime64_any_dtype(df[col]) or 'date' in col.lower():
+            col_info['data_type'] = 'date'
+        else:
+            col_info['data_type'] = 'categorical'
+            top_values = df[col].value_counts().head(5)
+            col_info['top_values'] = {str(k): int(v) for k, v in top_values.items()}
+        
+        profile['columns'][col] = col_info
+    
+    return profile
+
+
+def generate_kpi_structure_with_ai(table_name, schema, data_profile, sample_data):
+    """Use AI to determine the most relevant KPIs for this table."""
+    
+    prompt = f"""You are a data analytics expert. Analyze this database table and determine the most relevant KPIs to display on a dashboard.
+
+Table Name: {table_name}
+
+Schema:
+{schema}
+
+Data Profile:
+{json.dumps(data_profile, indent=2)}
+
+Sample Data (first 50 rows):
+{sample_data}
+
+Based on this table structure and data, identify:
+
+1. **Primary KPIs** (4-6 main metrics): The most important metrics that should be prominently displayed
+   - For each KPI, specify:
+   - For each KPI, specify:
+     - name: Display name
+     - description: What it measures
+     - column: The column to use (or "*" for row counts)  <-- NEW
+     - aggregation: "sum", "avg", "count" (for rows), or "unique" (for unique column values) <-- NEW
+     - format: "number", "currency", "percentage", or "date"
+    #  - name: Display name
+    #  - description: What it measures
+    #  - calculation: How to calculate it (column name or aggregation)
+    #  - format: "number", "currency", "percentage", or "date"
+    #  - icon: Suggested icon name (e.g., "TrendingUp", "DollarSign", "Users", "ShoppingCart")
+
+2. **Chart Visualizations** (3-5 charts): Most insightful visualizations
+   - For each chart:
+     - type: "bar", "line", "pie", "area"
+     - title: Chart title
+     - x_axis: Column for x-axis
+     - y_axis: Column for y-axis (or aggregation)
+     - aggregation: "sum", "count", "avg", "min", "max"
+     - description: What insight this provides
+
+3. **Trend Analysis**: Which columns should show trends over time (if date columns exist)
+
+4. **Segmentation**: How the data should be grouped or categorized
+
+Respond ONLY with valid JSON in this exact structure:
+{{
+  "primary_kpis": [
+    {{
+      "name": "KPI Name",
+      "description": "What it measures",
+      "calculation": "column_name or aggregation",
+      "format": "number|currency|percentage|date",
+      "icon": "icon_name",
+      "category": "financial|operational|customer|product"
+    }}
+  ],
+  "charts": [
+    {{
+      "type": "bar|line|pie|area",
+      "title": "Chart Title",
+      "x_axis": "column_name",
+      "y_axis": "column_name",
+      "aggregation": "sum|count|avg|min|max",
+      "description": "Insight provided",
+      "limit": 10
+    }}
+  ],
+  "trends": [
+    {{
+      "metric": "column_name",
+      "date_column": "date_column_name",
+      "aggregation": "sum|count|avg"
+    }}
+  ],
+  "segments": [
+    {{
+      "category": "column_name",
+      "metric": "column_name",
+      "aggregation": "sum|count|avg"
+    }}
+  ]
+}}"""
+    
+    try:
+        response = openai_client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": "You are a data analytics expert who designs KPI dashboards. Respond only with valid JSON."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.3,
+            max_tokens=2000
+        )
+        
+        kpi_text = response.choices[0].message.content.strip()
+        kpi_text = kpi_text.replace('```json', '').replace('```', '').strip()
+        kpi_structure = json.loads(kpi_text)
+        
+        return kpi_structure
+        
+    except json.JSONDecodeError as e:
+        print(f"JSON decode error: {e}")
+        # Return default structure
+        return generate_default_kpi_structure(data_profile)
+    except Exception as e:
+        print(f"Error generating KPI structure: {e}")
+        return generate_default_kpi_structure(data_profile)
+
+
+def generate_default_kpi_structure(data_profile):
+    """Generate a default KPI structure if AI fails."""
+    primary_kpis = []
+    charts = []
+    
+    # Find numeric columns for KPIs
+    numeric_cols = [col for col, info in data_profile['columns'].items() 
+                    if info['data_type'] == 'numeric']
+    
+    categorical_cols = [col for col, info in data_profile['columns'].items() 
+                        if info['data_type'] == 'categorical']
+    
+    # Create default KPIs from numeric columns
+    for col in numeric_cols[:4]:
+        primary_kpis.append({
+            'name': col.replace('_', ' ').title(),
+            'description': f'Total {col}',
+            'calculation': col,
+            'format': 'currency' if any(word in col.lower() for word in ['price', 'amount', 'cost', 'revenue']) else 'number',
+            'icon': 'TrendingUp',
+            'category': 'operational'
+        })
+    
+    # Create default charts
+    if len(categorical_cols) > 0 and len(numeric_cols) > 0:
+        charts.append({
+            'type': 'bar',
+            'title': f'{categorical_cols[0]} Analysis',
+            'x_axis': categorical_cols[0],
+            'y_axis': numeric_cols[0],
+            'aggregation': 'sum',
+            'description': f'Distribution by {categorical_cols[0]}',
+            'limit': 10
+        })
+    
+    return {
+        'primary_kpis': primary_kpis,
+        'charts': charts,
+        'trends': [],
+        'segments': []
+    }
+
+
+def calculate_kpis(df, kpi_structure):
+    """Calculate actual KPI values based on the AI-generated structure."""
+    kpi_values = []
+    
+    for kpi in kpi_structure.get('primary_kpis', []):
+        try:
+            calculation = kpi['calculation']
+            
+            # Check if it's a simple column reference
+            if calculation in df.columns:
+                if kpi['format'] == 'number':
+                    value = float(df[calculation].sum())
+                elif kpi['format'] == 'currency':
+                    value = float(df[calculation].sum())
+                elif kpi['format'] == 'percentage':
+                    value = float(df[calculation].mean() * 100)
+                else:
+                    value = float(df[calculation].sum())
+                
+                # Calculate change (mock for now, you can implement actual trend)
+                change = 0.0
+                
+                kpi_values.append({
+                    'name': kpi['name'],
+                    'value': value,
+                    'format': kpi['format'],
+                    'icon': kpi.get('icon', 'TrendingUp'),
+                    'category': kpi.get('category', 'operational'),
+                    'description': kpi['description'],
+                    'change': change,
+                    'change_direction': 'up' if change > 0 else 'down' if change < 0 else 'neutral'
+                })
+            else:
+                # Handle aggregations like "count(*)"
+                if 'count' in calculation.lower():
+                    value = len(df)
+                else:
+                    value = 0
+                
+                kpi_values.append({
+                    'name': kpi['name'],
+                    'value': value,
+                    'format': kpi['format'],
+                    'icon': kpi.get('icon', 'TrendingUp'),
+                    'category': kpi.get('category', 'operational'),
+                    'description': kpi['description'],
+                    'change': 0.0,
+                    'change_direction': 'neutral'
+                })
+                
+        except Exception as e:
+            print(f"Error calculating KPI {kpi['name']}: {e}")
+            continue
+    
+    return kpi_values
+
+
+def generate_chart_data(df, kpi_structure):
+    """Generate data for all charts based on KPI structure."""
+    chart_data_list = []
+    
+    for chart_config in kpi_structure.get('charts', []):
+        try:
+            x_axis = chart_config['x_axis']
+            y_axis = chart_config['y_axis']
+            aggregation = chart_config.get('aggregation', 'sum')
+            limit = chart_config.get('limit', 10)
+            
+            if x_axis not in df.columns or y_axis not in df.columns:
+                continue
+            
+            # Group and aggregate data
+            if aggregation == 'sum':
+                grouped = df.groupby(x_axis)[y_axis].sum().reset_index()
+            elif aggregation == 'count':
+                grouped = df.groupby(x_axis)[y_axis].count().reset_index()
+            elif aggregation == 'avg':
+                grouped = df.groupby(x_axis)[y_axis].mean().reset_index()
+            elif aggregation == 'min':
+                grouped = df.groupby(x_axis)[y_axis].min().reset_index()
+            elif aggregation == 'max':
+                grouped = df.groupby(x_axis)[y_axis].max().reset_index()
+            else:
+                grouped = df.groupby(x_axis)[y_axis].sum().reset_index()
+            
+            # Sort and limit
+            grouped = grouped.nlargest(limit, y_axis)
+            
+            # Convert to list of dicts
+            chart_data = grouped.to_dict('records')
+            
+            chart_data_list.append({
+                'type': chart_config['type'],
+                'title': chart_config['title'],
+                'description': chart_config.get('description', ''),
+                'x_axis': x_axis,
+                'y_axis': y_axis,
+                'data': chart_data
+            })
+            
+        except Exception as e:
+            print(f"Error generating chart data: {e}")
+            continue
+    
+    return chart_data_list
+
+
+@app.route('/api/dashboard/kpi/insights/<table_name>', methods=['POST'])
+def get_kpi_insights(table_name):
+    """Generate AI insights specifically for KPI dashboard."""
+    try:
+        data = request.json
+        kpi_values = data.get('kpi_values', [])
+        chart_data = data.get('chart_data', [])
+        
+        # Generate contextual insights
+        insights = generate_kpi_insights_with_ai(table_name, kpi_values, chart_data)
+        
+        return jsonify({
+            'success': True,
+            'insights': insights
+        })
+        
+    except Exception as e:
+        print(f"Error generating KPI insights: {e}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
+def generate_kpi_insights_with_ai(table_name, kpi_values, chart_data):
+    """Generate business insights based on KPI values."""
+    
+    prompt = f"""You are a business intelligence expert. Analyze these KPI metrics and provide actionable insights.
+
+Table: {table_name}
+
+KPI Values:
+{json.dumps(kpi_values, indent=2)}
+
+Chart Data Summary:
+{json.dumps([{'title': c['title'], 'type': c['type']} for c in chart_data], indent=2)}
+
+Provide:
+1. **Key Observations** (3-4 points): What stands out in the data?
+2. **Action Items** (3-4 items): Specific actions to improve metrics
+3. **Opportunities** (2-3 items): Growth or improvement opportunities
+4. **Risks** (1-2 items): Potential concerns or red flags
+
+Respond with JSON:
+{{
+  "observations": ["observation 1", "observation 2", ...],
+  "action_items": [
+    {{"title": "Action", "description": "Details", "priority": "high|medium|low"}}
+  ],
+  "opportunities": ["opportunity 1", "opportunity 2", ...],
+  "risks": ["risk 1", "risk 2", ...]
+}}"""
+    
+    try:
+        response = openai_client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": "You are a business intelligence expert. Respond only with valid JSON."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.7,
+            max_tokens=1000
+        )
+        
+        insights_text = response.choices[0].message.content.strip()
+        insights_text = insights_text.replace('```json', '').replace('```', '').strip()
+        return json.loads(insights_text)
+        
+    except Exception as e:
+        print(f"Error generating insights: {e}")
+        return {
+            "observations": [],
+            "action_items": [],
+            "opportunities": [],
+            "risks": []
+        }
 
 
 
