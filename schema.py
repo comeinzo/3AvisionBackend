@@ -1,6 +1,6 @@
 # schema.py
 import psycopg2
-from model import LoginHistoryTable
+from model import LoginHistoryTable,LicenseManager
 from config import PASSWORD, USER_NAME, HOST, PORT,DB_NAME
 def create_schema():
     conn = psycopg2.connect(
@@ -13,7 +13,9 @@ def create_schema():
     cur = conn.cursor()
 
     login_history = LoginHistoryTable(cur)
+    license_manager = LicenseManager(cur)
     login_history.setup()
+    license_manager.setup()
 
     conn.commit()
     cur.close()

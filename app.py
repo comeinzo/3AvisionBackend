@@ -12086,83 +12086,85 @@ def get_user_management_logs():
 # def serve_static(filename):
 #     return send_file(os.path.join('static', filename))
 
-def create_license_tables():
-    try:
-        conn = get_db_connection()
-        cur = conn.cursor()
+# def create_license_tables():
+#     try:
+#         conn = get_db_connection()
+#         cur = conn.cursor()
 
-        cur.execute("""
-        CREATE TABLE IF NOT EXISTS license_plan (
-            id SERIAL PRIMARY KEY,
-            plan_name VARCHAR(100) UNIQUE NOT NULL,
-            description TEXT,
-            storage_limit INTEGER,
-            price DECIMAL(10,2),
-            duration_days INTEGER DEFAULT 30,
-            employee_limit INTEGER,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        );
-        """)
+#         cur.execute("""
+#         CREATE TABLE IF NOT EXISTS license_plan (
+#             id SERIAL PRIMARY KEY,
+#             plan_name VARCHAR(100) UNIQUE NOT NULL,
+#             description TEXT,
+#             storage_limit INTEGER,
+#             price DECIMAL(10,2),
+#             duration_days INTEGER DEFAULT 30,
+#             employee_limit INTEGER,
+#             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+#         );
+#         """)
 
-        cur.execute("""
-        CREATE TABLE IF NOT EXISTS license_features (
-            id SERIAL PRIMARY KEY,
-            plan_id INTEGER REFERENCES license_plan(id) ON DELETE CASCADE,
-            feature_name VARCHAR(100) NOT NULL,
-            is_enabled BOOLEAN DEFAULT TRUE
-        );
-        """)
+#         cur.execute("""
+#         CREATE TABLE IF NOT EXISTS license_features (
+#             id SERIAL PRIMARY KEY,
+#             plan_id INTEGER REFERENCES license_plan(id) ON DELETE CASCADE,
+#             feature_name VARCHAR(100) NOT NULL,
+#             is_enabled BOOLEAN DEFAULT TRUE
+#         );
+#         """)
 
-        cur.execute("""
-        CREATE TABLE IF NOT EXISTS organization_license (
-            id SERIAL PRIMARY KEY,
-            company_id INTEGER REFERENCES organizationdatatest(id) ON DELETE CASCADE,
-            plan_id INTEGER REFERENCES license_plan(id) ON DELETE CASCADE,
-            start_date DATE NOT NULL,
-            end_date DATE NOT NULL,
-            is_active BOOLEAN DEFAULT TRUE
-        );
-        """)
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS project_features (
-                id SERIAL PRIMARY KEY,
-                feature_name VARCHAR(100) UNIQUE NOT NULL,
-                description TEXT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            );
-        """)
+#         cur.execute("""
+#         CREATE TABLE IF NOT EXISTS organization_license (
+#             id SERIAL PRIMARY KEY,
+#             company_id INTEGER REFERENCES organizationdatatest(id) ON DELETE CASCADE,
+#             plan_id INTEGER REFERENCES license_plan(id) ON DELETE CASCADE,
+#             start_date DATE NOT NULL,
+#             end_date DATE NOT NULL,
+#             is_active BOOLEAN DEFAULT TRUE
+#         );
+#         """)
+#         cur.execute("""
+#             CREATE TABLE IF NOT EXISTS project_features (
+#                 id SERIAL PRIMARY KEY,
+#                 feature_name VARCHAR(100) UNIQUE NOT NULL,
+#                 description TEXT,
+#                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+#             );
+#         """)
 
-        # ✅ Insert Default Features
-        default_features = [
-            ('share_dashboard', 'Allows users to share dashboards with others'),
-            ('AI_Analytics', 'Provides AI-powered analytics insights'),
-            ('custom_theme', 'Enables users to customize chart and UI themes'),
-            ('live_update', 'Allows real-time data updates in dashboards')
-        ]
+#         # ✅ Insert Default Features
+#         default_features = [
+#             ('share_dashboard', 'Allows users to share dashboards with others'),
+#             ('AI_Analytics', 'Provides AI-powered analytics insights'),
+#             ('custom_theme', 'Enables users to customize chart and UI themes'),
+#             ('live_update', 'Allows real-time data updates in dashboards'),
+#             ('Agentic_AI', 'Enables advanced Agentic AI functionalities'),
+#             ()
+#         ]
 
-        for feature_name, description in default_features:
-            cur.execute("""
-                INSERT INTO project_features (feature_name, description)
-                VALUES (%s, %s)
-                ON CONFLICT (feature_name) DO NOTHING;
-            """, (feature_name, description))
+#         for feature_name, description in default_features:
+#             cur.execute("""
+#                 INSERT INTO project_features (feature_name, description)
+#                 VALUES (%s, %s)
+#                 ON CONFLICT (feature_name) DO NOTHING;
+#             """, (feature_name, description))
 
 
-        conn.commit()
-        cur.close()
-        conn.close()
+#         conn.commit()
+#         cur.close()
+#         conn.close()
 
-        return jsonify({'message': 'License-related tables created successfully ✅'}), 200
+#         return jsonify({'message': 'License-related tables created successfully ✅'}), 200
 
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+#     except Exception as e:
+#         return jsonify({'error': str(e)}), 500
 # ==========================================================
 # ➕ Add License Plan
 # ==========================================================
 @app.route('/add_license_plan', methods=['POST'])
 @token_required
 def add_license_plan():
-    create_license_tables()
+    # create_license_tables()
     data = request.json
     plan_name = data.get('plan_name')
     description = data.get('description', '')
@@ -12218,7 +12220,7 @@ def add_license_feature():
 @app.route('/get_all_plans', methods=['GET'])
 def get_all_plans():
     try:
-        create_license_tables()
+        # create_license_tables()
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=RealDictCursor)
         cur.execute("""
