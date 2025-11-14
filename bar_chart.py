@@ -1107,7 +1107,7 @@ def fetch_data(table_name, x_axis_columns, filter_options, y_axis_column, aggreg
     import numpy as np
     import json
     import re
-    print("dateGranularity", dateGranularity)
+    print("dateGranularity......................", dateGranularity)
 
     global global_df
     # print("global_df",global_df)
