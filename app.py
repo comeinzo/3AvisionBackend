@@ -2076,7 +2076,7 @@ def get_bar_chart_route():
     
     # # Dual Bar Chart
     if len(x_axis_columns) == 2 and chart_data in ["duealbarChart", "stackedbar"] :
-        data = fetch_data_for_duel_bar(table_name, x_axis_columns, checked_option, y_axis_columns, aggregation, db_nameeee, selectedUser,calculationData)
+        data = fetch_data_for_duel_bar(table_name, x_axis_columns, checked_option, y_axis_columns, aggregation, db_nameeee, selectedUser,calculationData,dateGranularity)
         # print("data",data)
         # Apply data limiting if specified
         if data_limit_type:
@@ -2518,7 +2518,7 @@ def get_bar_chart_route():
         try:
 
             print("calculationData",calculationData)
-            data = fetch_data_for_duel(table_name, x_axis_columns, filter_options, y_axis_columns, aggregation, db_nameeee, selectedUser,calculationData= data.get('calculationData'))
+            data = fetch_data_for_duel(table_name, x_axis_columns, filter_options, y_axis_columns, aggregation, db_nameeee, selectedUser,calculationData= data.get('calculationData'),dateGranularity=dateGranularity)
             
             # Debug: Print the structure of fetched data
             print(f"🔍 Dual Y-axis Chart - Original data length: {len(data)}")
@@ -2772,7 +2772,7 @@ def get_edit_chart_route():
     
     # if chart_data == "singleValueChart":
     elif chartType in ["duealbarChart", "stackedbar"]:
-        datass = fetch_data_for_duel_bar(table_name, x_axis_columns, checked_option, y_axis_columns, aggregation, db_nameeee,selectedUser,calculationData)
+        datass = fetch_data_for_duel_bar(table_name, x_axis_columns, checked_option, y_axis_columns, aggregation, db_nameeee,selectedUser,calculationData,dateGranularity=selectedFrequency)
         data = {
              "categories": [row[0] for row in datass],
             "series1": [row[1] for row in datass],
@@ -2979,104 +2979,255 @@ def get_edit_chart_route():
             print("Error preparing Tree Hierarchy data:", e)
             return jsonify({"error": str(e)})
 
-    elif len(y_axis_columns) == 1 and chartType != "duealbarChart" and chartType !="stackedbar" and chartType != "timeSeriesDecomposition":
-        data = fetch_data(table_name, x_axis_columns, checked_option, y_axis_columns, aggregation, db_nameeee,selectedUser,calculationData,dateGranularity)
-        print("data====================", data)     
-        # categories = {}  
-        # for row in data:
-        #     category = tuple(row[:-1])
-        #     y_axis_value = row[-1]
-        #     if category not in categories:
-        #         categories[category] = initial_value(aggregation)
-        #     update_category(categories, category, y_axis_value, aggregation)      
-        # labels = [', '.join(category) for category in categories.keys()]  
-        # values = list(categories.values())
-        # print("labels====================", labels)
-        # print("values====================", values)
-        # return jsonify({"categories": labels, "values": values, "aggregation": aggregation})
+    # elif len(y_axis_columns) == 1 and chartType != "duealbarChart" and chartType !="stackedbar" and chartType != "timeSeriesDecomposition":
+    #     data = fetch_data(table_name, x_axis_columns, checked_option, y_axis_columns, aggregation, db_nameeee,selectedUser,calculationData,dateGranularity)
+    #     print("data====================", data)     
+    #     # categories = {}  
+    #     # for row in data:
+    #     #     category = tuple(row[:-1])
+    #     #     y_axis_value = row[-1]
+    #     #     if category not in categories:
+    #     #         categories[category] = initial_value(aggregation)
+    #     #     update_category(categories, category, y_axis_value, aggregation)      
+    #     # labels = [', '.join(category) for category in categories.keys()]  
+    #     # values = list(categories.values())
+    #     # print("labels====================", labels)
+    #     # print("values====================", values)
+    #     # return jsonify({"categories": labels, "values": values, "aggregation": aggregation})
     
-        if aggregation == "count":
-            array1 = [item[0] for item in data]
-            array2 = [item[1] for item in data]
+    #     if aggregation == "count":
+    #         array1 = [item[0] for item in data]
+    #         array2 = [item[1] for item in data]
             
-            # Apply data limiting if specified
-            if data_limit_type:
-                temp_df = pd.DataFrame({'categories': array1, 'values': array2})
-                limited_df = apply_data_limiting(temp_df, data_limit_type, data_limit_column or 'values', ['categories'], ['values'], aggregation)
-                array1 = limited_df['categories'].tolist()
-                array2 = limited_df['values'].tolist()
+    #         # Apply data limiting if specified
+    #         if data_limit_type:
+    #             temp_df = pd.DataFrame({'categories': array1, 'values': array2})
+    #             limited_df = apply_data_limiting(temp_df, data_limit_type, data_limit_column or 'values', ['categories'], ['values'], aggregation)
+    #             array1 = limited_df['categories'].tolist()
+    #             array2 = limited_df['values'].tolist()
             
-            # Check data points limit with consent logic
-            limit_check = check_data_points_limit(len(array1), user_consent_given, data_limit_type)
-            if limit_check:
-                return jsonify(limit_check), 400
+    #         # Check data points limit with consent logic
+    #         limit_check = check_data_points_limit(len(array1), user_consent_given, data_limit_type)
+    #         if limit_check:
+    #             return jsonify(limit_check), 400
             
-            # Return the JSON response for count aggregation
-            return jsonify({"categories": array1, "values": array2, "aggregation": aggregation})
+    #         # Return the JSON response for count aggregation
+    #         return jsonify({"categories": array1, "values": array2, "aggregation": aggregation})
             
-        elif aggregation == "average":
-            array1 = [item[0] for item in data]
-            array2 = [item[1] for item in data]
+    #     elif aggregation == "average":
+    #         array1 = [item[0] for item in data]
+    #         array2 = [item[1] for item in data]
             
-            # Apply data limiting if specified
-            if data_limit_type:
-                temp_df = pd.DataFrame({'categories': array1, 'values': array2})
-                limited_df = apply_data_limiting(temp_df, data_limit_type, data_limit_column or 'values', ['categories'], ['values'], aggregation)
-                array1 = limited_df['categories'].tolist()
-                array2 = limited_df['values'].tolist()
+    #         # Apply data limiting if specified
+    #         if data_limit_type:
+    #             temp_df = pd.DataFrame({'categories': array1, 'values': array2})
+    #             limited_df = apply_data_limiting(temp_df, data_limit_type, data_limit_column or 'values', ['categories'], ['values'], aggregation)
+    #             array1 = limited_df['categories'].tolist()
+    #             array2 = limited_df['values'].tolist()
             
-            # Check data points limit with consent logic
-            limit_check = check_data_points_limit(len(array1), user_consent_given, data_limit_type)
-            if limit_check:
-                return jsonify(limit_check), 400
+    #         # Check data points limit with consent logic
+    #         limit_check = check_data_points_limit(len(array1), user_consent_given, data_limit_type)
+    #         if limit_check:
+    #             return jsonify(limit_check), 400
             
-            return jsonify({"categories": array1, "values": array2, "aggregation": aggregation})
+    #         return jsonify({"categories": array1, "values": array2, "aggregation": aggregation})
             
-        elif aggregation == "variance":
-            array1 = [item[0] for item in data]
-            array2 = [item[1] for item in data]
+    #     elif aggregation == "variance":
+    #         array1 = [item[0] for item in data]
+    #         array2 = [item[1] for item in data]
             
-            # Apply data limiting if specified
-            if data_limit_type:
-                temp_df = pd.DataFrame({'categories': array1, 'values': array2})
-                limited_df = apply_data_limiting(temp_df, data_limit_type, data_limit_column or 'values', ['categories'], ['values'], aggregation)
-                array1 = limited_df['categories'].tolist()
-                array2 = limited_df['values'].tolist()
+    #         # Apply data limiting if specified
+    #         if data_limit_type:
+    #             temp_df = pd.DataFrame({'categories': array1, 'values': array2})
+    #             limited_df = apply_data_limiting(temp_df, data_limit_type, data_limit_column or 'values', ['categories'], ['values'], aggregation)
+    #             array1 = limited_df['categories'].tolist()
+    #             array2 = limited_df['values'].tolist()
             
-            # Check data points limit with consent logic
-            limit_check = check_data_points_limit(len(array1), user_consent_given, data_limit_type)
-            if limit_check:
-                return jsonify(limit_check), 400
+    #         # Check data points limit with consent logic
+    #         limit_check = check_data_points_limit(len(array1), user_consent_given, data_limit_type)
+    #         if limit_check:
+    #             return jsonify(limit_check), 400
             
-            return jsonify({"categories": array1, "values": array2, "aggregation": aggregation})
+    #         return jsonify({"categories": array1, "values": array2, "aggregation": aggregation})
         
-        # For other aggregation types
+    #     # For other aggregation types
+    #     categories = {}
+    #     for row in data:
+    #         category = tuple(row[:-1])
+    #         y_axis_value = row[-1]
+    #         if category not in categories:
+    #             categories[category] = initial_value(aggregation)
+    #         update_category(categories, category, y_axis_value, aggregation)
+
+    #     print("categories after aggregation====================", categories    )
+
+    #     labels = [', '.join(category) for category in categories.keys()]
+    #     values = list(categories.values())
+        
+    #     # Apply data limiting if specified
+    #     if data_limit_type:
+    #         temp_df = pd.DataFrame({'categories': labels, 'values': values})
+    #         limited_df = apply_data_limiting(temp_df, data_limit_type, data_limit_column or 'values', ['categories'], ['values'], aggregation)
+    #         labels = limited_df['categories'].tolist()
+    #         values = limited_df['values'].tolist()
+        
+    #     # Check data points limit with consent logic
+    #     limit_check = check_data_points_limit(len(labels), user_consent_given, data_limit_type)
+    #     if limit_check:
+    #         return jsonify(limit_check), 400
+        
+    #     return jsonify({"categories": labels, "values": values, "aggregation": aggregation})
+    elif (
+        len(y_axis_columns) == 1 
+        and chartType != "duealbarChart"
+        and chartType != "stackedbar" 
+        and chartType != "timeSeriesDecomposition"
+    ):
+
+        print("dateGranularity raw:", dateGranularity)
+
+        # -------------------------
+        # 1. SAFE JSON PARSE
+        # -------------------------
+        import json
+        if isinstance(dateGranularity, str):
+            try:
+                dateGranularity = json.loads(dateGranularity)
+            except:
+                dateGranularity = {}
+
+        print("Parsed dateGranularity:", dateGranularity)
+
+        # -------------------------
+        # 2. FETCH DATA
+        # -------------------------
+        data = fetch_data(
+            table_name,
+            x_axis_columns,
+            checked_option,
+            y_axis_columns,
+            aggregation,
+            db_nameeee,
+            selectedUser,
+            calculationData,
+            dateGranularity
+        )
+
+        # -----------------------------------------------------------
+        # 3. SIMPLE AGGREGATION TYPES (count, average, variance)
+        # -----------------------------------------------------------
+        if aggregation in ["count", "average", "variance"]:
+            array1 = [item[0] for item in data]
+            array2 = [item[1] for item in data]
+
+            # Apply data limiting
+            if data_limit_type:
+                temp_df = pd.DataFrame({'categories': array1, 'values': array2})
+                limited_df = apply_data_limiting(
+                    temp_df,
+                    data_limit_type,
+                    data_limit_column or 'values',
+                    ['categories'],
+                    ['values'],
+                    aggregation
+                )
+                array1 = limited_df['categories'].tolist()
+                array2 = limited_df['values'].tolist()
+
+            # Data points limit check
+            limit_check = check_data_points_limit(len(array1), user_consent_given, data_limit_type)
+            if limit_check:
+                return jsonify(limit_check), 400
+
+            return jsonify({
+                "categories": array1,
+                "values": array2,
+                "aggregation": aggregation
+            })
+
+        # -----------------------------------------------------------
+        # 4. OTHER AGGREGATION TYPES (sum, min, max etc.)
+        # -----------------------------------------------------------
+
         categories = {}
+
+        from datetime import date, datetime
+
+        def convert_for_granularity(value):
+            """Converts date to monthly/yearly/etc format based on dateGranularity."""
+            if isinstance(value, (date, datetime)):
+                # Apply only if granularity is defined
+                for key, gran in dateGranularity.items():
+                    if gran == "month":
+                        return value.strftime("%Y-%m")
+                    elif gran == "year":
+                        return value.strftime("%Y")
+            return value
+
+        # -------------------------
+        # 5. PROCESS CATEGORY VALUES
+        # -------------------------
         for row in data:
-            category = tuple(row[:-1])
+            category_items = list(row[:-1])
+
+            # Apply granularity conversion to each X column
+            category_items = [convert_for_granularity(c) for c in category_items]
+
+            category = tuple(category_items)
             y_axis_value = row[-1]
+
             if category not in categories:
                 categories[category] = initial_value(aggregation)
+
             update_category(categories, category, y_axis_value, aggregation)
 
-        print("categories after aggregation====================", categories    )
+        print("Final categories after aggregation:", categories)
 
-        labels = [', '.join(category) for category in categories.keys()]
+        # -------------------------
+        # 6. FORMAT LABELS
+        # -------------------------
+        def format_item(item):
+            if isinstance(item, (date, datetime)):
+                return item.isoformat()
+            return str(item)
+
+        labels = [
+            ", ".join(format_item(i) for i in category)
+            for category in categories.keys()
+        ]
         values = list(categories.values())
-        
-        # Apply data limiting if specified
+
+        # -------------------------
+        # 7. APPLY DATA LIMITING
+        # -------------------------
         if data_limit_type:
             temp_df = pd.DataFrame({'categories': labels, 'values': values})
-            limited_df = apply_data_limiting(temp_df, data_limit_type, data_limit_column or 'values', ['categories'], ['values'], aggregation)
+            limited_df = apply_data_limiting(
+                temp_df,
+                data_limit_type,
+                data_limit_column or 'values',
+                ['categories'],
+                ['values'],
+                aggregation
+            )
             labels = limited_df['categories'].tolist()
             values = limited_df['values'].tolist()
-        
-        # Check data points limit with consent logic
+
+        # -------------------------
+        # 8. CHECK DATA POINT LIMIT
+        # -------------------------
         limit_check = check_data_points_limit(len(labels), user_consent_given, data_limit_type)
         if limit_check:
             return jsonify(limit_check), 400
-        
-        return jsonify({"categories": labels, "values": values, "aggregation": aggregation})
+
+        # -------------------------
+        # 9. RETURN RESPONSE
+        # -------------------------
+        return jsonify({
+            "categories": labels,
+            "values": values,
+            "aggregation": aggregation
+        })
 
     elif len(y_axis_columns) == 0 and chartType == "wordCloud":
             query = f"""
@@ -3112,7 +3263,7 @@ def get_edit_chart_route():
                 return jsonify({"error": str(e)}), 500
         
     elif len(y_axis_columns) == 2:
-        datass = fetch_data_for_duel(table_name, x_axis_columns, checked_option, y_axis_columns, aggregation, db_nameeee,selectedUser,calculationData)
+        datass = fetch_data_for_duel(table_name, x_axis_columns, checked_option, y_axis_columns, aggregation, db_nameeee,selectedUser,calculationData,dateGranularity=dateGranularity)
         data = {
              "categories": [row[0] for row in datass],
             "series1": [row[1] for row in datass],
@@ -5330,7 +5481,9 @@ def receive_chart_details():
         if chart_type != 'treeHierarchy' and chart_type != 'tablechart':
 
             if chart_type in ["duealbarChart", "stackedbar"]:
-                    datass = fetch_data_for_duel_bar(tableName, x_axis, filter_options, y_axis, aggregate, databaseName,selectedUser,calculation_data)
+                    selectedFrequency = data.get("selectedFrequency",)
+                    print("selectedFrequency",selectedFrequency)
+                    datass = fetch_data_for_duel_bar(tableName, x_axis, filter_options, y_axis, aggregate, databaseName,selectedUser,calculation_data,dateGranularity=selectedFrequency)
                     print("Duel/Stacked bar")
                     description = f"{user_name} viewed the chart '{chart}' from table '{tableName}'."
                     log_activity(
@@ -5357,7 +5510,8 @@ def receive_chart_details():
                     print("Dual y-axis chart detected")
                     # print("filter_options====================", filter_options)
                     # print("filtertype====================", type(filter_options))
-                    data = fetch_data_for_duel(tableName, x_axis, filter_options, y_axis, aggregate, databaseName, selectedUser,calculation_data)
+                    dateGranularity= data.get("selectedFrequency",)
+                    data = fetch_data_for_duel(tableName, x_axis, filter_options, y_axis, aggregate, databaseName, selectedUser,calculation_data,dateGranularity)
                     # print("Data from fetch_data_for_duel:")  # Print before returning
                     # print("Categories:", [row[0] for row in data])
                     # print("Series1:", [row[1] for row in data])
@@ -5380,9 +5534,10 @@ def receive_chart_details():
                     })
             if chart_type == "duealChart"  :
                     print("Dual y-axis chart detected")
+                    dateGranularity= data.get("selectedFrequency",)
                     # print("filter_options====================", filter_options)
                     # print("filtertype====================", type(filter_options))
-                    data = fetch_data_for_duel(tableName, x_axis, filter_options, y_axis, aggregate, databaseName, selectedUser,calculation_data)
+                    data = fetch_data_for_duel(tableName, x_axis, filter_options, y_axis, aggregate, databaseName, selectedUser,calculation_data,dateGranularity)
                     # print("Data from fetch_data_for_duel:")  # Print before returning
                     # print("Categories:", [row[0] for row in data])
                     # print("Series1:", [row[1] for row in data])

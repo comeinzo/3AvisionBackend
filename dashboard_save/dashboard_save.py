@@ -1767,7 +1767,7 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
 
                             print("Fetching data...")
                             # data = fetch_data_for_duel(table_name, x_axis, filter_options, y_axis, aggregate, database_name, selected_user,calculationData)
-                            data = fetch_data_for_duel(table_name, x_axis, filter_options, y_axis, aggregate, database_name, selected_user,calculationData)
+                            data = fetch_data_for_duel(table_name, x_axis, filter_options, y_axis, aggregate, database_name, selected_user,calculationData,dateGranularity=selectedFrequency)
                             print(f"Data fetched for dual chart: {data}")
                             # --- Optimization Filtering ---
                             if 'OptimizationData' in locals() or 'OptimizationData' in globals():
@@ -1821,7 +1821,7 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                                     filter_options = json.loads(filter_options)  # Convert JSON string to dict
                                 except json.JSONDecodeError:
                                     raise ValueError("Invalid JSON format for filter_options")
-                            data = fetch_data_for_duel(table_name, x_axis, filter_options, y_axis, aggregate, database_name, selected_user,calculationData)
+                            data = fetch_data_for_duel(table_name, x_axis, filter_options, y_axis, aggregate, database_name, selected_user,calculationData,dateGranularity=selectedFrequency)
                            # --- Optimization Filtering ---
                             if 'OptimizationData' in locals() or 'OptimizationData' in globals():
                                 df = pd.DataFrame(data, columns=[x_axis[0], 'series1', 'series2'])
@@ -1876,7 +1876,7 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                                 except json.JSONDecodeError:
                                     raise ValueError("Invalid JSON format for filter_options")
                         
-                        datass = fetch_data_for_duel_bar(table_name, x_axis, filter_options, y_axis, aggregate, database_name,selected_user,calculationData)
+                        datass = fetch_data_for_duel_bar(table_name, x_axis, filter_options, y_axis, aggregate, database_name,selected_user,calculationData,dateGranularity=selectedFrequency)
                         print("datass",datass)
                     # --- Optimization Filtering ---
                         if 'OptimizationData' in locals() or 'OptimizationData' in globals():
