@@ -2647,13 +2647,14 @@ def get_edit_chart_route():
     user_consent_given =  False  # Track if user already gave consent
     current_x_axis_key = None  # Create a key for current xAxis combination
     selectedFrequency=data['selectedFrequency']
+    dateGranularity= data['selectedFrequency']
     connection_path = get_db_connection_or_path(selectedUser, db_nameeee, return_path=True)
-    print("Connection path:", connection_path)
+    print("dateGranularity dateGranularity:", dateGranularity)
     database_con = psycopg2.connect(connection_path)
     print("database_con", connection_path)
     # Fetch chart data
     new_df = fetch_chart_data(database_con, table_name)
-    dateGranularity= data.get('dateGranularity', None)
+    # dateGranularity= data.get('dateGranularity', None)
 
     # Check if fetched data is valid
     if new_df is None:
@@ -2980,7 +2981,7 @@ def get_edit_chart_route():
 
     elif len(y_axis_columns) == 1 and chartType != "duealbarChart" and chartType !="stackedbar" and chartType != "timeSeriesDecomposition":
         data = fetch_data(table_name, x_axis_columns, checked_option, y_axis_columns, aggregation, db_nameeee,selectedUser,calculationData,dateGranularity)
-        # print("data====================", data)     
+        print("data====================", data)     
         # categories = {}  
         # for row in data:
         #     category = tuple(row[:-1])
@@ -3057,6 +3058,8 @@ def get_edit_chart_route():
             if category not in categories:
                 categories[category] = initial_value(aggregation)
             update_category(categories, category, y_axis_value, aggregation)
+
+        print("categories after aggregation====================", categories    )
 
         labels = [', '.join(category) for category in categories.keys()]
         values = list(categories.values())
@@ -3286,10 +3289,10 @@ def save_data():
 
     # print("data====================", data) 
     
-    print("company_name====================",company_name)  
-    print("user_id====================",user_id)
-    print("save_name====================", save_name)
-    print("connectionType====================", data)
+    # print("company_name====================",company_name)  
+    # print("user_id====================",user_id)
+    # print("save_name====================", save_name)
+    # print("connectionType====================", data)
    
     
     try:
@@ -3305,6 +3308,8 @@ def save_data():
         calculation_data_json = json.dumps(data.get('calculationData'))
         xAxisTitle = json.dumps(data.get('xAxisTitle'))  # '{"x1": "region", "x2": "product"}'
         yAxisTitle = json.dumps(data.get('yAxisTitle'))  # '{"y1": ["unit_cost"]}'
+        dateGranularity=json.dumps(data.get('dateGranularity'))
+        # Get the last inserted chart ID
 
 
         cur.execute("SELECT MAX(id) FROM table_chart_save")
@@ -3368,7 +3373,8 @@ def save_data():
             data.get('areaColor'),
             data.get('optimizationOption'),
             calculation_data_json,
-            data.get('selectedFrequency'),
+            # data.get('dateGranularity'),
+            dateGranularity,
             xAxisTitle,
             yAxisTitle
 
@@ -3734,7 +3740,7 @@ def chart_names():
         return jsonify({'error': 'Failed to fetch chart names'})
 
 def get_chart_data(chart_name,company_name,user_id):
-    print("chart_id====================......................................................",chart_name,company_name,user_id)
+    # print("chart_id====================......................................................",chart_name,company_name,user_id)
     conn = connect_to_db()
     if conn:
         try:
@@ -3765,7 +3771,7 @@ def chart_data(chart_name,company_name):
     user_id, chart_name = chart_name.split(",", 1)  # Split only once
     data = get_chart_data(chart_name,company_name,user_id)
     
-    print("chart datas------------------------------------------------------------------------------------------------------------------",data)
+    # print("chart datas------------------------------------------------------------------------------------------------------------------",data)
     if data is not None:
         return jsonify(data)
     else:
