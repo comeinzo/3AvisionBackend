@@ -1876,7 +1876,7 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                                 except json.JSONDecodeError:
                                     raise ValueError("Invalid JSON format for filter_options")
                         
-                        datass = fetch_data_for_duel_bar(table_name, x_axis, filter_options, y_axis, aggregate, database_name,selected_user,calculationData)
+                        datass = fetch_data_for_duel_bar(table_name, x_axis, filter_options, y_axis, aggregate, database_name,selected_user,calculationData,dateGranularity=selectedFrequency)
                         print("datass",datass)
                     # --- Optimization Filtering ---
                         if 'OptimizationData' in locals() or 'OptimizationData' in globals():
