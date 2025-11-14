@@ -1311,7 +1311,7 @@ def listen_to_db(sid, table_name, x_axis_columns, checked_option, y_axis_columns
             while connection.notifies:
                 notify = connection.notifies.pop(0)
                 if notify.payload == table_name:
-                    updated_data = fetch_data(table_name, x_axis_columns, checked_option, y_axis_columns, aggregation, db_name, None,calculationData)
+                    updated_data = fetch_data(table_name, x_axis_columns, checked_option, y_axis_columns, aggregation, db_name, None,calculationData,dateGranularity)
                    
                     # Create data package
                     data_package = {
@@ -2653,6 +2653,7 @@ def get_edit_chart_route():
     print("database_con", connection_path)
     # Fetch chart data
     new_df = fetch_chart_data(database_con, table_name)
+    dateGranularity= data.get('dateGranularity', None)
 
     # Check if fetched data is valid
     if new_df is None:
@@ -2978,7 +2979,7 @@ def get_edit_chart_route():
             return jsonify({"error": str(e)})
 
     elif len(y_axis_columns) == 1 and chartType != "duealbarChart" and chartType !="stackedbar" and chartType != "timeSeriesDecomposition":
-        data = fetch_data(table_name, x_axis_columns, checked_option, y_axis_columns, aggregation, db_nameeee,selectedUser,calculationData)
+        data = fetch_data(table_name, x_axis_columns, checked_option, y_axis_columns, aggregation, db_nameeee,selectedUser,calculationData,dateGranularity)
         # print("data====================", data)     
         # categories = {}  
         # for row in data:
