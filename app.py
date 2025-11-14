@@ -1833,16 +1833,12 @@ def fetch_data_for_ts_decomposition(table_name, x_axis_columns, filter_options, 
 
 @app.route('/plot_chart', methods=['POST', 'GET'])
 @token_required
-
 def get_bar_chart_route(): 
-    
-    
+     
     # Safely access the global DataFrame
     df = bc.global_df
     data = request.json
-
     # print("data", data)
-    
     try:
         x_axis_columns = [col.strip() for col in data['xAxis'].split(',')]
     except AttributeError:
@@ -1858,7 +1854,14 @@ def get_bar_chart_route():
     db_nameeee = data['databaseName']
     selectedUser = data['selectedUser']
     chart_data = data['chartType']
-    print("chart_data",data)
+
+    dateGranularity= data.get('dateGranularity', None)
+
+    print("filter_options-----",filter_options)
+    print("dateGranularity-----",dateGranularity)
+
+
+    # print("chart_data",data)
     
     # NEW: Get data limiting options and consent tracking
     data_limit_type = data.get('dataLimitType', None)  # 'top10', 'bottom10', 'both5'
@@ -1867,126 +1870,6 @@ def get_bar_chart_route():
     current_x_axis_key = ','.join(sorted(x_axis_columns))  # Create a key for current xAxis combination
     calculationData = data.get('calculationData')
     selectedFrequency=data.get('selectedFrequency')
-    # if not selectedUser or selectedUser.lower() == 'null':
-    #     print("Using default database connection...")
-    #     connection_path = f"dbname={db_nameeee} user={USER_NAME} password={PASSWORD} host={HOST}"
-    # else:
-    #     print(f"Using connection for user: {selectedUser}")
-    #     connection_string = fetch_external_db_connection(db_nameeee, selectedUser)
-    #     if not connection_string:
-    #         raise Exception("Unable to fetch external database connection details.")
-
-    #     db_details = {
-    #         "host": connection_string[3],
-    #         "database": connection_string[7],
-    #         "user": connection_string[4],
-    #         "password": connection_string[5],
-    #         "port": int(connection_string[6])
-    #     }
-    # connection_path = None
-    # ssh_client = None
-    # local_sock = None
-    # stop_event = threading.Event()
-    # tunnel_thread = None
-
-    #     # ✅ 1️⃣ LOCAL DATABASE CONNECTION
-    # if not selectedUser or selectedUser.lower() in ('local','null', 'none'):
-    #     print("Using local database connection...")
-    #     connection_path = f"dbname={db_nameeee} user={USER_NAME} password={PASSWORD} host={HOST}"
-   
-
-    #     # ✅ 2️⃣ EXTERNAL DATABASE CONNECTION (via SSH tunnel)
-    # else:
-    #     print(f"Using external connection for user: {selectedUser}")
-    #     connection_details = fetch_external_db_connection(db_nameeee, selectedUser)
-    #     if not connection_details:
-    #         raise Exception(f"Unable to fetch external database connection details for user '{selectedUser}'")
-
-    #     db_details = {
-    #             "name": connection_details[1],
-    #             "dbType": connection_details[2],
-    #             "host": connection_details[3],
-    #             "user": connection_details[4],
-    #             "password": connection_details[5],
-    #             "port": int(connection_details[6]),
-    #             "database": connection_details[7],
-    #             "use_ssh": connection_details[8],
-    #             "ssh_host": connection_details[9],
-    #             "ssh_port": int(connection_details[10]),
-    #             "ssh_username": connection_details[11],
-    #             "ssh_key_path": connection_details[12],
-    #     }
-
-    #     print(f"🔹 External DB Connection Details: {db_details}")
-
-    #         # ✅ Start SSH tunnel if needed
-    #     if db_details["use_ssh"]:
-    #         print("🔐 Establishing SSH tunnel manually (Paramiko)...")
-    #         private_key = paramiko.RSAKey.from_private_key_file(db_details["ssh_key_path"])
-
-    #         ssh_client = paramiko.SSHClient()
-    #         ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-    #         ssh_client.connect(
-    #                 db_details["ssh_host"],
-    #                 username=db_details["ssh_username"],
-    #                 pkey=private_key,
-    #                 port=db_details["ssh_port"],
-    #                 timeout=10
-    #         )
-
-    #             # Find free local port for tunnel
-    #         local_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    #         local_sock.bind(('127.0.0.1', 0))
-    #         local_port = local_sock.getsockname()[1]
-    #         local_sock.listen(1)
-    #         print(f"✅ Local forwarder listening on 127.0.0.1:{local_port}")
-
-    #         transport = ssh_client.get_transport()
-
-    #         def pipe(src, dst):
-    #             try:
-    #                 while True:
-    #                     data = src.recv(1024)
-    #                     if not data:
-    #                         break
-    #                     dst.sendall(data)
-    #             except Exception:
-    #                 pass
-    #             finally:
-    #                 src.close()
-    #                 dst.close()
-
-    #         def forward_tunnel():
-    #             while not stop_event.is_set():
-    #                 try:
-    #                     client_sock, _ = local_sock.accept()
-    #                     chan = transport.open_channel(
-    #                             "direct-tcpip",
-    #                             ("127.0.0.1", 5432),
-    #                             client_sock.getsockname()
-    #                     )
-    #                     if chan is None:
-    #                         client_sock.close()
-    #                         continue
-    #                     threading.Thread(target=pipe, args=(client_sock, chan), daemon=True).start()
-    #                     threading.Thread(target=pipe, args=(chan, client_sock), daemon=True).start()
-    #                 except Exception as e:
-    #                     print(f"❌ Channel open failed: {e}")
-
-    #         tunnel_thread = threading.Thread(target=forward_tunnel, daemon=True)
-    #         tunnel_thread.start()
-
-    #             # Override host and port for local tunnel
-    #         host = "127.0.0.1"
-    #         port = local_port
-    #     else:
-    #         host = db_details["host"]
-    #         port = db_details["port"]
-
-    #     print(f"🧩 Connecting to external PostgreSQL at {host}:{port} ...")
-           
-    #     connection_path = f"dbname={db_details['database']} user={db_details['user']} password={db_details['password']}  host={host} port={port}"
-    #     print("Connection Path:", connection_path)
     connection_path = get_db_connection_or_path(selectedUser, db_nameeee, return_path=True)
     print("Connection path:", connection_path)
     database_con = psycopg2.connect(connection_path)
@@ -2322,7 +2205,7 @@ def get_bar_chart_route():
     # Single Y-axis chart
     if len(y_axis_columns) == 1 and chart_data not in ["treeHierarchy", "tablechart","timeSeriesDecomposition"]:
         print("Single Y-axis chart")
-        data = fetch_data(table_name, x_axis_columns, filter_options, y_axis_columns, aggregation, db_nameeee, selectedUser,calculationData)
+        data = fetch_data(table_name, x_axis_columns, filter_options, y_axis_columns, aggregation, db_nameeee, selectedUser,calculationData,dateGranularity)
         print(data)
         if aggregation == "count":
             array1 = [item[0] for item in data]
@@ -8069,7 +7952,7 @@ def get_Edb_connection(username, password, host, port, db_name):
 #             tunnel.stop()
 #             print("🔒 SSH Tunnel closed.")
 import pymongo
-import cx_Oracle
+# import cx_Oracle
 import psycopg2
 import mysql.connector
 from pymongo import MongoClient
@@ -9787,7 +9670,7 @@ def connect_and_fetch_dbtables():
 
     try:
         if db_type == "Oracle":
-            import cx_Oracle
+            # import cx_Oracle
             if username.lower() == "sys":
                 conn = cx_Oracle.connect(
                     user=username,
@@ -10584,7 +10467,7 @@ def get_tables():
             tables = db.list_collection_names()
             client.close()
         elif db_type == 'Oracle':
-            import cx_Oracle
+            # import cx_Oracle
             dsn_tns = cx_Oracle.makedsn(host or 'localhost', port or '1521', service_name=dbName)
             conn = cx_Oracle.connect(user=username, password=password, dsn_tns=dsn_tns)
             cursor = conn.cursor()
