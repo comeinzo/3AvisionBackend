@@ -2076,7 +2076,7 @@ def get_bar_chart_route():
     
     # # Dual Bar Chart
     if len(x_axis_columns) == 2 and chart_data in ["duealbarChart", "stackedbar"] :
-        data = fetch_data_for_duel_bar(table_name, x_axis_columns, checked_option, y_axis_columns, aggregation, db_nameeee, selectedUser,calculationData)
+        data = fetch_data_for_duel_bar(table_name, x_axis_columns, checked_option, y_axis_columns, aggregation, db_nameeee, selectedUser,calculationData,dateGranularity)
         # print("data",data)
         # Apply data limiting if specified
         if data_limit_type:
@@ -2518,7 +2518,7 @@ def get_bar_chart_route():
         try:
 
             print("calculationData",calculationData)
-            data = fetch_data_for_duel(table_name, x_axis_columns, filter_options, y_axis_columns, aggregation, db_nameeee, selectedUser,calculationData= data.get('calculationData'))
+            data = fetch_data_for_duel(table_name, x_axis_columns, filter_options, y_axis_columns, aggregation, db_nameeee, selectedUser,calculationData= data.get('calculationData'),dateGranularity=dateGranularity)
             
             # Debug: Print the structure of fetched data
             print(f"🔍 Dual Y-axis Chart - Original data length: {len(data)}")
@@ -3109,7 +3109,7 @@ def get_edit_chart_route():
                 return jsonify({"error": str(e)}), 500
         
     elif len(y_axis_columns) == 2:
-        datass = fetch_data_for_duel(table_name, x_axis_columns, checked_option, y_axis_columns, aggregation, db_nameeee,selectedUser,calculationData)
+        datass = fetch_data_for_duel(table_name, x_axis_columns, checked_option, y_axis_columns, aggregation, db_nameeee,selectedUser,calculationData,dateGranularity=dateGranularity)
         data = {
              "categories": [row[0] for row in datass],
             "series1": [row[1] for row in datass],
@@ -5351,7 +5351,8 @@ def receive_chart_details():
                     print("Dual y-axis chart detected")
                     # print("filter_options====================", filter_options)
                     # print("filtertype====================", type(filter_options))
-                    data = fetch_data_for_duel(tableName, x_axis, filter_options, y_axis, aggregate, databaseName, selectedUser,calculation_data)
+                    dateGranularity= data.get("selectedFrequency",)
+                    data = fetch_data_for_duel(tableName, x_axis, filter_options, y_axis, aggregate, databaseName, selectedUser,calculation_data,dateGranularity)
                     # print("Data from fetch_data_for_duel:")  # Print before returning
                     # print("Categories:", [row[0] for row in data])
                     # print("Series1:", [row[1] for row in data])
@@ -5374,9 +5375,10 @@ def receive_chart_details():
                     })
             if chart_type == "duealChart"  :
                     print("Dual y-axis chart detected")
+                    dateGranularity= data.get("selectedFrequency",)
                     # print("filter_options====================", filter_options)
                     # print("filtertype====================", type(filter_options))
-                    data = fetch_data_for_duel(tableName, x_axis, filter_options, y_axis, aggregate, databaseName, selectedUser,calculation_data)
+                    data = fetch_data_for_duel(tableName, x_axis, filter_options, y_axis, aggregate, databaseName, selectedUser,calculation_data,dateGranularity)
                     # print("Data from fetch_data_for_duel:")  # Print before returning
                     # print("Categories:", [row[0] for row in data])
                     # print("Series1:", [row[1] for row in data])

@@ -1992,65 +1992,240 @@ def drill_down(clicked_category, x_axis_columns, y_axis_column, aggregation):
 
 
 
-def fetch_data_for_duel(table_name, x_axis_columns, filter_options, y_axis_columns, aggregation, db_nameeee, selectedUser, calculationData=None):
-    print("data====================", table_name, x_axis_columns, filter_options, y_axis_columns, aggregation, db_nameeee, selectedUser,calculationData)
+# def fetch_data_for_duel(table_name, x_axis_columns, filter_options, y_axis_columns, aggregation, db_nameeee, selectedUser, calculationData=None):
+#     print("data====================", table_name, x_axis_columns, filter_options, y_axis_columns, aggregation, db_nameeee, selectedUser,calculationData)
 
     
-    try:
+#     try:
         
-        conn = get_db_connection_or_path(selectedUser, db_nameeee)
+#         conn = get_db_connection_or_path(selectedUser, db_nameeee)
 
+#         cur = conn.cursor()
+
+#         # Populate global_df.columns with actual column names from the table
+#         # This is crucial for formula parsing functions to know valid column names.
+#         global global_df
+#         cur.execute(f"SELECT * FROM {table_name} LIMIT 0") # Limit 0 to get schema without fetching data
+#         colnames = [desc[0] for desc in cur.description]
+#         global_df = pd.DataFrame(columns=colnames)
+#         print(f"Schema columns loaded: {global_df.columns.tolist()}")
+
+#         # Initialize filter_clause BEFORE the if block
+#         filter_clause = ""
+#         # Build WHERE clause
+#         if filter_options:
+#             where_clauses = []
+#             # for col, filters in filter_options.items():
+#             #     if col in global_df.columns: # Ensure the column exists in the table schema
+#             #         # Ensure filters_str is not empty
+#             #         valid_filters = [f for f in filters if f is not None]
+#             #         if valid_filters:
+#             #             filters_str = ', '.join(["'{}'".format(str(f).replace("'", "''")) for f in valid_filters]) # Convert to string before replace
+#             #             where_clauses.append(f'"{col}" IN ({filters_str})')
+#             #         else:
+#             #             print(f"Warning: No valid filters provided for column '{col}'. Skipping filter.")
+#             #     else:
+#             #         print(f"Warning: Filter column '{col}' not found in table '{table_name}' schema. Skipping filter.")
+#             for col, filters in filter_options.items():
+#                 matched_calc = next((calc for calc in calculationData or [] if calc.get("columnName") == col and calc.get("calculation")), None)
+#                 valid_filters = [f for f in filters if f is not None]
+#                 if not valid_filters:
+#                     continue
+
+#                 filters_str = ', '.join(["'{}'".format(str(f).replace("'", "''")) for f in valid_filters])
+
+#                 if matched_calc:
+#                     try:
+#                         raw_formula = matched_calc["calculation"].strip()
+#                         formula_sql = convert_calculation_to_sql(raw_formula, dataframe_columns=global_df.columns.tolist())
+#                         where_clauses.append(f'({formula_sql}) IN ({filters_str})')
+#                     except Exception as e:
+#                         print(f"Error parsing formula for filter column '{col}': {e}")
+#                 elif col in global_df.columns:
+#                     where_clauses.append(f'"{col}" IN ({filters_str})')
+#                 else:
+#                     print(f"Warning: Filter column '{col}' not found in table and not calculated. Skipping.")
+
+#             if where_clauses:
+#                 filter_clause = "WHERE " + " AND ".join(where_clauses)
+#             # else: filter_clause remains "" which is correct
+
+#         # Validate aggregation
+#         agg_func = {
+#             "sum": "SUM",
+#             "average": "AVG",
+#             "count": "COUNT",
+#             "maximum": "MAX",
+#             "minimum": "MIN"
+#         }.get(aggregation.lower())
+#         if not agg_func:
+#             raise ValueError(f"Unsupported aggregation type: {aggregation}")
+
+#         if not x_axis_columns:
+#             raise ValueError("x_axis_columns cannot be empty.")
+
+#         x_axis_exprs = []
+#         group_by_x_axis_aliases = [] # Store aliases for GROUP BY clause
+
+#         # Move X-axis processing outside any Y-axis loop
+#         for x_col in x_axis_columns:
+          
+#         # select_exprs = []
+#             for x_col in x_axis_columns:
+#                 matched_calc = next((calc for calc in calculationData or [] if calc.get("columnName") == x_col and calc.get("calculation")), None)
+            
+#                 if matched_calc:
+#                     raw_formula = matched_calc["calculation"].strip()
+#                     # raw_formula = calculationData["calculation"].strip()
+#                     formula_sql = convert_calculation_to_sql(raw_formula, dataframe_columns=global_df.columns.tolist())
+#                     alias_name = f"{x_col}_calculated"
+#                     x_axis_exprs.append(f'({formula_sql}) AS "{alias_name}"')
+#                     group_by_x_axis_aliases.append(f'"{alias_name}"')
+#                 else:
+#                     # Include normal column if not in calculation
+#                     x_axis_exprs.append(f'"{x_col}"')
+#                     group_by_x_axis_aliases.append(f'"{x_col}"')
+
+#         print("y_axis_columns", y_axis_columns)
+#         select_x_axis_str = ', '.join(x_axis_exprs)
+#         group_by_x_axis_str = ', '.join(group_by_x_axis_aliases)
+
+#         select_exprs = []
+#         # Y-axis processing loop
+#         for y_col in y_axis_columns:
+#             # if calculationData and y_col == calculationData.get("columnName") and calculationData.get("calculation"):
+#             matched_calc = next((calc for calc in calculationData or [] if calc.get("columnName") == y_col and calc.get("calculation")), None)
+            
+#             if matched_calc:
+#                 raw_formula = matched_calc["calculation"].strip()
+
+#                 # raw_formula = calculationData["calculation"].strip()
+#                 try:
+#                     formula_sql = convert_calculation_to_sql(raw_formula, dataframe_columns=global_df.columns.tolist())
+#                     alias_name = f"{y_col}_calculated"
+#                     print("formula_sql",formula_sql)
+#                     # Apply aggregation if not already present
+#                     if re.search(r'\b(SUM|AVG|COUNT|MAX|MIN)\b', formula_sql, re.IGNORECASE):
+#                         select_exprs.append(f'{formula_sql} AS "{alias_name}"')
+#                     else:
+#                         select_exprs.append(f'{agg_func}(({formula_sql})::numeric) AS "{alias_name}"')
+#                 except Exception as e:
+#                     raise ValueError(f"Error parsing formula for {y_col}: {e}")
+#             else:
+#                 if agg_func == "COUNT":
+#                     select_exprs.append(f'{agg_func}("{y_col}") AS "{y_col}"')
+#                 else:
+#                     select_exprs.append(f'{agg_func}("{y_col}"::numeric) AS "{y_col}"')
+
+        
+#         # Final SQL
+#         query = f"""
+#         SELECT {select_x_axis_str}, {", ".join(select_exprs)}
+#         FROM {table_name}
+#         {filter_clause}
+#         GROUP BY {group_by_x_axis_str};
+#         """
+#         print("Constructed Query:", cur.mogrify(query).decode('utf-8'))
+#         cur.execute(query)
+#         rows = cur.fetchall()
+#         print("rows", rows)
+#         return rows
+
+#     except Exception as e:
+#         print(f"An error occurred: {e}")
+#         raise # Re-raise the exception after printing
+#     finally:
+#         if cur:
+#             cur.close()
+#         if conn:
+#             conn.close()
+
+
+def fetch_data_for_duel(
+    table_name,
+    x_axis_columns,
+    filter_options,
+    y_axis_columns,
+    aggregation,
+    db_nameeee,
+    selectedUser,
+    calculationData=None,
+    dateGranularity=None
+):
+    import pandas as pd
+    import psycopg2
+    import re
+
+    print("data====================", table_name, x_axis_columns, filter_options, y_axis_columns,
+          aggregation, db_nameeee, selectedUser, calculationData, dateGranularity)
+
+    try:
+        conn = get_db_connection_or_path(selectedUser, db_nameeee)
         cur = conn.cursor()
 
-        # Populate global_df.columns with actual column names from the table
-        # This is crucial for formula parsing functions to know valid column names.
-        global global_df
-        cur.execute(f"SELECT * FROM {table_name} LIMIT 0") # Limit 0 to get schema without fetching data
+        # Load schema for calculation parsing
+        cur.execute(f"SELECT * FROM {table_name} LIMIT 0")
         colnames = [desc[0] for desc in cur.description]
         global_df = pd.DataFrame(columns=colnames)
         print(f"Schema columns loaded: {global_df.columns.tolist()}")
 
-        # Initialize filter_clause BEFORE the if block
+        # ---------------------- DATE GRANULARITY (SQL-BASED) ----------------------
+        def build_date_granularity_sql(col, gran):
+            g = gran.lower()
+            alias = f"{col}_{g}"
+
+            if g == "year":
+                return f"EXTRACT(YEAR FROM \"{col}\")::text AS \"{alias}\"", f"\"{alias}\""
+
+            elif g == "quarter":
+                return f"'Q' || EXTRACT(QUARTER FROM \"{col}\") AS \"{alias}\"", f"\"{alias}\""
+
+            elif g == "month":
+                return f"TO_CHAR(\"{col}\", 'Month') AS \"{alias}\"", f"\"{alias}\""
+
+            elif g == "week":
+                return f"'Week ' || EXTRACT(WEEK FROM \"{col}\") AS \"{alias}\"", f"\"{alias}\""
+
+            elif g == "day":
+                return f"\"{col}\"::date AS \"{alias}\"", f"\"{alias}\""
+
+            else:
+                raise ValueError(f"Unsupported date granularity: {gran}")
+
+        # ---------------------- FILTER CLAUSE ----------------------
         filter_clause = ""
-        # Build WHERE clause
         if filter_options:
             where_clauses = []
-            # for col, filters in filter_options.items():
-            #     if col in global_df.columns: # Ensure the column exists in the table schema
-            #         # Ensure filters_str is not empty
-            #         valid_filters = [f for f in filters if f is not None]
-            #         if valid_filters:
-            #             filters_str = ', '.join(["'{}'".format(str(f).replace("'", "''")) for f in valid_filters]) # Convert to string before replace
-            #             where_clauses.append(f'"{col}" IN ({filters_str})')
-            #         else:
-            #             print(f"Warning: No valid filters provided for column '{col}'. Skipping filter.")
-            #     else:
-            #         print(f"Warning: Filter column '{col}' not found in table '{table_name}' schema. Skipping filter.")
+
             for col, filters in filter_options.items():
-                matched_calc = next((calc for calc in calculationData or [] if calc.get("columnName") == col and calc.get("calculation")), None)
+                if not filters:
+                    continue
+
                 valid_filters = [f for f in filters if f is not None]
                 if not valid_filters:
                     continue
 
-                filters_str = ', '.join(["'{}'".format(str(f).replace("'", "''")) for f in valid_filters])
+                filters_str = ", ".join(["'{}'".format(str(f).replace("'", "''")) for f in valid_filters])
+
+                matched_calc = next(
+                    (calc for calc in (calculationData or []) if calc.get("columnName") == col and calc.get("calculation")),
+                    None
+                )
 
                 if matched_calc:
-                    try:
-                        raw_formula = matched_calc["calculation"].strip()
-                        formula_sql = convert_calculation_to_sql(raw_formula, dataframe_columns=global_df.columns.tolist())
-                        where_clauses.append(f'({formula_sql}) IN ({filters_str})')
-                    except Exception as e:
-                        print(f"Error parsing formula for filter column '{col}': {e}")
+                    formula_sql = convert_calculation_to_sql(
+                        matched_calc["calculation"].strip(),
+                        dataframe_columns=global_df.columns.tolist()
+                    )
+                    where_clauses.append(f"({formula_sql}) IN ({filters_str})")
+
                 elif col in global_df.columns:
-                    where_clauses.append(f'"{col}" IN ({filters_str})')
-                else:
-                    print(f"Warning: Filter column '{col}' not found in table and not calculated. Skipping.")
+                    where_clauses.append(f"\"{col}\" IN ({filters_str})")
 
             if where_clauses:
                 filter_clause = "WHERE " + " AND ".join(where_clauses)
-            # else: filter_clause remains "" which is correct
 
-        # Validate aggregation
+        # ---------------------- AGGREGATION ----------------------
         agg_func = {
             "sum": "SUM",
             "average": "AVG",
@@ -2058,88 +2233,109 @@ def fetch_data_for_duel(table_name, x_axis_columns, filter_options, y_axis_colum
             "maximum": "MAX",
             "minimum": "MIN"
         }.get(aggregation.lower())
-        if not agg_func:
-            raise ValueError(f"Unsupported aggregation type: {aggregation}")
 
-        if not x_axis_columns:
+        if not agg_func:
+            raise ValueError(f"Unsupported aggregation: {aggregation}")
+
+        # ---------------------- X-AXIS EXPRESSIONS ----------------------
+        x_axis_exprs = []
+        group_by_aliases = []
+
+        for x_col in x_axis_columns:
+            # If date granularity applies
+            if dateGranularity and x_col in dateGranularity:
+                gran = dateGranularity[x_col]
+                print(f"Applying date granularity: {x_col} -> {gran}")
+
+                expr, alias = build_date_granularity_sql(x_col, gran)
+                x_axis_exprs.append(expr)
+                group_by_aliases.append(alias)
+                continue
+
+            # Otherwise normal column
+            matched_calc = next(
+                (calc for calc in (calculationData or []) if calc.get("columnName") == x_col and calc.get("calculation")),
+                None
+            )
+
+            if matched_calc:
+                formula_sql = convert_calculation_to_sql(
+                    matched_calc["calculation"].strip(),
+                    dataframe_columns=global_df.columns.tolist()
+                )
+                alias = f"{x_col}_calculated"
+                x_axis_exprs.append(f"({formula_sql}) AS \"{alias}\"")
+                group_by_aliases.append(f"\"{alias}\"")
+            else:
+                x_axis_exprs.append(f"\"{x_col}\"")
+                group_by_aliases.append(f"\"{x_col}\"")
+
+        if not x_axis_exprs:
             raise ValueError("x_axis_columns cannot be empty.")
 
-        x_axis_exprs = []
-        group_by_x_axis_aliases = [] # Store aliases for GROUP BY clause
-
-        # Move X-axis processing outside any Y-axis loop
-        for x_col in x_axis_columns:
-          
-        # select_exprs = []
-            for x_col in x_axis_columns:
-                matched_calc = next((calc for calc in calculationData or [] if calc.get("columnName") == x_col and calc.get("calculation")), None)
-            
-                if matched_calc:
-                    raw_formula = matched_calc["calculation"].strip()
-                    # raw_formula = calculationData["calculation"].strip()
-                    formula_sql = convert_calculation_to_sql(raw_formula, dataframe_columns=global_df.columns.tolist())
-                    alias_name = f"{x_col}_calculated"
-                    x_axis_exprs.append(f'({formula_sql}) AS "{alias_name}"')
-                    group_by_x_axis_aliases.append(f'"{alias_name}"')
-                else:
-                    # Include normal column if not in calculation
-                    x_axis_exprs.append(f'"{x_col}"')
-                    group_by_x_axis_aliases.append(f'"{x_col}"')
-
-        print("y_axis_columns", y_axis_columns)
-        select_x_axis_str = ', '.join(x_axis_exprs)
-        group_by_x_axis_str = ', '.join(group_by_x_axis_aliases)
-
+        # ---------------------- Y-AXIS EXPRESSIONS ----------------------
         select_exprs = []
-        # Y-axis processing loop
+
         for y_col in y_axis_columns:
-            # if calculationData and y_col == calculationData.get("columnName") and calculationData.get("calculation"):
-            matched_calc = next((calc for calc in calculationData or [] if calc.get("columnName") == y_col and calc.get("calculation")), None)
-            
+
+            # detect datatype based on sample row
+            cur.execute(f'SELECT "{y_col}" FROM {table_name} LIMIT 1')
+            sample_value = cur.fetchone()[0]
+            is_numeric = True
+            try:
+                float(sample_value)
+            except Exception:
+                is_numeric = False
+
+            matched_calc = next(
+                (calc for calc in (calculationData or []) if calc.get("columnName") == y_col and calc.get("calculation")),
+                None
+            )
+
             if matched_calc:
-                raw_formula = matched_calc["calculation"].strip()
+                formula_sql = convert_calculation_to_sql(
+                    matched_calc["calculation"].strip(),
+                    dataframe_columns=global_df.columns.tolist()
+                )
+                alias = f"{y_col}_calculated"
 
-                # raw_formula = calculationData["calculation"].strip()
-                try:
-                    formula_sql = convert_calculation_to_sql(raw_formula, dataframe_columns=global_df.columns.tolist())
-                    alias_name = f"{y_col}_calculated"
-                    print("formula_sql",formula_sql)
-                    # Apply aggregation if not already present
-                    if re.search(r'\b(SUM|AVG|COUNT|MAX|MIN)\b', formula_sql, re.IGNORECASE):
-                        select_exprs.append(f'{formula_sql} AS "{alias_name}"')
-                    else:
-                        select_exprs.append(f'{agg_func}(({formula_sql})::numeric) AS "{alias_name}"')
-                except Exception as e:
-                    raise ValueError(f"Error parsing formula for {y_col}: {e}")
-            else:
-                if agg_func == "COUNT":
-                    select_exprs.append(f'{agg_func}("{y_col}") AS "{y_col}"')
+                if re.search(r"\b(SUM|AVG|COUNT|MAX|MIN)\b", formula_sql, re.IGNORECASE):
+                    select_exprs.append(f"{formula_sql} AS \"{alias}\"")
                 else:
-                    select_exprs.append(f'{agg_func}("{y_col}"::numeric) AS "{y_col}"')
+                    if is_numeric:
+                        select_exprs.append(f"{agg_func}(({formula_sql})::numeric) AS \"{alias}\"")
+                    else:
+                        select_exprs.append(f"COUNT(({formula_sql})) AS \"{alias}\"")
 
-        
-        # Final SQL
+            else:
+                if is_numeric:
+                    select_exprs.append(f"{agg_func}(\"{y_col}\"::numeric) AS \"{y_col}\"")
+                else:
+                    select_exprs.append(f"COUNT(\"{y_col}\") AS \"{y_col}\"")
+
+        # ---------------------- FINAL QUERY ----------------------
         query = f"""
-        SELECT {select_x_axis_str}, {", ".join(select_exprs)}
+        SELECT {', '.join(x_axis_exprs)}, {', '.join(select_exprs)}
         FROM {table_name}
         {filter_clause}
-        GROUP BY {group_by_x_axis_str};
+        GROUP BY {', '.join(group_by_aliases)};
         """
-        print("Constructed Query:", cur.mogrify(query).decode('utf-8'))
+
+        print("Constructed Query:", cur.mogrify(query).decode("utf-8"))
+
         cur.execute(query)
         rows = cur.fetchall()
-        print("rows", rows)
         return rows
 
     except Exception as e:
-        print(f"An error occurred: {e}")
-        raise # Re-raise the exception after printing
+        print("❌ Error:", e)
+        raise
+
     finally:
         if cur:
             cur.close()
         if conn:
             conn.close()
-
 
 import psycopg2
 import pandas as pd
@@ -2477,21 +2673,156 @@ def replace_brackets(expr: str) -> str:
     return re.sub(r'\[([^\]]+)\]', r'"\1"::numeric', expr)
 
 
-def fetch_data_for_duel_bar(table_name, x_axis_columns, filter_options, y_axis_columns, aggregation, db_nameeee, selectedUser, calculationData=None):
-    # print("data====================", table_name, x_axis_columns, filter_options, y_axis_columns, aggregation, db_nameeee, selectedUser)
+# def fetch_data_for_duel_bar(table_name, x_axis_columns, filter_options, y_axis_columns, aggregation, db_nameeee, selectedUser, calculationData=None,dateGranularity=None):
+#     # print("data====================", table_name, x_axis_columns, filter_options, y_axis_columns, aggregation, db_nameeee, selectedUser)
+#     print("data====================", dateGranularity)
+#     conn = get_db_connection_or_path(selectedUser, db_nameeee)
+#     cur = conn.cursor()
+#     global global_df
+#     cur.execute(f"SELECT * FROM {table_name} LIMIT 0") # Limit 0 to get schema without fetching data
+#     colnames = [desc[0] for desc in cur.description]
+#     global_df = pd.DataFrame(columns=colnames)
+#     print(f"Schema columns loaded: {global_df.columns.tolist()}")
+
+
+#     # Format x-axis
+#     x_axis_columns_str = ', '.join(f'"{col}"' for col in x_axis_columns)
+
+#     # Get aggregation function
+#     agg_func = {
+#         "sum": "SUM",
+#         "average": "AVG",
+#         "count": "COUNT",
+#         "maximum": "MAX",
+#         "minimum": "MIN"
+#     }.get(aggregation.lower())
+#     if not agg_func:
+#         raise ValueError(f"Unsupported aggregation type: {aggregation}")
+
+#     # Build WHERE clause
+#     filter_clause = ""
+#     if filter_options:
+#         where_clauses = []
+#         # for col, filters in filter_options.items():
+#         #     filters_str = ', '.join(f"'{val}'" for val in filters if val is not None)
+#         #     where_clauses.append(f'"{col}" IN ({filters_str})')
+#         for col, filters in filter_options.items():
+#             matched_calc = next((calc for calc in calculationData or [] if calc.get("columnName") == col and calc.get("calculation")), None)
+#             # filters_str = ', '.join(f"'{val}'" for val in filters if val is not None)
+#             filters_str = ', '.join("'" + str(val).replace("'", "''") + "'" for val in filters if val is not None)
+
+#             if matched_calc:
+#                 raw_formula = matched_calc["calculation"].strip()
+#                 formula_sql = convert_calculation_to_sql(raw_formula, dataframe_columns=global_df.columns.tolist())
+#                 where_clauses.append(f'({formula_sql}) IN ({filters_str})')
+#             else:
+#                 where_clauses.append(f'"{col}" IN ({filters_str})')
+
+#         if where_clauses:
+#             filter_clause = "WHERE " + " AND ".join(where_clauses)
+
+#     y_axis_exprs = []
+
+#     for y_col in y_axis_columns:
+#             # if calculationData and y_col == calculationData.get("columnName") and calculationData.get("calculation"):
+#             matched_calc = next((calc for calc in calculationData or [] if calc.get("columnName") == y_col and calc.get("calculation")), None)
+            
+#             if matched_calc:
+#                 raw_formula = matched_calc["calculation"].strip()
+#                 # raw_formula = calculationData["calculation"].strip()
+#                 try:
+#                     formula_sql = convert_calculation_to_sql(raw_formula, dataframe_columns=global_df.columns.tolist())
+#                     alias_name = f"{y_col}"
+#                     print("formula_sql",formula_sql)
+#                     # Apply aggregation if not already present
+#                     if re.search(r'\b(SUM|AVG|COUNT|MAX|MIN)\b', formula_sql, re.IGNORECASE):
+#                         y_axis_exprs.append(f'{formula_sql} AS "{alias_name}"')
+#                     else:
+#                         y_axis_exprs.append(f'{agg_func}(({formula_sql})::numeric) AS "{alias_name}"')
+#                 except Exception as e:
+#                     raise ValueError(f"Error parsing formula for {y_col}: {e}")
+#             else:
+#                 if agg_func == "COUNT":
+#                     y_axis_exprs.append(f'{agg_func}("{y_col}") AS "{y_col}"')
+#                 else:
+#                     y_axis_exprs.append(f'{agg_func}("{y_col}"::numeric) AS "{y_col}"')
+#     x_axis_exprs = []
+#     for x_col in x_axis_columns:
+       
+        
+#             # if calculationData and x_col == calculationData.get("columnName") and calculationData.get("calculation"):
+#             matched_calc = next((calc for calc in calculationData or [] if calc.get("columnName") == x_col and calc.get("calculation")), None)
+    
+#             if matched_calc:
+#                 raw_formula = matched_calc["calculation"].strip()
+#                 # raw_formula = calculationData["calculation"].strip()
+#                 formula_sql = convert_calculation_to_sql(raw_formula, dataframe_columns=global_df.columns.tolist())
+#                 # alias_name = f"{x_col}_calculated"
+#                 # x_axis_exprs.append(f'({formula_sql}) AS "{alias_name}"')
+#                 x_axis_exprs.append(f'({formula_sql}) AS "{x_col}"')
+
+                
+#             else:
+#                     # Include normal column if not in calculation
+#                 x_axis_exprs.append(f'"{x_col}"')
+                   
+
+
+    
+#     select_x_axis_str = ', '.join(x_axis_exprs)
+#     # group_by_x_axis_str = ', '.join([f'"{col}_calculated"' if col == calculationData.get("columnName") and calculationData.get("calculation") else f'"{col}"' for col in x_axis_columns])
+#     # group_by_x_axis_str = ', '.join([
+#     #     f'"{col}_calculated"' if isinstance(calculationData, dict) and col == calculationData.get("columnName") and calculationData.get("calculation") else f'"{col}"'
+#     #     for col in x_axis_columns
+#     # ])
+#     # group_by_x_axis_str = ', '.join([
+#     #     f'"{col}_calculated"' if any(calc.get("columnName") == col and calc.get("calculation") for calc in calculationData or []) else f'"{col}"'
+#     #     for col in x_axis_columns
+#     # ])
+#     group_by_x_axis_str = ', '.join(f'"{col}"' for col in x_axis_columns)
+
+
+
+#     # Final SQL
+#     query = f"""
+#     SELECT {select_x_axis_str}, {', '.join(y_axis_exprs)}
+#     FROM {table_name}
+#     {filter_clause}
+#     GROUP BY {group_by_x_axis_str};
+#     """
+
+#     print("Constructed Query:", cur.mogrify(query).decode("utf-8"))
+#     cur.execute(query)
+#     rows = cur.fetchall()
+#     cur.close()
+#     conn.close()
+#     # print("Rows from database:", rows)
+#     return rows
+def fetch_data_for_duel_bar(
+    table_name,
+    x_axis_columns,
+    filter_options,
+    y_axis_columns,
+    aggregation,
+    db_nameeee,
+    selectedUser,
+    calculationData=None,
+    dateGranularity=None
+):
+    import pandas as pd
+    import psycopg2
+    import re
+
     conn = get_db_connection_or_path(selectedUser, db_nameeee)
     cur = conn.cursor()
-    global global_df
-    cur.execute(f"SELECT * FROM {table_name} LIMIT 0") # Limit 0 to get schema without fetching data
+
+    # Load schema
+    cur.execute(f"SELECT * FROM {table_name} LIMIT 0")
     colnames = [desc[0] for desc in cur.description]
     global_df = pd.DataFrame(columns=colnames)
     print(f"Schema columns loaded: {global_df.columns.tolist()}")
 
-
-    # Format x-axis
-    x_axis_columns_str = ', '.join(f'"{col}"' for col in x_axis_columns)
-
-    # Get aggregation function
+    # ------------------------- AGG FUNCTION -------------------------
     agg_func = {
         "sum": "SUM",
         "average": "AVG",
@@ -2499,108 +2830,148 @@ def fetch_data_for_duel_bar(table_name, x_axis_columns, filter_options, y_axis_c
         "maximum": "MAX",
         "minimum": "MIN"
     }.get(aggregation.lower())
+
     if not agg_func:
         raise ValueError(f"Unsupported aggregation type: {aggregation}")
 
-    # Build WHERE clause
+    # ------------------------- DATE GRANULARITY -------------------------
+    def build_date_granularity_sql(col, gran):
+        g = gran.lower()
+        alias = f"{col}_{g}"
+
+        if g == "year":
+            return f"EXTRACT(YEAR FROM \"{col}\")::text AS \"{alias}\"", alias
+        elif g == "quarter":
+            return f"'Q' || EXTRACT(QUARTER FROM \"{col}\") AS \"{alias}\"", alias
+        elif g == "month":
+            return f"TO_CHAR(\"{col}\", 'Month') AS \"{alias}\"", alias
+        elif g == "week":
+            return f"'Week ' || EXTRACT(WEEK FROM \"{col}\") AS \"{alias}\"", alias
+        elif g == "day":
+            return f"\"{col}\"::date AS \"{alias}\"", alias
+        else:
+            raise ValueError(f"Unsupported date granularity: {gran}")
+
+    # ------------------------- WHERE FILTERS -------------------------
     filter_clause = ""
     if filter_options:
         where_clauses = []
-        # for col, filters in filter_options.items():
-        #     filters_str = ', '.join(f"'{val}'" for val in filters if val is not None)
-        #     where_clauses.append(f'"{col}" IN ({filters_str})')
+
         for col, filters in filter_options.items():
-            matched_calc = next((calc for calc in calculationData or [] if calc.get("columnName") == col and calc.get("calculation")), None)
-            # filters_str = ', '.join(f"'{val}'" for val in filters if val is not None)
-            filters_str = ', '.join("'" + str(val).replace("'", "''") + "'" for val in filters if val is not None)
+
+            matched_calc = next(
+                (calc for calc in (calculationData or []) if calc.get("columnName") == col and calc.get("calculation")),
+                None
+            )
+
+            valid_filters = [f for f in filters if f is not None]
+            filters_str = ", ".join("'" + str(v).replace("'", "''") + "'" for v in valid_filters)
 
             if matched_calc:
-                raw_formula = matched_calc["calculation"].strip()
-                formula_sql = convert_calculation_to_sql(raw_formula, dataframe_columns=global_df.columns.tolist())
-                where_clauses.append(f'({formula_sql}) IN ({filters_str})')
-            else:
-                where_clauses.append(f'"{col}" IN ({filters_str})')
+                fsql = convert_calculation_to_sql(
+                    matched_calc["calculation"].strip(),
+                    dataframe_columns=global_df.columns.tolist()
+                )
+                where_clauses.append(f"({fsql}) IN ({filters_str})")
+
+            elif col in global_df.columns:
+                where_clauses.append(f"\"{col}\" IN ({filters_str})")
 
         if where_clauses:
             filter_clause = "WHERE " + " AND ".join(where_clauses)
 
+    # ------------------------- Y-AXIS EXPRESSIONS -------------------------
     y_axis_exprs = []
 
     for y_col in y_axis_columns:
-            # if calculationData and y_col == calculationData.get("columnName") and calculationData.get("calculation"):
-            matched_calc = next((calc for calc in calculationData or [] if calc.get("columnName") == y_col and calc.get("calculation")), None)
-            
-            if matched_calc:
-                raw_formula = matched_calc["calculation"].strip()
-                # raw_formula = calculationData["calculation"].strip()
-                try:
-                    formula_sql = convert_calculation_to_sql(raw_formula, dataframe_columns=global_df.columns.tolist())
-                    alias_name = f"{y_col}"
-                    print("formula_sql",formula_sql)
-                    # Apply aggregation if not already present
-                    if re.search(r'\b(SUM|AVG|COUNT|MAX|MIN)\b', formula_sql, re.IGNORECASE):
-                        y_axis_exprs.append(f'{formula_sql} AS "{alias_name}"')
-                    else:
-                        y_axis_exprs.append(f'{agg_func}(({formula_sql})::numeric) AS "{alias_name}"')
-                except Exception as e:
-                    raise ValueError(f"Error parsing formula for {y_col}: {e}")
+        matched_calc = next(
+            (calc for calc in (calculationData or []) if calc.get("columnName") == y_col and calc.get("calculation")),
+            None
+        )
+
+        # Detect numeric values
+        cur.execute(f'SELECT "{y_col}" FROM {table_name} LIMIT 1')
+        sample_value = cur.fetchone()[0]
+        is_numeric = True
+        try:
+            float(sample_value)
+        except:
+            is_numeric = False
+
+        if matched_calc:
+            formula_sql = convert_calculation_to_sql(
+                matched_calc["calculation"].strip(),
+                dataframe_columns=global_df.columns.tolist()
+            )
+
+            alias = f"{y_col}"
+
+            if re.search(r"\b(SUM|AVG|COUNT|MAX|MIN)\b", formula_sql, re.IGNORECASE):
+                y_axis_exprs.append(f"{formula_sql} AS \"{alias}\"")
             else:
-                if agg_func == "COUNT":
-                    y_axis_exprs.append(f'{agg_func}("{y_col}") AS "{y_col}"')
+                if is_numeric:
+                    y_axis_exprs.append(f"{agg_func}(({formula_sql})::numeric) AS \"{alias}\"")
                 else:
-                    y_axis_exprs.append(f'{agg_func}("{y_col}"::numeric) AS "{y_col}"')
-    x_axis_exprs = []
-    for x_col in x_axis_columns:
-       
-        
-            # if calculationData and x_col == calculationData.get("columnName") and calculationData.get("calculation"):
-            matched_calc = next((calc for calc in calculationData or [] if calc.get("columnName") == x_col and calc.get("calculation")), None)
-    
-            if matched_calc:
-                raw_formula = matched_calc["calculation"].strip()
-                # raw_formula = calculationData["calculation"].strip()
-                formula_sql = convert_calculation_to_sql(raw_formula, dataframe_columns=global_df.columns.tolist())
-                # alias_name = f"{x_col}_calculated"
-                # x_axis_exprs.append(f'({formula_sql}) AS "{alias_name}"')
-                x_axis_exprs.append(f'({formula_sql}) AS "{x_col}"')
+                    y_axis_exprs.append(f"COUNT(({formula_sql})) AS \"{alias}\"")
 
-                
+        else:
+            if is_numeric:
+                y_axis_exprs.append(f"{agg_func}(\"{y_col}\"::numeric) AS \"{y_col}\"")
             else:
-                    # Include normal column if not in calculation
-                x_axis_exprs.append(f'"{x_col}"')
-                   
+                y_axis_exprs.append(f"COUNT(\"{y_col}\") AS \"{y_col}\"")
 
+    # ------------------------- X-AXIS EXPRESSIONS -------------------------
+    x_axis_exprs = []
+    group_by_aliases = []
 
-    
-    select_x_axis_str = ', '.join(x_axis_exprs)
-    # group_by_x_axis_str = ', '.join([f'"{col}_calculated"' if col == calculationData.get("columnName") and calculationData.get("calculation") else f'"{col}"' for col in x_axis_columns])
-    # group_by_x_axis_str = ', '.join([
-    #     f'"{col}_calculated"' if isinstance(calculationData, dict) and col == calculationData.get("columnName") and calculationData.get("calculation") else f'"{col}"'
-    #     for col in x_axis_columns
-    # ])
-    # group_by_x_axis_str = ', '.join([
-    #     f'"{col}_calculated"' if any(calc.get("columnName") == col and calc.get("calculation") for calc in calculationData or []) else f'"{col}"'
-    #     for col in x_axis_columns
-    # ])
-    group_by_x_axis_str = ', '.join(f'"{col}"' for col in x_axis_columns)
+    for x_col in x_axis_columns:
 
+        # DATE GRANULARITY
+        if dateGranularity and x_col in dateGranularity:
+            gran = dateGranularity[x_col]
+            print(f"Applying date granularity: {x_col} -> {gran}")
 
+            expr, alias = build_date_granularity_sql(x_col, gran)
+            x_axis_exprs.append(expr)
+            group_by_aliases.append(f"\"{alias}\"")
+            continue
 
-    # Final SQL
+        # CALCULATED X
+        matched_calc = next(
+            (calc for calc in (calculationData or []) if calc.get("columnName") == x_col and calc.get("calculation")),
+            None
+        )
+
+        if matched_calc:
+            formula_sql = convert_calculation_to_sql(
+                matched_calc["calculation"].strip(),
+                dataframe_columns=global_df.columns.tolist()
+            )
+            alias = f"{x_col}"
+            x_axis_exprs.append(f"({formula_sql}) AS \"{alias}\"")
+            group_by_aliases.append(f"\"{alias}\"")
+        else:
+            x_axis_exprs.append(f"\"{x_col}\"")
+            group_by_aliases.append(f"\"{x_col}\"")
+
+    # ------------------------- FINAL QUERY -------------------------
     query = f"""
-    SELECT {select_x_axis_str}, {', '.join(y_axis_exprs)}
+    SELECT {', '.join(x_axis_exprs)}, {', '.join(y_axis_exprs)}
     FROM {table_name}
     {filter_clause}
-    GROUP BY {group_by_x_axis_str};
+    GROUP BY {', '.join(group_by_aliases)};
     """
 
     print("Constructed Query:", cur.mogrify(query).decode("utf-8"))
+
     cur.execute(query)
     rows = cur.fetchall()
+
     cur.close()
     conn.close()
-    # print("Rows from database:", rows)
+
     return rows
+
 
 
 
