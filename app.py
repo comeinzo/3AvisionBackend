@@ -5602,80 +5602,111 @@ def receive_chart_details():
             #         "y_axis": y_axis,
             #          "optimizeData": optimizeData, 
             #     }), 200
-
             if aggregate == 'count':
                 print("Count aggregation detected")
-                
+
+                # apply calculations first (keeps original behavior)
                 df, x_axis, y_axis = apply_calculation_to_df(df, calculation_data, x_axis, y_axis)
-                
+
+                # ---------- DATE GRANULARITY (COUNT SECTION) ----------
+                dateGranularity = data.get("selectedFrequency", {})
+                if isinstance(dateGranularity, str):
+                    try:
+                        dateGranularity = json.loads(dateGranularity)
+                    except Exception:
+                        dateGranularity = {}
+
+                if dateGranularity and isinstance(dateGranularity, dict):
+                    for date_col, granularity in dateGranularity.items():
+                        if date_col in df.columns and date_col in x_axis:
+                            print(f"[COUNT] Applying granularity: {date_col} -> {granularity}")
+                            df[date_col] = pd.to_datetime(df[date_col], errors='coerce')
+                            g = granularity.lower()
+                            granularity_col = f"{date_col}_{g}"
+
+                            if g == "year":
+                                df[granularity_col] = df[date_col].dt.year.astype(str)
+                            elif g == "quarter":
+                                df[granularity_col] = "Q" + df[date_col].dt.quarter.astype(str)
+                            elif g == "month":
+                                df[granularity_col] = df[date_col].dt.month_name()
+                            elif g == "week":
+                                df[granularity_col] = "Week " + df[date_col].dt.isocalendar().week.astype(str)
+                            elif g == "day":
+                                df[granularity_col] = df[date_col].dt.strftime("%Y-%m-%d")
+                            else:
+                                raise ValueError(f"Unsupported granularity: {granularity}")
+
+                            # Replace x_axis entry with granularity column
+                            x_axis = [granularity_col if c == date_col else c for c in x_axis]
+                            print(f"[COUNT] Created granularity column: {granularity_col}")
+                            print(df[[date_col, granularity_col]].head())
+
                 # Parse the filter options
-                allowed_categories = json.loads(data.get('filter_options'))
+                allowed_categories = json.loads(data.get('filter_options')) if data.get('filter_options') else {}
                 print("allowed_categories====================", allowed_categories)
-                
+
                 # Apply filters to the dataframe BEFORE grouping
                 filtered_df = df.copy()
-                
+
                 # Apply each filter condition
                 for column, valid_values in allowed_categories.items():
                     if column in filtered_df.columns:
-                        # Filter the dataframe to only include rows where the column value is in valid_values
                         filtered_df = filtered_df[filtered_df[column].isin(valid_values)]
                         print(f"After filtering {column}: {len(filtered_df)} rows remaining")
                     else:
                         print(f"Warning: Column '{column}' not found in dataframe")
-                
+
                 print(f"Original dataframe rows: {len(df)}")
                 print(f"Filtered dataframe rows: {len(filtered_df)}")
-                
-                # Now group the filtered dataframe
+
+                # Now group the filtered dataframe (all rows)
                 grouped_df = filtered_df.groupby(x_axis[0]).size().reset_index(name="count")
                 print("Grouped DataFrame with all rows:", grouped_df)
-                
+
                 # For valid rows (non-null y_axis values)
                 filtered_df_valid = filtered_df[filtered_df[y_axis[0]].notnull()]
                 grouped_df_valid = filtered_df_valid.groupby(x_axis[0])[y_axis[0]].count().reset_index(name="count")
                 print("Grouped DataFrame with valid rows:", grouped_df_valid)
-                
+
                 chosen_grouped_df = grouped_df_valid
-                categories = chosen_grouped_df[x_axis[0]].tolist()
+
+                # Normalize categories to strings (handle Timestamps / Periods / tuples)
+                def normalize_cat(c):
+                    if isinstance(c, pd.Timestamp):
+                        return c.strftime("%Y-%m-%d")
+                    # If it's a tuple-like (e.g., ('January',)) take first element
+                    if isinstance(c, (list, tuple)) and len(c) == 1:
+                        return str(c[0])
+                    return str(c)
+
+                categories = [normalize_cat(c) for c in chosen_grouped_df[x_axis[0]].tolist()]
                 values = chosen_grouped_df["count"].tolist()
+
                 category_value_pairs = list(zip(categories, values))
-                optimized_categories = []
-                optimized_values = []
+                optimized_pairs = []
 
                 if optimizeData == "top10":
-                            # Sort by values in descending order and take top 10
                     sorted_pairs = sorted(category_value_pairs, key=lambda x: x[1], reverse=True)
                     optimized_pairs = sorted_pairs[:10]
-                            
                 elif optimizeData == "bottom10":
-                            # Sort by values in ascending order and take bottom 10
                     sorted_pairs = sorted(category_value_pairs, key=lambda x: x[1])
                     optimized_pairs = sorted_pairs[:10]
-                            
                 elif optimizeData == "both10":
-                            # Get bottom 5
                     sorted_asc = sorted(category_value_pairs, key=lambda x: x[1])
                     bottom5_pairs = sorted_asc[:5]
-                            
-                            # Get top 5
                     sorted_desc = sorted(category_value_pairs, key=lambda x: x[1], reverse=True)
                     top5_pairs = sorted_desc[:5]
-                            
-                            # Combine bottom 5 and top 5
                     optimized_pairs = bottom5_pairs + top5_pairs
-                            
                 else:
-                            # Default: return all filtered data
                     optimized_pairs = category_value_pairs
 
-                        # Separate back into categories and values
                 optimized_categories = [pair[0] for pair in optimized_pairs]
                 optimized_values = [pair[1] for pair in optimized_pairs]
-                
+
                 print("Final categories====================", categories)
                 print("Final values====================", values)
-                
+
                 connection.close()
                 description = f"{user_name} viewed the chart '{chart}' from table '{tableName}'."
                 log_activity(
@@ -5694,17 +5725,17 @@ def receive_chart_details():
                     "chart_heading": chart_heading,
                     "x_axis": x_axis,
                     "y_axis": y_axis,
-                    "optimizeData": optimizeData, 
+                    "optimizeData": optimizeData,
                 }), 200
 
-
+            # ---------- NON-COUNT AGGREGATIONS ----------
             else:
                 # if len(y_axis) == 2:
                 if chart_type == "duealChart":
-                    print("Dual y-axis chart detected") 
+                    print("Dual y-axis chart detected")
                     if 'OptimizationData' in locals() or 'OptimizationData' in globals():
                         df = pd.DataFrame(data, columns=[x_axis[0], 'series1', 'series2'])
-                            
+
                         if optimizeData == 'top10':
                             df = df.sort_values(by='series1', ascending=False).head(10)
                         elif optimizeData == 'bottom10':
@@ -5714,7 +5745,43 @@ def receive_chart_details():
                             bottom_df = df.sort_values(by='series1', ascending=True).head(5)
                             df = pd.concat([top_df, bottom_df])
 
+                    # apply calculations
                     df, x_axis, y_axis = apply_calculation_to_df(df, calculation_data, x_axis, y_axis)
+
+                    # ---------- DATE GRANULARITY (DUAL-AXIS SECTION) ----------
+                    dateGranularity = data.get("selectedFrequency", {})
+                    if isinstance(dateGranularity, str):
+                        try:
+                            dateGranularity = json.loads(dateGranularity)
+                        except Exception:
+                            dateGranularity = {}
+
+                    if dateGranularity and isinstance(dateGranularity, dict):
+                        for date_col, granularity in dateGranularity.items():
+                            if date_col in df.columns and date_col in x_axis:
+                                print(f"[DUAL] Applying granularity: {date_col} -> {granularity}")
+                                df[date_col] = pd.to_datetime(df[date_col], errors='coerce')
+                                g = granularity.lower()
+                                granularity_col = f"{date_col}_{g}"
+
+                                if g == "year":
+                                    df[granularity_col] = df[date_col].dt.year.astype(str)
+                                elif g == "quarter":
+                                    df[granularity_col] = "Q" + df[date_col].dt.quarter.astype(str)
+                                elif g == "month":
+                                    df[granularity_col] = df[date_col].dt.month_name()
+                                elif g == "week":
+                                    df[granularity_col] = "Week " + df[date_col].dt.isocalendar().week.astype(str)
+                                elif g == "day":
+                                    df[granularity_col] = df[date_col].dt.strftime("%Y-%m-%d")
+                                else:
+                                    raise ValueError(f"Unsupported granularity: {granularity}")
+
+                                x_axis = [granularity_col if c == date_col else c for c in x_axis]
+                                print(f"[DUAL] Created granularity column: {granularity_col}")
+                                print(df[[date_col, granularity_col]].head())
+
+                    # Convert times or numeric y-axes
                     for axis in y_axis:
                         try:
                             df[axis] = pd.to_datetime(df[axis], errors='raise', format='%H:%M:%S')
@@ -5725,20 +5792,18 @@ def receive_chart_details():
                     grouped_df = df.groupby(x_axis)[y_axis].agg(aggregate_py).reset_index()
                     print("Grouped DataFrame (dual y-axis): ", grouped_df.head())
 
-                    # categories = grouped_df[x_axis[0]].tolist()
-                    # categories = [category.strftime('%Y-%m-%d') for category in grouped_df[x_axis[0]]]
-                    categories = grouped_df[x_axis[0]].tolist()
+                    # Normalize categories list
+                    def normalize_cat_dual(c):
+                        if isinstance(c, pd.Timestamp):
+                            return c.strftime("%Y-%m-%d")
+                        if isinstance(c, (list, tuple)) and len(c) == 1:
+                            return str(c[0])
+                        return str(c)
 
-                    # Check if the elements are datetime objects before formatting
-                    if isinstance(categories[0], pd.Timestamp):  # Assumes at least one value is present
-                        categories = [category.strftime('%Y-%m-%d') for category in categories]
-                    else:
-                        categories = [str(category) for category in categories]  
+                    categories = [normalize_cat_dual(c) for c in grouped_df[x_axis[0]].tolist()]
 
-
-                    
-                    values1 = [float(value) for value in grouped_df[y_axis[0]]]  # Convert Decimal to float
-                    values2 = [float(value) for value in grouped_df[y_axis[1]]]  # Convert Decimal to float
+                    values1 = [float(value) for value in grouped_df[y_axis[0]]]
+                    values2 = [float(value) for value in grouped_df[y_axis[1]]]
                     print("duel axis categories====================", categories)
 
                     # Filter categories and values based on filter_options
@@ -5747,10 +5812,10 @@ def receive_chart_details():
                     filtered_values2 = []
 
                     # Extract the filter values dynamically (e.g., filter_options['region'])
-                    filter_values = list(filter_options.values())[0]  # Extract the first filter list dynamically
+                    filter_values = list(filter_options.values())[0] if filter_options else []
 
                     for category, value1, value2 in zip(categories, values1, values2):
-                        if category in filter_values:  # Dynamically check category
+                        if category in filter_values:
                             filtered_categories.append(category)
                             filtered_values1.append(value1)
                             filtered_values2.append(value2)
@@ -5758,7 +5823,6 @@ def receive_chart_details():
                     print("filtered_categories====================", filtered_categories)
                     print("filtered_values1====================", filtered_values1)
                     print("filtered_values2====================", filtered_values2)
-
 
                     connection.close()
                     description = f"{user_name} viewed the chart '{chart}' from table '{tableName}'."
@@ -5780,30 +5844,62 @@ def receive_chart_details():
                         "chart_type": chart_type,
                         "chart_heading": chart_heading,
                         "x_axis": x_axis,
-                         "optimizeData": optimizeData, 
+                        "optimizeData": optimizeData,
                     }), 200
+
                 if chart_type == "Butterfly":
-                    print("Dual y-axis chart detected") 
-                    
+                    print("Dual y-axis chart detected")
+
                     df, x_axis, y_axis = apply_calculation_to_df(df, calculation_data, x_axis, y_axis)
+
+                    # ---------- DATE GRANULARITY (BUTTERFLY SECTION) ----------
+                    dateGranularity = data.get("selectedFrequency", {})
+                    if isinstance(dateGranularity, str):
+                        try:
+                            dateGranularity = json.loads(dateGranularity)
+                        except Exception:
+                            dateGranularity = {}
+
+                    if dateGranularity and isinstance(dateGranularity, dict):
+                        for date_col, granularity in dateGranularity.items():
+                            if date_col in df.columns and date_col in x_axis:
+                                print(f"[BUTTERFLY] Applying granularity: {date_col} -> {granularity}")
+                                df[date_col] = pd.to_datetime(df[date_col], errors='coerce')
+                                g = granularity.lower()
+                                granularity_col = f"{date_col}_{g}"
+
+                                if g == "year":
+                                    df[granularity_col] = df[date_col].dt.year.astype(str)
+                                elif g == "quarter":
+                                    df[granularity_col] = "Q" + df[date_col].dt.quarter.astype(str)
+                                elif g == "month":
+                                    df[granularity_col] = df[date_col].dt.month_name()
+                                elif g == "week":
+                                    df[granularity_col] = "Week " + df[date_col].dt.isocalendar().week.astype(str)
+                                elif g == "day":
+                                    df[granularity_col] = df[date_col].dt.strftime("%Y-%m-%d")
+                                else:
+                                    raise ValueError(f"Unsupported granularity: {granularity}")
+
+                                x_axis = [granularity_col if c == date_col else c for c in x_axis]
+                                print(f"[BUTTERFLY] Created granularity column: {granularity_col}")
+                                print(df[[date_col, granularity_col]].head())
 
                     grouped_df = df.groupby(x_axis)[y_axis].agg(aggregate_py).reset_index()
                     print("Grouped DataFrame (dual y-axis): ", grouped_df.head())
 
-                    # categories = grouped_df[x_axis[0]].tolist()
-                    # categories = [category.strftime('%Y-%m-%d') for category in grouped_df[x_axis[0]]]
-                    categories = grouped_df[x_axis[0]].tolist()
+                    # Normalize categories
+                    def normalize_cat_bf(c):
+                        if isinstance(c, pd.Timestamp):
+                            return c.strftime("%Y-%m-%d")
+                        if isinstance(c, (list, tuple)) and len(c) == 1:
+                            return str(c[0])
+                        return str(c)
 
-                    # Check if the elements are datetime objects before formatting
-                    if isinstance(categories[0], pd.Timestamp):  # Assumes at least one value is present
-                        categories = [category.strftime('%Y-%m-%d') for category in categories]
-                    else:
-                        categories = [str(category) for category in categories]  
+                    categories = [normalize_cat_bf(c) for c in grouped_df[x_axis[0]].tolist()]
 
-
-                    
-                    values1 = [float(value) for value in grouped_df[y_axis[0]]]  # Convert Decimal to float
-                    values2 = [float(value) for value in grouped_df[y_axis[1]]]  # Convert Decimal to float
+                    values1 = [float(value) for value in grouped_df[y_axis[0]]]
+                    values2 = [float(value) for value in grouped_df[y_axis[1]]]
                     print("duel axis categories====================", categories)
 
                     # Filter categories and values based on filter_options
@@ -5812,10 +5908,10 @@ def receive_chart_details():
                     filtered_values2 = []
 
                     # Extract the filter values dynamically (e.g., filter_options['region'])
-                    filter_values = list(filter_options.values())[0]  # Extract the first filter list dynamically
+                    filter_values = list(filter_options.values())[0] if filter_options else []
 
                     for category, value1, value2 in zip(categories, values1, values2):
-                        if category in filter_values:  # Dynamically check category
+                        if category in filter_values:
                             filtered_categories.append(category)
                             filtered_values1.append(value1)
                             filtered_values2.append(value2)
@@ -5823,7 +5919,6 @@ def receive_chart_details():
                     print("filtered_categories====================", filtered_categories)
                     print("filtered_values1====================", filtered_values1)
                     print("filtered_values2====================", filtered_values2)
-
 
                     connection.close()
                     description = f"{user_name} viewed the chart '{chart}' from table '{tableName}'."
@@ -5845,106 +5940,518 @@ def receive_chart_details():
                         "chart_type": chart_type,
                         "chart_heading": chart_heading,
                         "x_axis": x_axis,
-                        "optimizeData": optimizeData, 
-                        "optimizeData": optimizeData, 
+                        "optimizeData": optimizeData,
                     }), 200
+
+            # if aggregate == 'count':
+            #     print("Count aggregation detected")
+                
+            #     df, x_axis, y_axis = apply_calculation_to_df(df, calculation_data, x_axis, y_axis)
+                
+            #     # Parse the filter options
+            #     allowed_categories = json.loads(data.get('filter_options'))
+            #     print("allowed_categories====================", allowed_categories)
+                
+            #     # Apply filters to the dataframe BEFORE grouping
+            #     filtered_df = df.copy()
+                
+            #     # Apply each filter condition
+            #     for column, valid_values in allowed_categories.items():
+            #         if column in filtered_df.columns:
+            #             # Filter the dataframe to only include rows where the column value is in valid_values
+            #             filtered_df = filtered_df[filtered_df[column].isin(valid_values)]
+            #             print(f"After filtering {column}: {len(filtered_df)} rows remaining")
+            #         else:
+            #             print(f"Warning: Column '{column}' not found in dataframe")
+                
+            #     print(f"Original dataframe rows: {len(df)}")
+            #     print(f"Filtered dataframe rows: {len(filtered_df)}")
+                
+            #     # Now group the filtered dataframe
+            #     grouped_df = filtered_df.groupby(x_axis[0]).size().reset_index(name="count")
+            #     print("Grouped DataFrame with all rows:", grouped_df)
+                
+            #     # For valid rows (non-null y_axis values)
+            #     filtered_df_valid = filtered_df[filtered_df[y_axis[0]].notnull()]
+            #     grouped_df_valid = filtered_df_valid.groupby(x_axis[0])[y_axis[0]].count().reset_index(name="count")
+            #     print("Grouped DataFrame with valid rows:", grouped_df_valid)
+                
+            #     chosen_grouped_df = grouped_df_valid
+            #     categories = chosen_grouped_df[x_axis[0]].tolist()
+            #     values = chosen_grouped_df["count"].tolist()
+            #     category_value_pairs = list(zip(categories, values))
+            #     optimized_categories = []
+            #     optimized_values = []
+
+            #     if optimizeData == "top10":
+            #                 # Sort by values in descending order and take top 10
+            #         sorted_pairs = sorted(category_value_pairs, key=lambda x: x[1], reverse=True)
+            #         optimized_pairs = sorted_pairs[:10]
+                            
+            #     elif optimizeData == "bottom10":
+            #                 # Sort by values in ascending order and take bottom 10
+            #         sorted_pairs = sorted(category_value_pairs, key=lambda x: x[1])
+            #         optimized_pairs = sorted_pairs[:10]
+                            
+            #     elif optimizeData == "both10":
+            #                 # Get bottom 5
+            #         sorted_asc = sorted(category_value_pairs, key=lambda x: x[1])
+            #         bottom5_pairs = sorted_asc[:5]
+                            
+            #                 # Get top 5
+            #         sorted_desc = sorted(category_value_pairs, key=lambda x: x[1], reverse=True)
+            #         top5_pairs = sorted_desc[:5]
+                            
+            #                 # Combine bottom 5 and top 5
+            #         optimized_pairs = bottom5_pairs + top5_pairs
+                            
+            #     else:
+            #                 # Default: return all filtered data
+            #         optimized_pairs = category_value_pairs
+
+            #             # Separate back into categories and values
+            #     optimized_categories = [pair[0] for pair in optimized_pairs]
+            #     optimized_values = [pair[1] for pair in optimized_pairs]
+                
+            #     print("Final categories====================", categories)
+            #     print("Final values====================", values)
+                
+            #     connection.close()
+            #     description = f"{user_name} viewed the chart '{chart}' from table '{tableName}'."
+            #     log_activity(
+            #         company_name=databaseName,
+            #         user_email=user_email,
+            #         action_type="View Chart",
+            #         table_name=tableName,
+            #         dashboard_name=chart,
+            #         description=description
+            #     )
+            #     return jsonify({
+            #         "message": "Chart details received successfully!",
+            #         "categories": optimized_categories,
+            #         "values": optimized_values,
+            #         "chart_type": chart_type,
+            #         "chart_heading": chart_heading,
+            #         "x_axis": x_axis,
+            #         "y_axis": y_axis,
+            #         "optimizeData": optimizeData, 
+            #     }), 200
+
+
+            # else:
+            #     # if len(y_axis) == 2:
+            #     if chart_type == "duealChart":
+            #         print("Dual y-axis chart detected") 
+            #         if 'OptimizationData' in locals() or 'OptimizationData' in globals():
+            #             df = pd.DataFrame(data, columns=[x_axis[0], 'series1', 'series2'])
+                            
+            #             if optimizeData == 'top10':
+            #                 df = df.sort_values(by='series1', ascending=False).head(10)
+            #             elif optimizeData == 'bottom10':
+            #                 df = df.sort_values(by='series1', ascending=True).head(10)
+            #             elif optimizeData == 'both5':
+            #                 top_df = df.sort_values(by='series1', ascending=False).head(5)
+            #                 bottom_df = df.sort_values(by='series1', ascending=True).head(5)
+            #                 df = pd.concat([top_df, bottom_df])
+
+            #         df, x_axis, y_axis = apply_calculation_to_df(df, calculation_data, x_axis, y_axis)
+            #         for axis in y_axis:
+            #             try:
+            #                 df[axis] = pd.to_datetime(df[axis], errors='raise', format='%H:%M:%S')
+            #                 df[axis] = df[axis].apply(lambda x: x.hour * 60 + x.minute)
+            #             except (ValueError, TypeError):
+            #                 df[axis] = pd.to_numeric(df[axis], errors='coerce')
+
+            #         grouped_df = df.groupby(x_axis)[y_axis].agg(aggregate_py).reset_index()
+            #         print("Grouped DataFrame (dual y-axis): ", grouped_df.head())
+
+            #         # categories = grouped_df[x_axis[0]].tolist()
+            #         # categories = [category.strftime('%Y-%m-%d') for category in grouped_df[x_axis[0]]]
+            #         categories = grouped_df[x_axis[0]].tolist()
+
+            #         # Check if the elements are datetime objects before formatting
+            #         if isinstance(categories[0], pd.Timestamp):  # Assumes at least one value is present
+            #             categories = [category.strftime('%Y-%m-%d') for category in categories]
+            #         else:
+            #             categories = [str(category) for category in categories]  
+
+
+                    
+            #         values1 = [float(value) for value in grouped_df[y_axis[0]]]  # Convert Decimal to float
+            #         values2 = [float(value) for value in grouped_df[y_axis[1]]]  # Convert Decimal to float
+            #         print("duel axis categories====================", categories)
+
+            #         # Filter categories and values based on filter_options
+            #         filtered_categories = []
+            #         filtered_values1 = []
+            #         filtered_values2 = []
+
+            #         # Extract the filter values dynamically (e.g., filter_options['region'])
+            #         filter_values = list(filter_options.values())[0]  # Extract the first filter list dynamically
+
+            #         for category, value1, value2 in zip(categories, values1, values2):
+            #             if category in filter_values:  # Dynamically check category
+            #                 filtered_categories.append(category)
+            #                 filtered_values1.append(value1)
+            #                 filtered_values2.append(value2)
+
+            #         print("filtered_categories====================", filtered_categories)
+            #         print("filtered_values1====================", filtered_values1)
+            #         print("filtered_values2====================", filtered_values2)
+
+
+            #         connection.close()
+            #         description = f"{user_name} viewed the chart '{chart}' from table '{tableName}'."
+            #         log_activity(
+            #             company_name=databaseName,
+            #             user_email=user_email,
+            #             action_type="View Chart",
+            #             table_name=tableName,
+            #             dashboard_name=chart,
+            #             description=description
+            #         )
+
+            #         # Return the filtered data for both series
+            #         return jsonify({
+            #             "message": "Chart details received successfully!",
+            #             "categories": filtered_categories,
+            #             "series1": filtered_values1,
+            #             "series2": filtered_values2,
+            #             "chart_type": chart_type,
+            #             "chart_heading": chart_heading,
+            #             "x_axis": x_axis,
+            #              "optimizeData": optimizeData, 
+            #         }), 200
+            #     if chart_type == "Butterfly":
+            #         print("Dual y-axis chart detected") 
+                    
+            #         df, x_axis, y_axis = apply_calculation_to_df(df, calculation_data, x_axis, y_axis)
+
+            #         grouped_df = df.groupby(x_axis)[y_axis].agg(aggregate_py).reset_index()
+            #         print("Grouped DataFrame (dual y-axis): ", grouped_df.head())
+
+            #         # categories = grouped_df[x_axis[0]].tolist()
+            #         # categories = [category.strftime('%Y-%m-%d') for category in grouped_df[x_axis[0]]]
+            #         categories = grouped_df[x_axis[0]].tolist()
+
+            #         # Check if the elements are datetime objects before formatting
+            #         if isinstance(categories[0], pd.Timestamp):  # Assumes at least one value is present
+            #             categories = [category.strftime('%Y-%m-%d') for category in categories]
+            #         else:
+            #             categories = [str(category) for category in categories]  
+
+
+                    
+            #         values1 = [float(value) for value in grouped_df[y_axis[0]]]  # Convert Decimal to float
+            #         values2 = [float(value) for value in grouped_df[y_axis[1]]]  # Convert Decimal to float
+            #         print("duel axis categories====================", categories)
+
+            #         # Filter categories and values based on filter_options
+            #         filtered_categories = []
+            #         filtered_values1 = []
+            #         filtered_values2 = []
+
+            #         # Extract the filter values dynamically (e.g., filter_options['region'])
+            #         filter_values = list(filter_options.values())[0]  # Extract the first filter list dynamically
+
+            #         for category, value1, value2 in zip(categories, values1, values2):
+            #             if category in filter_values:  # Dynamically check category
+            #                 filtered_categories.append(category)
+            #                 filtered_values1.append(value1)
+            #                 filtered_values2.append(value2)
+
+            #         print("filtered_categories====================", filtered_categories)
+            #         print("filtered_values1====================", filtered_values1)
+            #         print("filtered_values2====================", filtered_values2)
+
+
+            #         connection.close()
+            #         description = f"{user_name} viewed the chart '{chart}' from table '{tableName}'."
+            #         log_activity(
+            #             company_name=databaseName,
+            #             user_email=user_email,
+            #             action_type="View Chart",
+            #             table_name=tableName,
+            #             dashboard_name=chart,
+            #             description=description
+            #         )
+
+            #         # Return the filtered data for both series
+            #         return jsonify({
+            #             "message": "Chart details received successfully!",
+            #             "categories": filtered_categories,
+            #             "series1": filtered_values1,
+            #             "series2": filtered_values2,
+            #             "chart_type": chart_type,
+            #             "chart_heading": chart_heading,
+            #             "x_axis": x_axis,
+            #             "optimizeData": optimizeData, 
+            #             "optimizeData": optimizeData, 
+            #         }), 200
                 else:
                     
                   
 
-                    df, x_axis, y_axis = apply_calculation_to_df(df, calculation_data, x_axis, y_axis)
-                    grouped_df = df.groupby(x_axis[0])[y_axis].agg(aggregate_py).reset_index()
+                    # df, x_axis, y_axis = apply_calculation_to_df(df, calculation_data, x_axis, y_axis)
+                    # grouped_df = df.groupby(x_axis[0])[y_axis].agg(aggregate_py).reset_index()
 
-                    print("Grouped DataFrame: ", grouped_df.head())
+                    # print("Grouped DataFrame: ", grouped_df.head())
 
-                    categories = grouped_df[x_axis[0]].tolist()
-                    if isinstance(categories[0], pd.Timestamp):  # Assumes at least one value is present
-                        categories = [category.strftime('%Y-%m-%d') for category in categories]
-                    else:
-                        categories = [str(category) for category in categories]  
+                    # categories = grouped_df[x_axis[0]].tolist()
+                    # if isinstance(categories[0], pd.Timestamp):  # Assumes at least one value is present
+                    #     categories = [category.strftime('%Y-%m-%d') for category in categories]
+                    # else:
+                    #     categories = [str(category) for category in categories]  
 
-                    values = [float(value) for value in grouped_df[y_axis[0]]]  # Convert Decimal to float
+                    # values = [float(value) for value in grouped_df[y_axis[0]]]  # Convert Decimal to float
 
-                    print("categories====================22222", categories) 
-                    print("values====================22222", values)
-                    # allowed_categories = filter_options.get(x_axis[0], [])  # Get the list of valid categories
-                    allowed_categories = list(map(str, filter_options.get(x_axis[0], [])))
+                    # print("categories====================22222", categories) 
+                    # print("values====================22222", values)
+                    # # allowed_categories = filter_options.get(x_axis[0], [])  # Get the list of valid categories
+                    # allowed_categories = list(map(str, filter_options.get(x_axis[0], [])))
 
-                    filtered_categories = []
-                    filtered_values = []
+                    # filtered_categories = []
+                    # filtered_values = []
 
+                    # # for category, value in zip(categories, values):
+                    # #     # if category.strip() in allowed_categories:  # Ensure category matches the filter
+                    # #     if str(category).strip() in allowed_categories:
+
+                    # #         filtered_categories.append(category)
+                    # #         filtered_values.append(value)
+                    # #     else:
+                    # #         print(f"Category '{category}' not in filter_options[{x_axis[0]}]")
                     # for category, value in zip(categories, values):
-                    #     # if category.strip() in allowed_categories:  # Ensure category matches the filter
+                    #     print("Type of category:", type(category), "Value:", category)
                     #     if str(category).strip() in allowed_categories:
-
                     #         filtered_categories.append(category)
                     #         filtered_values.append(value)
                     #     else:
                     #         print(f"Category '{category}' not in filter_options[{x_axis[0]}]")
-                    for category, value in zip(categories, values):
-                        print("Type of category:", type(category), "Value:", category)
-                        if str(category).strip() in allowed_categories:
-                            filtered_categories.append(category)
-                            filtered_values.append(value)
-                        else:
-                            print(f"Category '{category}' not in filter_options[{x_axis[0]}]")
 
 
+                    # print("filtered_categories====================1111", filtered_categories)
+                    # print("filtered_values====================", filtered_values)
+
+                    # # Create a combined list of (category, value) pairs
+                    # category_value_pairs = list(zip(filtered_categories, filtered_values))
+
+                    # # Sort based on optimization strategy
+                    # optimized_categories = []
+                    # optimized_values = []
+
+                    # if optimizeData == "top10":
+                    #     # Sort by values in descending order and take top 10
+                    #     sorted_pairs = sorted(category_value_pairs, key=lambda x: x[1], reverse=True)
+                    #     optimized_pairs = sorted_pairs[:10]
+                        
+                    # elif optimizeData == "bottom10":
+                    #     # Sort by values in ascending order and take bottom 10
+                    #     sorted_pairs = sorted(category_value_pairs, key=lambda x: x[1])
+                    #     optimized_pairs = sorted_pairs[:10]
+                        
+                    # elif optimizeData == "both10":
+                    #     # Get bottom 5
+                    #     sorted_asc = sorted(category_value_pairs, key=lambda x: x[1])
+                    #     bottom5_pairs = sorted_asc[:5]
+                        
+                    #     # Get top 5
+                    #     sorted_desc = sorted(category_value_pairs, key=lambda x: x[1], reverse=True)
+                    #     top5_pairs = sorted_desc[:5]
+                        
+                    #     # Combine bottom 5 and top 5
+                    #     optimized_pairs = bottom5_pairs + top5_pairs
+                        
+                    # else:
+                    #     # Default: return all filtered data
+                    #     optimized_pairs = category_value_pairs
+
+                    # # Separate back into categories and values
+                    # optimized_categories = [pair[0] for pair in optimized_pairs]
+                    # optimized_values = [pair[1] for pair in optimized_pairs]
+
+                    # print(f"{optimizeData} optimized_categories====================", optimized_categories)
+                    # print(f"{optimizeData} optimized_values====================", optimized_values)
+
+                    # connection.close()
+                    # description = f"{user_name} viewed the chart '{chart}' from table '{tableName}'."
+                    # log_activity(
+                    #     company_name=databaseName,
+                    #     user_email=user_email,
+                    #     action_type="View Chart",
+                    #     table_name=tableName,
+                    #     dashboard_name=chart,
+                    #     description=description
+                    # )
+
+                    # # Return the optimized data
+                    # return jsonify({
+                    #     "message": "Chart details received successfully!",
+                    #     "categories": optimized_categories,
+                    #     "values": optimized_values,
+                    #     "chart_type": chart_type,
+                    #     "chart_heading": chart_heading,
+                    #     "tableName": tableName,
+                    #     "x_axis": x_axis,
+                    #     "optimizeData": optimizeData, 
+                    # }), 200
+                    # ----------------------------- START REPLACEMENT BLOCK -----------------------------
+
+                    # Convert selectedFrequency string → dict
+                    dateGranularity = data.get("selectedFrequency", {})
+                    if isinstance(dateGranularity, str):
+                        try:
+                            dateGranularity = json.loads(dateGranularity)
+                        except Exception:
+                            dateGranularity = {}
+
+                    # Apply calculations (existing behavior)
+                    df, x_axis, y_axis = apply_calculation_to_df(df, calculation_data, x_axis, y_axis)
+
+                    # ---------- DATE GRANULARITY PROCESSING ----------
+                    if dateGranularity and isinstance(dateGranularity, dict):
+                        for date_col, granularity in dateGranularity.items():
+                            if date_col in df.columns and date_col in x_axis:
+
+                                df[date_col] = pd.to_datetime(df[date_col], errors='coerce')
+                                g = granularity.lower()
+                                granularity_col = f"{date_col}_{g}"
+
+                                # ---- Proper formatting for each granularity ----
+                                if g == "year":
+                                    df[granularity_col] = df[date_col].dt.year.astype(str)   # "2023"
+
+                                elif g == "quarter":
+                                    df[granularity_col] = "Q" + df[date_col].dt.quarter.astype(str)   # "Q1"
+
+                                elif g == "month":
+                                    df[granularity_col] = df[date_col].dt.month_name()   # "January"
+
+                                elif g == "week":
+                                    df[granularity_col] = (
+                                        "Week " + df[date_col].dt.isocalendar().week.astype(str)
+                                    )   # "Week 15"
+
+                                elif g == "day":
+                                    df[granularity_col] = df[date_col].dt.strftime("%Y-%m-%d")
+
+                                else:
+                                    raise ValueError(f"Unsupported granularity: {granularity}")
+
+                                # Replace x-axis with new granularity column
+                                x_axis = [granularity_col if c == date_col else c for c in x_axis]
+
+                                print(f"Created granularity column: {granularity_col}")
+                                print(df[[date_col, granularity_col]].head())
+
+                    # ---------- BUILD FILTER OPTIONS ----------
+                    options = []
+                    for col in x_axis:
+                        if col in filter_options:
+                            options.extend(filter_options[col])
+                    options = list(map(str, options))
+
+                    # Apply filter if options exist
+                    if options:
+                        filtered_df = df[df[x_axis[0]].astype(str).isin(options)]
+                    else:
+                        filtered_df = df
+
+                    # ---------- GROUP ----------
+                    grouped_df = filtered_df.groupby(x_axis[0])[y_axis].agg(aggregate_py).reset_index()
+                    print("Grouped DataFrame:", grouped_df.head())
+
+                    # ---------- NORMALIZE CATEGORY ----------
+                    def normalize_date(category):
+                        if isinstance(category, pd.Timestamp):
+                            return category.strftime("%Y-%m-%d")
+                        return str(category)
+
+                    categories = [normalize_date(c) for c in grouped_df[x_axis[0]].tolist()]
+                    values = [float(v) for v in grouped_df[y_axis[0]]]
+
+                    print("categories====================22222", categories)
+                    print("values====================22222", values)
+
+                    # ---------- CORRECT allowed_categories BASED ON GRANULARITY ----------
+                    original_date_col = None
+                    if isinstance(dateGranularity, dict) and len(dateGranularity) > 0:
+                        original_date_col = list(dateGranularity.keys())[0]
+
+                    allowed_categories = []
+
+                    if original_date_col:
+                        raw_dates = filter_options.get(original_date_col, [])
+                        gran = dateGranularity.get(original_date_col, "").lower()
+
+                        for d in raw_dates:
+                            dt = pd.to_datetime(d, errors='coerce')
+                            if pd.isna(dt):
+                                continue
+
+                            if gran == "year":
+                                key = dt.to_period("Y").to_timestamp().strftime("%Y-%m-%d")
+                            elif gran == "quarter":
+                                key = dt.to_period("Q").to_timestamp().strftime("%Y-%m-%d")
+                            elif gran == "month":
+                                key = dt.to_period("M").to_timestamp().strftime("%Y-%m-%d")
+                            elif gran == "week":
+                                key = dt.to_period("W").to_timestamp().strftime("%Y-%m-%d")
+                            else:
+                                key = dt.date().strftime("%Y-%m-%d")
+
+                            if key not in allowed_categories:
+                                allowed_categories.append(key)
+
+                    else:
+                        allowed_categories = list(map(str, filter_options.get(x_axis[0], [])))
+
+                    # ---------- FINAL FILTER ----------
+                    if not allowed_categories:
+                        filtered_categories = categories
+                        filtered_values = values
+                    else:
+                        filtered_categories = []
+                        filtered_values = []
+                        for c, v in zip(categories, values):
+                            if str(c).strip() in allowed_categories:
+                                filtered_categories.append(c)
+                                filtered_values.append(v)
+
+                    print("allowed_categories:", allowed_categories)
                     print("filtered_categories====================1111", filtered_categories)
                     print("filtered_values====================", filtered_values)
 
-                    # Create a combined list of (category, value) pairs
-                    category_value_pairs = list(zip(filtered_categories, filtered_values))
-
-                    # Sort based on optimization strategy
-                    optimized_categories = []
-                    optimized_values = []
+                    # ---------- OPTIMIZATION ----------
+                    pairs = list(zip(filtered_categories, filtered_values))
 
                     if optimizeData == "top10":
-                        # Sort by values in descending order and take top 10
-                        sorted_pairs = sorted(category_value_pairs, key=lambda x: x[1], reverse=True)
-                        optimized_pairs = sorted_pairs[:10]
-                        
+                        pairs = sorted(pairs, key=lambda x: x[1], reverse=True)[:10]
                     elif optimizeData == "bottom10":
-                        # Sort by values in ascending order and take bottom 10
-                        sorted_pairs = sorted(category_value_pairs, key=lambda x: x[1])
-                        optimized_pairs = sorted_pairs[:10]
-                        
+                        pairs = sorted(pairs, key=lambda x: x[1])[:10]
                     elif optimizeData == "both10":
-                        # Get bottom 5
-                        sorted_asc = sorted(category_value_pairs, key=lambda x: x[1])
-                        bottom5_pairs = sorted_asc[:5]
-                        
-                        # Get top 5
-                        sorted_desc = sorted(category_value_pairs, key=lambda x: x[1], reverse=True)
-                        top5_pairs = sorted_desc[:5]
-                        
-                        # Combine bottom 5 and top 5
-                        optimized_pairs = bottom5_pairs + top5_pairs
-                        
-                    else:
-                        # Default: return all filtered data
-                        optimized_pairs = category_value_pairs
+                        bot = sorted(pairs, key=lambda x: x[1])[:5]
+                        top = sorted(pairs, key=lambda x: x[1], reverse=True)[:5]
+                        pairs = bot + top
 
-                    # Separate back into categories and values
-                    optimized_categories = [pair[0] for pair in optimized_pairs]
-                    optimized_values = [pair[1] for pair in optimized_pairs]
+                    optimized_categories = [p[0] for p in pairs]
+                    optimized_values = [p[1] for p in pairs]
 
                     print(f"{optimizeData} optimized_categories====================", optimized_categories)
                     print(f"{optimizeData} optimized_values====================", optimized_values)
 
+                    # ---------- CLEANUP ----------
                     connection.close()
-                    description = f"{user_name} viewed the chart '{chart}' from table '{tableName}'."
+
                     log_activity(
                         company_name=databaseName,
                         user_email=user_email,
                         action_type="View Chart",
                         table_name=tableName,
                         dashboard_name=chart,
-                        description=description
+                        description=f"{user_name} viewed the chart '{chart}' from '{tableName}'."
                     )
 
-                    # Return the optimized data
                     return jsonify({
                         "message": "Chart details received successfully!",
                         "categories": optimized_categories,
@@ -5953,8 +6460,11 @@ def receive_chart_details():
                         "chart_heading": chart_heading,
                         "tableName": tableName,
                         "x_axis": x_axis,
-                        "optimizeData": optimizeData, 
+                        "optimizeData": optimizeData,
                     }), 200
+
+                    # ------------------------------ END REPLACEMENT BLOCK ------------------------------
+
         else:
             print("Tree hierarchy chart detected")
             print("tableName====================", tableName)

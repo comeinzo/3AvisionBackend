@@ -1460,33 +1460,33 @@ def fetch_data(table_name, x_axis_columns, filter_options, y_axis_column, aggreg
                 
                 # Extract based on granularity
                 granularity_lower = granularity.lower()
-                # if granularity_lower == 'year':
-                #     temp_df[granularity_col] = temp_df[date_col].dt.year.astype(str)
-                # elif granularity_lower == 'quarter':
-                #     temp_df[granularity_col] = 'Q' + temp_df[date_col].dt.quarter.astype(str)
-                # elif granularity_lower == 'month':
-                #     # Extract month as full name (January, February, etc.)
-                #     temp_df[granularity_col] = temp_df[date_col].dt.strftime('%B')
-                # elif granularity_lower == 'week':
-                #     # Week number with year (e.g., "Week 1", "Week 2")
-                #     temp_df[granularity_col] = 'Week ' + temp_df[date_col].dt.isocalendar().week.astype(str)
-                # elif granularity_lower == 'day':
-                #     temp_df[granularity_col] = temp_df[date_col].dt.date.astype(str)
-                # FORMAT X-AXIS DATE PROPERLY AND MAKE SURE GROUPING WORKS
                 if granularity_lower == 'year':
-                    temp_df[granularity_col] = temp_df[date_col].dt.to_period("Y").dt.to_timestamp()
-
+                    temp_df[granularity_col] = temp_df[date_col].dt.year.astype(str)
                 elif granularity_lower == 'quarter':
-                    temp_df[granularity_col] = temp_df[date_col].dt.to_period("Q").dt.to_timestamp()
-
+                    temp_df[granularity_col] = 'Q' + temp_df[date_col].dt.quarter.astype(str)
                 elif granularity_lower == 'month':
-                    temp_df[granularity_col] = temp_df[date_col].dt.to_period("M").dt.to_timestamp()
-
+                    # Extract month as full name (January, February, etc.)
+                    temp_df[granularity_col] = temp_df[date_col].dt.strftime('%B')
                 elif granularity_lower == 'week':
-                    temp_df[granularity_col] = temp_df[date_col].dt.to_period("W").dt.to_timestamp()
-
+                    # Week number with year (e.g., "Week 1", "Week 2")
+                    temp_df[granularity_col] = 'Week ' + temp_df[date_col].dt.isocalendar().week.astype(str)
                 elif granularity_lower == 'day':
-                    temp_df[granularity_col] = temp_df[date_col].dt.normalize()
+                    temp_df[granularity_col] = temp_df[date_col].dt.date.astype(str)
+                # FORMAT X-AXIS DATE PROPERLY AND MAKE SURE GROUPING WORKS
+                # if granularity_lower == 'year':
+                #     temp_df[granularity_col] = temp_df[date_col].dt.to_period("Y").dt.to_timestamp()
+
+                # elif granularity_lower == 'quarter':
+                #     temp_df[granularity_col] = temp_df[date_col].dt.to_period("Q").dt.to_timestamp()
+
+                # elif granularity_lower == 'month':
+                #     temp_df[granularity_col] = temp_df[date_col].dt.to_period("M").dt.to_timestamp()
+
+                # elif granularity_lower == 'week':
+                #     temp_df[granularity_col] = temp_df[date_col].dt.to_period("W").dt.to_timestamp()
+
+                # elif granularity_lower == 'day':
+                #     temp_df[granularity_col] = temp_df[date_col].dt.normalize()
 
                 else:
                     raise ValueError(f"Unsupported date granularity: {granularity}")
