@@ -5687,20 +5687,32 @@ def receive_chart_details():
                 optimized_pairs = []
 
                 if optimizeData == "top10":
+                            # Sort by values in descending order and take top 10
                     sorted_pairs = sorted(category_value_pairs, key=lambda x: x[1], reverse=True)
                     optimized_pairs = sorted_pairs[:10]
+                            
                 elif optimizeData == "bottom10":
+                            # Sort by values in ascending order and take bottom 10
                     sorted_pairs = sorted(category_value_pairs, key=lambda x: x[1])
                     optimized_pairs = sorted_pairs[:10]
+                            
                 elif optimizeData == "both10":
+                            # Get bottom 5
                     sorted_asc = sorted(category_value_pairs, key=lambda x: x[1])
                     bottom5_pairs = sorted_asc[:5]
+                            
+                            # Get top 5
                     sorted_desc = sorted(category_value_pairs, key=lambda x: x[1], reverse=True)
                     top5_pairs = sorted_desc[:5]
+                            
+                            # Combine bottom 5 and top 5
                     optimized_pairs = bottom5_pairs + top5_pairs
+                            
                 else:
+                            # Default: return all filtered data
                     optimized_pairs = category_value_pairs
 
+                        # Separate back into categories and values
                 optimized_categories = [pair[0] for pair in optimized_pairs]
                 optimized_values = [pair[1] for pair in optimized_pairs]
 
@@ -6650,10 +6662,10 @@ def dashboard_data(dashboard_name,company_name):
                     wallpaper_src = result[0]
                 cursor.close()
             conn.close()
-            print("fontStyleLocal",fontStyleLocal)
-            print("fontColor",fontColor)
-            print("fontSize",fontSize)
-            print("Chart Data=======>",data)
+            # print("fontStyleLocal",fontStyleLocal)
+            # print("fontColor",fontColor)
+            # print("fontSize",fontSize)
+            # print("Chart Data=======>",data)
         user_email = None
         user_name=None
         emp_conn = psycopg2.connect(
