@@ -13598,6 +13598,53 @@ def get_all_plans():
         return jsonify({'message': 'License plans fetched successfully ✅', 'data': plans}), 200
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+@app.route('/get_all_plans_company', methods=['GET'])
+def get_all_plans_company():
+    try:
+        company_id = request.args.get("company_id")
+        print("company_id",company_id)
+
+        conn = get_db_connection()
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+
+        # Check if FREE plan already used for this company
+        free_used = False
+        if company_id:
+            cur.execute("""
+                SELECT 1 
+                FROM organization_license ol
+                JOIN license_plan lp ON ol.plan_id = lp.id
+                WHERE ol.company_id = %s AND LOWER(lp.plan_name) = 'free'
+            """, (company_id,))
+            
+            free_used = cur.fetchone() is not None
+
+        # Get all plans
+        cur.execute("""
+            SELECT lp.id, lp.plan_name, lp.description, lp.storage_limit, lp.price, 
+                   lp.duration_days, lp.employee_limit,
+                   json_agg(json_build_object('feature_name', lf.feature_name, 'is_enabled', lf.is_enabled))
+                   AS features
+            FROM license_plan lp
+            LEFT JOIN license_features lf ON lp.id = lf.plan_id
+            GROUP BY lp.id
+            ORDER BY lp.id;
+        """)
+
+        plans = cur.fetchall()
+
+        cur.close()
+        conn.close()
+
+        # Filter out FREE plan if already used
+        if free_used:
+            plans = [p for p in plans if p['plan_name'].lower() != 'free']
+
+        return jsonify({'message': 'License plans fetched successfully ✅', 'data': plans}), 200
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 
 
 # ==========================================================
@@ -13850,6 +13897,52 @@ def update_license_plan(plan_id):
 
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+@app.route("/get_org_plan_activation_details", methods=["GET"])
+def get_org_plan_activation_details():
+    try:
+        company_id = request.args.get("company_id")
+        if not company_id:
+            return jsonify({"error": "company_id is required"}), 400
+
+        conn = get_db_connection()
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+
+        cur.execute("""
+            SELECT 
+                ol.id,
+                ol.company_id,
+                o.organizationname,
+                lp.plan_name,
+                lp.price,
+                lp.duration_days,
+                lp.employee_limit,
+                ol.start_date,
+                ol.end_date,
+                ol.is_active,
+                CASE 
+                    WHEN ol.end_date >= CURRENT_DATE THEN 'Active'
+                    ELSE 'Expired'
+                END AS status
+            FROM organization_license ol
+            JOIN license_plan lp ON ol.plan_id = lp.id
+            JOIN organizationdatatest o ON ol.company_id = o.id
+            WHERE ol.company_id = %s
+            ORDER BY ol.start_date DESC;
+        """, (company_id,))
+
+        plans = cur.fetchall()
+
+        cur.close()
+        conn.close()
+
+        return jsonify({
+            "message": "Organization plan activation history fetched successfully ✅",
+            "data": plans
+        }), 200
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 @app.route("/api/get_organization", methods=["GET"])
 
 def get_organization():
