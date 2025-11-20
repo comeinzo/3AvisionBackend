@@ -5918,10 +5918,29 @@ def receive_chart_details():
                             x_axis = [granularity_col if c == date_col else c for c in x_axis]
                             print(f"[COUNT] Created granularity column: {granularity_col}")
                             print(df[[date_col, granularity_col]].head())
+                
+                
 
                 # Parse the filter options
                 allowed_categories = json.loads(data.get('filter_options')) if data.get('filter_options') else {}
                 print("allowed_categories====================", allowed_categories)
+                # --- FIX FILTERS FOR DATE GRANULARITY ---
+                fixed_allowed_categories = {}
+
+                for col, values in allowed_categories.items():
+                    # If this is the date column and granularity was applied
+                    if col in dateGranularity:
+                        gran = dateGranularity[col].lower()
+                        gran_col = f"{col}_{gran}"
+                        if gran_col in df.columns:
+                            fixed_allowed_categories[gran_col] = [str(v) for v in values]
+                            continue
+
+                    # Otherwise keep same
+                    fixed_allowed_categories[col] = values
+
+                allowed_categories = fixed_allowed_categories
+                print("Updated allowed_categories:", allowed_categories)
 
                 # Apply filters to the dataframe BEFORE grouping
                 filtered_df = df.copy()
@@ -6069,6 +6088,7 @@ def receive_chart_details():
                                 x_axis = [granularity_col if c == date_col else c for c in x_axis]
                                 print(f"[DUAL] Created granularity column: {granularity_col}")
                                 print(df[[date_col, granularity_col]].head())
+                    
 
                     # Convert times or numeric y-axes
                     for axis in y_axis:
@@ -6631,6 +6651,21 @@ def receive_chart_details():
 
                                 print(f"Created granularity column: {granularity_col}")
                                 print(df[[date_col, granularity_col]].head())
+                    # ========== APPLY FILTERS AFTER GRANULARITY ==========
+                    for col, values in filter_options.items():
+                        values = list(map(str, values))
+
+                        # If granularity column exists, filter on it
+                        gran_col = None
+                        if dateGranularity and col in dateGranularity:
+                            gran_col = f"{col}_{dateGranularity[col]}"
+
+                        if gran_col and gran_col in df.columns:
+                            df = df[df[gran_col].isin(values)]
+                        elif col in df.columns:
+                            df[col] = df[col].astype(str)
+                            df = df[df[col].isin(values)]
+
 
                     # ---------- BUILD FILTER OPTIONS ----------
                     options = []
@@ -11325,22 +11360,22 @@ def transfer_and_verify_data():
             print("-" * 50)
         if email:
             msg = f"""
-Subject: 3A Vision Data Transfer Scheduled
+                Subject: 3A Vision Data Transfer Scheduled
 
-Hello {email},
+                Hello {email},
 
-Your data transfer job has been successfully scheduled.
+                Your data transfer job has been successfully scheduled.
 
-Details:
-Source Table: {source_table_name}
-Destination Table: {dest_table_name}
-Schedule Type: {schedule_type}
-Scheduled Time: {schedule_time if schedule_time else 'N/A'}
-Job ID: {job_id}
+                Details:
+                Source Table: {source_table_name}
+                Destination Table: {dest_table_name}
+                Schedule Type: {schedule_type}
+                Scheduled Time: {schedule_time if schedule_time else 'N/A'}
+                Job ID: {job_id}
 
-Regards,
-3A Vision Team
-"""
+                Regards,
+                3A Vision Team
+                """
             send_notification_email(email, "3A Vision Data Transfer Scheduled", msg)
 
         return jsonify({"success": True, "message": "Job scheduled successfully", "job_id": job_id})
