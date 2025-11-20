@@ -10765,83 +10765,90 @@ app.config['SCHEDULER_JOB_DEFAULTS'] = {
 scheduler = APScheduler()
 scheduler.init_app(app)
 scheduler.start()
-def update_last_transfer_status(source_table, dest_table, status, message):
-    try:
-        conn = psycopg2.connect(
-            dbname=DB_NAME,
-            user=USER_NAME,
-            password=PASSWORD,
-            host=HOST,
-            port=PORT
-        )
-        cur = conn.cursor()
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS last_transfer_status (
-                id SERIAL PRIMARY KEY,
-                source_table VARCHAR NOT NULL,
-                destination_table VARCHAR NOT NULL,
-                last_transfer_time TIMESTAMP,
-                status VARCHAR,
-                message TEXT,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                UNIQUE (source_table, destination_table)
-            );
-        """)
-        conn.commit()
+# def update_last_transfer_status(source_table, dest_table, status, message, destination_config):
+#     try:
+#         dbname = destination_config.get('dbName')
+#         conn = psycopg2.connect(
+#             dbname =dbname,
+#             user=USER_NAME,
+#             password=PASSWORD,
+#             host=HOST,
+#             port=PORT
+#         )
+#         cur = conn.cursor()
+#         cur.execute("""
+#             CREATE TABLE IF NOT EXISTS last_transfer_status (
+#                 id SERIAL PRIMARY KEY,
+#                 company_name VARCHAR NOT NULL,
+#                 source_table VARCHAR NOT NULL,
+#                 destination_table VARCHAR NOT NULL,
+#                 last_transfer_time TIMESTAMP,
+#                 status VARCHAR,
+#                 message TEXT,
+#                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+#                 UNIQUE (company_name,source_table, destination_table)
+#             );
+#         """)
+#         conn.commit()
+#         company_name = dbname 
+#         upsert_query = """
+#             INSERT INTO last_transfer_status (
+#                 company_name,source_table, destination_table, last_transfer_time, status, message,log_id INT REFERENCES data_transfer_logs(id) ON DELETE CASCADE,
+#                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+#                 UNIQUE (company_name, source_table, destination_table)
+#             )
+#             VALUES (%s,%s, %s, %s, %s, %s)
+#             ON CONFLICT (company_name,source_table, destination_table)
+#             DO UPDATE SET
+#                 last_transfer_time = EXCLUDED.last_transfer_time,
+#                 status = EXCLUDED.status,
+#                 message = EXCLUDED.message,
+#                 updated_at = CURRENT_TIMESTAMP;
+#         """
+#         cur.execute(upsert_query, (
+#             company_name,source_table, dest_table, datetime.utcnow(), status, message
+#         ))
+#         conn.commit()
+#         cur.close()
+#         conn.close()
+#     except Exception as e:
+#         print(f"❌ Failed to update last transfer status: {str(e)}")
 
-        upsert_query = """
-            INSERT INTO last_transfer_status (
-                source_table, destination_table, last_transfer_time, status, message
-            )
-            VALUES (%s, %s, %s, %s, %s)
-            ON CONFLICT (source_table, destination_table)
-            DO UPDATE SET
-                last_transfer_time = EXCLUDED.last_transfer_time,
-                status = EXCLUDED.status,
-                message = EXCLUDED.message,
-                updated_at = CURRENT_TIMESTAMP;
-        """
-        cur.execute(upsert_query, (
-            source_table, dest_table, datetime.utcnow(), status, message
-        ))
-        conn.commit()
-        cur.close()
-        conn.close()
-    except Exception as e:
-        print(f"❌ Failed to update last transfer status: {str(e)}")
 
-
-def create_log_table_if_not_exists():
-    try:
-        conn = get_db_connection()
-        # conn = psycopg2.connect(**LOG_DB_CONFIG)
-        cur = conn.cursor()
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS data_transfer_logs (
-                id SERIAL PRIMARY KEY,
-                source_table VARCHAR,
-                destination_table VARCHAR,
-                schedule_type VARCHAR,
-                run_time TIMESTAMP,
-                status VARCHAR,
-                message TEXT,
-                record_count INTEGER,
-                data_size_mb FLOAT,
-                user_email VARCHAR,
-                job_id VARCHAR,
-                time_taken_seconds FLOAT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                inserted_count INTEGER DEFAULT 0,
-                updated_count INTEGER DEFAULT 0,
-                skipped_count INTEGER DEFAULT 0
-            );
-        """)
-        conn.commit()
-        cur.close()
-        conn.close()
-        print("✅ 'data_transfer_logs' table ensured.")
-    except Exception as e:
-        print(f"❌ Failed to create table: {e}")
+# def create_log_table_if_not_exists(destination_config):
+#     try:
+#         db_name=destination_config.get("dbName")
+#         conn = get_company_db_connection(db_name)
+#         # conn = psycopg2.connect(**LOG_DB_CONFIG)
+#         cur = conn.cursor()
+#         cur.execute("""
+#             CREATE TABLE IF NOT EXISTS data_transfer_logs (
+#                 id SERIAL PRIMARY KEY,
+#                 company_name VARCHAR NOT NULL,
+#                 source_table VARCHAR,
+#                 destination_table VARCHAR,
+#                 schedule_type VARCHAR,
+#                 run_time TIMESTAMP,
+#                 status VARCHAR,
+#                 message TEXT,
+#                 record_count INTEGER,
+#                 data_size_mb FLOAT,
+#                 user_email VARCHAR,
+#                 user_id INTEGER REFERENCES employee_list(employee_id),
+#                 job_id VARCHAR,
+#                 time_taken_seconds FLOAT,
+#                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+#                 inserted_count INTEGER DEFAULT 0,
+#                 updated_count INTEGER DEFAULT 0,
+#                 skipped_count INTEGER DEFAULT 0
+#             );
+#         """)
+#         conn.commit()
+#         cur.close()
+#         conn.close()
+#         print("✅ 'data_transfer_logs' table ensured.")
+#     except Exception as e:
+#         print(f"❌ Failed to create table: {e}")
 def to_native(val):
     """Convert NumPy datatypes to Python-native types."""
     if isinstance(val, (np.integer,)):
@@ -10851,42 +10858,73 @@ def to_native(val):
     if isinstance(val, (np.bool_,)):
         return bool(val)
     return val
-def log_data_transfer(source_table, dest_table, schedule_type, run_time,
-                      status, message, record_count, data_size_mb, email, job_id,time_taken_seconds, inserted_count=0, updated_count=0, skipped_count=0):
-    try:
-        conn = psycopg2.connect(
-            dbname=DB_NAME,  # Update this
-            user=USER_NAME,
-            password=PASSWORD,
-            host=HOST,
-            port=PORT
-        )
-        cur = conn.cursor()
-        insert_query = """
-            INSERT INTO data_transfer_logs (
-                source_table, destination_table, schedule_type, run_time,
-                status, message, record_count, data_size_mb, user_email, job_id,time_taken_seconds, inserted_count, updated_count, skipped_count
-            )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s,%s,%s, %s, %s)
-        """
-        # cur.execute(insert_query, (
-        #     source_table, dest_table, schedule_type, run_time,
-        #     status, message, record_count, data_size_mb, email, job_id,time_taken_seconds, inserted_count, updated_count, skipped_count
-        # ))
-        values = (
-            source_table, dest_table, schedule_type, run_time,
-            status, message, record_count, data_size_mb,
-            email, job_id, time_taken_seconds,
-            inserted_count, updated_count, skipped_count
-        )
+# def log_data_transfer(source_table, dest_table, schedule_type, run_time,
+#                       status, message, record_count, data_size_mb, email, job_id,time_taken_seconds, inserted_count=0, updated_count=0, skipped_count=0):
+#     try:
+#         conn = psycopg2.connect(
+#             dbname=DB_NAME,  # Update this
+#             user=USER_NAME,
+#             password=PASSWORD,
+#             host=HOST,
+#             port=PORT
+#         )
+#         cur = conn.cursor()
+#         insert_query = """
+#             INSERT INTO data_transfer_logs (
+#                 source_table, destination_table, schedule_type, run_time,
+#                 status, message, record_count, data_size_mb, user_email, job_id,time_taken_seconds, inserted_count, updated_count, skipped_count
+#             )
+#             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s,%s,%s, %s, %s)
+#         """
+#         # cur.execute(insert_query, (
+#         #     source_table, dest_table, schedule_type, run_time,
+#         #     status, message, record_count, data_size_mb, email, job_id,time_taken_seconds, inserted_count, updated_count, skipped_count
+#         # ))
+#         values = (
+#             source_table, dest_table, schedule_type, run_time,
+#             status, message, record_count, data_size_mb,
+#             email, job_id, time_taken_seconds,
+#             inserted_count, updated_count, skipped_count
+#         )
 
-        cur.execute(insert_query, tuple(to_native(v) for v in values))
+#         cur.execute(insert_query, tuple(to_native(v) for v in values))
 
-        conn.commit()
-        cur.close()
-        conn.close()
-    except Exception as e:
-        print(f"❌ Failed to log data transfer: {str(e)}")
+#         conn.commit()
+#         cur.close()
+#         conn.close()
+#     except Exception as e:
+#         print(f"❌ Failed to log data transfer: {str(e)}")
+# def log_data_transfer(source_table, dest_table, schedule_type, run_time,
+#                       status, message, record_count, data_size_mb, email, job_id,
+#                       time_taken_seconds, destination_config, user_id=None,
+#                       inserted_count=0, updated_count=0, skipped_count=0):
+#     try:
+#         dbname=destination_config.get("dbName")
+#         conn = get_company_db_connection(dbname)
+       
+#         cur = conn.cursor()
+#         insert_query = """
+#             INSERT INTO data_transfer_logs (
+#                 company_name,source_table, destination_table, schedule_type, run_time,
+#                 status, message, record_count, data_size_mb,
+#                 user_email, user_id, job_id, time_taken_seconds,
+#                 inserted_count, updated_count, skipped_count
+#             )
+#             VALUES (%s,%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+#         """
+#         values = (
+#             dbname,source_table, dest_table, schedule_type, run_time,
+#             status, message, record_count, data_size_mb,
+#             email, user_id, job_id, time_taken_seconds,
+#             inserted_count, updated_count, skipped_count
+#         )
+#         cur.execute(insert_query, tuple(to_native(v) for v in values))
+#         conn.commit()
+#         cur.close()
+#         conn.close()
+#     except Exception as e:
+#         print(f"❌ Failed to log data transfer: {str(e)}")
+
 # def send_notification_email(recipient, subject, body):
 #     try:
 #         print("Using Hotmail SMTP to send email...")
@@ -11005,56 +11043,286 @@ def send_notification_email(recipient, subject, body):
 #         if email:
 #             send_notification_email(email, "Data Transfer Failed", error_msg)
 #         return {"success": False, "error": error_msg}
+# def job_logic(cols=None, source_config=None, destination_config=None,
+#               source_table_name=None, dest_table_name=None,
+#               update_existing_table=False, create_view_if_exists=False,
+#               email=None, schedule_type=None, job_id=None,user_id=None):
+#     start_time = datetime.utcnow()
+#     print(f"[{datetime.now()}] Job triggered for table: {source_table_name}")
+#     create_log_table_if_not_exists(destination_config)
+
+#     try:
+#         # Placeholder for your actual data fetch logic
+#         source_df, fetch_error = fetch_data_with_columns(source_config, source_table_name, cols)
+#         if fetch_error:
+#             msg = f"Failed to fetch data: {fetch_error}"
+#             print(msg)
+#             if email:
+#                 send_notification_email(email, "Data Transfer Failed", msg)
+#             return {"success": False, "error": msg}
+
+#         if source_df is None:
+#             msg = f"No data found in '{source_table_name}'"
+#             if email:
+#                 send_notification_email(email, "Data Transfer Skipped", msg)
+#             log_data_transfer(source_table_name, dest_table_name, schedule_type,
+#                               datetime.utcnow(), "Skipped", msg, 0, 0.0, email, job_id, 0.0,destination_config, user_id,inserted_count=0, updated_count=0, skipped_count=0)
+#             print("Data transfer logged successfully1.")
+#             update_last_transfer_status(source_table_name, dest_table_name, "Skipped", msg,destination_config)
+#             return {"success": True, "message": msg}
+
+#         # Placeholder for insert logic
+#         insert_success = True  # Replace with actual insert result
+#         insert_error = None
+#         view_name = None
+#         insert_success, insert_error, view_created, view_name ,inserted_count, updated_count = insert_dataframe_with_upsert(
+#             destination_config, dest_table_name, source_df,source_config, source_table_name, cols, create_view_if_exists
+#         )
+#         skipped_count = len(source_df) - inserted_count - updated_count
+#         if not insert_success:
+#             msg = f"Insert failed: {insert_error}"
+#             if email:
+#                 send_notification_email(email, "Data Transfer Failed", msg)
+#             log_data_transfer(source_table_name, dest_table_name, schedule_type,
+#                               datetime.utcnow(), "Failed", msg, 0, 0.0, email, job_id, 0.0,destination_config, user_id,inserted_count, updated_count, skipped_count)
+#             print("Data transfer logged successfully.2")
+#             update_last_transfer_status(source_table_name, dest_table_name, "Failed", msg,destination_config)
+#             return {"success": False, "error": msg}
+
+#         records_count = len(source_df)
+#         data_size = source_df.memory_usage(deep=True).sum() / (1024 * 1024)
+
+#         msg = f"Transferred {records_count} records from {source_table_name} to {dest_table_name}."
+
+#         email_body = f"""
+# Subject: 3A Vision Data Transfer Completed
+
+# Hello {email},
+
+# ✅ Data transfer from '{source_config.get('dbName')}' to '{destination_config.get('dbName')}' completed.
+
+# Details:
+# Table: {source_table_name}
+# Records: {records_count}
+# Size: {data_size:.2f} MB
+# Time: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')}
+
+# Regards,
+# 3A Vision Team
+# """
+#         if email:
+#             send_notification_email(email, "3A Vision Data Transfer Completed", email_body)
+#         end_time = datetime.utcnow()
+#         time_taken_seconds = (end_time - start_time).total_seconds()
+#         log_data_transfer(source_table_name, dest_table_name, schedule_type,
+#                           datetime.utcnow(), "Success", msg, records_count, data_size, email, job_id,time_taken_seconds,destination_config, user_id,inserted_count, updated_count, skipped_count)
+#         print("Data transfer logged successfully.")
+#         update_last_transfer_status(source_table_name, dest_table_name, "Success", msg,destination_config)
+#         return {"success": True, "message": msg}
+
+#     except Exception as e:
+#         error_msg = f"Unexpected error: {str(e)}"
+#         print(traceback.format_exc())
+#         if email:
+#             send_notification_email(email, "Data Transfer Failed", error_msg)
+#         log_data_transfer(source_table_name, dest_table_name, schedule_type,
+#                           datetime.utcnow(), "Failed", error_msg, 0, 0.0, email, job_id,0.0,destination_config, user_id,inserted_count=0, updated_count=0, skipped_count=0)
+#         print("Data transfer logged successfully.3")
+#         return {"success": False, "error": error_msg}
+
+
+
+# --- Create data_transfer_logs table if it doesn't exist ---
+def create_log_table_if_not_exists(destination_config):
+    try:
+        db_name = destination_config.get("dbName")
+        conn = get_company_db_connection(db_name)
+        cur = conn.cursor()
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS data_transfer_logs (
+                id SERIAL PRIMARY KEY,
+                company_name VARCHAR NOT NULL,
+                source_table VARCHAR,
+                destination_table VARCHAR,
+                schedule_type VARCHAR,
+                run_time TIMESTAMP,
+                status VARCHAR,
+                message TEXT,
+                record_count INTEGER,
+                data_size_mb FLOAT,
+                user_email VARCHAR,
+                user_id INTEGER REFERENCES employee_list(employee_id),
+                job_id VARCHAR,
+                time_taken_seconds FLOAT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                inserted_count INTEGER DEFAULT 0,
+                updated_count INTEGER DEFAULT 0,
+                skipped_count INTEGER DEFAULT 0
+            );
+        """)
+        conn.commit()
+        cur.close()
+        conn.close()
+        print("✅ 'data_transfer_logs' table ensured.")
+    except Exception as e:
+        print(f"❌ Failed to create table: {e}")
+
+
+# --- Log data transfer and return log_id ---
+def log_data_transfer(source_table, dest_table, schedule_type, run_time,
+                      status, message, record_count, data_size_mb, email, job_id,
+                      time_taken_seconds, destination_config, user_id=None,
+                      inserted_count=0, updated_count=0, skipped_count=0):
+    try:
+        dbname = destination_config.get("dbName")
+        conn = get_company_db_connection(dbname)
+        cur = conn.cursor()
+        insert_query = """
+            INSERT INTO data_transfer_logs (
+                company_name, source_table, destination_table, schedule_type, run_time,
+                status, message, record_count, data_size_mb,
+                user_email, user_id, job_id, time_taken_seconds,
+                inserted_count, updated_count, skipped_count
+            )
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+            RETURNING id;
+        """
+        values = (
+            dbname, source_table, dest_table, schedule_type, run_time,
+            status, message, record_count, data_size_mb,
+            email, user_id, job_id, time_taken_seconds,
+            inserted_count, updated_count, skipped_count
+        )
+        # cur.execute(insert_query, tuple(values))
+        cur.execute(insert_query, tuple(to_native(v) for v in values))
+        log_id = cur.fetchone()[0]  # get the inserted row ID
+        conn.commit()
+        cur.close()
+        conn.close()
+        print(f"✅ Data transfer logged successfully. Log ID: {log_id}")
+        return log_id
+    except Exception as e:
+        print(f"❌ Failed to log data transfer: {str(e)}")
+        return None
+
+
+# --- Update last transfer status linked to log_id ---
+def update_last_transfer_status(source_table, dest_table, status, message, destination_config, log_id=None):
+    try:
+        dbname = destination_config.get('dbName')
+        conn = psycopg2.connect(
+            dbname=dbname,
+            user=USER_NAME,
+            password=PASSWORD,
+            host=HOST,
+            port=PORT
+        )
+        cur = conn.cursor()
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS last_transfer_status (
+                id SERIAL PRIMARY KEY,
+                company_name VARCHAR NOT NULL,
+                source_table VARCHAR NOT NULL,
+                destination_table VARCHAR NOT NULL,
+                last_transfer_time TIMESTAMP,
+                status VARCHAR,
+                message TEXT,
+                log_id INT REFERENCES data_transfer_logs(id) ON DELETE CASCADE,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE (company_name, source_table, destination_table)
+            );
+        """)
+        conn.commit()
+
+        company_name = dbname
+        upsert_query = """
+            INSERT INTO last_transfer_status (
+                company_name, source_table, destination_table, last_transfer_time, status, message, log_id
+            )
+            VALUES (%s,%s,%s,%s,%s,%s,%s)
+            ON CONFLICT (company_name, source_table, destination_table)
+            DO UPDATE SET
+                last_transfer_time = EXCLUDED.last_transfer_time,
+                status = EXCLUDED.status,
+                message = EXCLUDED.message,
+                log_id = EXCLUDED.log_id,
+                updated_at = CURRENT_TIMESTAMP;
+        """
+        cur.execute(upsert_query, (
+            company_name, source_table, dest_table, datetime.utcnow(), status, message, log_id
+        ))
+        conn.commit()
+        cur.close()
+        conn.close()
+        print("✅ Last transfer status updated.")
+    except Exception as e:
+        print(f"❌ Failed to update last transfer status: {str(e)}")
+
+
+# --- Main job logic ---
 def job_logic(cols=None, source_config=None, destination_config=None,
               source_table_name=None, dest_table_name=None,
               update_existing_table=False, create_view_if_exists=False,
-              email=None, schedule_type=None, job_id=None):
+              email=None, schedule_type=None, job_id=None, user_id=None):
     start_time = datetime.utcnow()
     print(f"[{datetime.now()}] Job triggered for table: {source_table_name}")
-    create_log_table_if_not_exists()
+
+    create_log_table_if_not_exists(destination_config)
 
     try:
-        # Placeholder for your actual data fetch logic
+        # --- Fetch source data (replace with your logic) ---
         source_df, fetch_error = fetch_data_with_columns(source_config, source_table_name, cols)
         if fetch_error:
             msg = f"Failed to fetch data: {fetch_error}"
-            print(msg)
             if email:
                 send_notification_email(email, "Data Transfer Failed", msg)
             return {"success": False, "error": msg}
 
-        if source_df is None:
+        if source_df is None or source_df.empty:
             msg = f"No data found in '{source_table_name}'"
             if email:
                 send_notification_email(email, "Data Transfer Skipped", msg)
-            log_data_transfer(source_table_name, dest_table_name, schedule_type,
-                              datetime.utcnow(), "Skipped", msg, 0, 0.0, email, job_id, 0.0,inserted_count=0, updated_count=0, skipped_count=0)
-            update_last_transfer_status(source_table_name, dest_table_name, "Skipped", msg)
+            log_id = log_data_transfer(source_table_name, dest_table_name, schedule_type,
+                                       datetime.utcnow(), "Skipped", msg, 0, 0.0, email,
+                                       job_id, 0.0, destination_config, user_id)
+            update_last_transfer_status(source_table_name, dest_table_name, "Skipped", msg, destination_config, log_id)
             return {"success": True, "message": msg}
 
-        # Placeholder for insert logic
-        insert_success = True  # Replace with actual insert result
-        insert_error = None
-        view_name = None
-        insert_success, insert_error, view_created, view_name ,inserted_count, updated_count = insert_dataframe_with_upsert(
-            destination_config, dest_table_name, source_df,source_config, source_table_name, cols, create_view_if_exists
+        # --- Insert data into destination (replace with your logic) ---
+        insert_success, insert_error, view_created, view_name, inserted_count, updated_count = insert_dataframe_with_upsert(
+            destination_config, dest_table_name, source_df, source_config, source_table_name, cols, create_view_if_exists
         )
         skipped_count = len(source_df) - inserted_count - updated_count
+
         if not insert_success:
             msg = f"Insert failed: {insert_error}"
             if email:
                 send_notification_email(email, "Data Transfer Failed", msg)
-            log_data_transfer(source_table_name, dest_table_name, schedule_type,
-                              datetime.utcnow(), "Failed", msg, 0, 0.0, email, job_id, 0.0,inserted_count, updated_count, skipped_count)
-            update_last_transfer_status(source_table_name, dest_table_name, "Failed", msg)
+            log_id = log_data_transfer(source_table_name, dest_table_name, schedule_type,
+                                       datetime.utcnow(), "Failed", msg, 0, 0.0, email,
+                                       job_id, 0.0, destination_config, user_id,
+                                       inserted_count, updated_count, skipped_count)
+            update_last_transfer_status(source_table_name, dest_table_name, "Failed", msg, destination_config, log_id)
             return {"success": False, "error": msg}
 
+        # --- Success logging ---
         records_count = len(source_df)
         data_size = source_df.memory_usage(deep=True).sum() / (1024 * 1024)
-
         msg = f"Transferred {records_count} records from {source_table_name} to {dest_table_name}."
+        end_time = datetime.utcnow()
+        time_taken_seconds = (end_time - start_time).total_seconds()
 
-        email_body = f"""
+        # Log transfer
+        log_id = log_data_transfer(source_table_name, dest_table_name, schedule_type,
+                                   datetime.utcnow(), "Success", msg, records_count, data_size, email,
+                                   job_id, time_taken_seconds, destination_config, user_id,
+                                   inserted_count, updated_count, skipped_count)
+        # Update last status
+        update_last_transfer_status(source_table_name, dest_table_name, "Success", msg, destination_config, log_id)
+
+        # --- Optional email notification ---
+        if email:
+            email_body = f"""
 Subject: 3A Vision Data Transfer Completed
 
 Hello {email},
@@ -11070,13 +11338,8 @@ Time: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')}
 Regards,
 3A Vision Team
 """
-        if email:
             send_notification_email(email, "3A Vision Data Transfer Completed", email_body)
-        end_time = datetime.utcnow()
-        time_taken_seconds = (end_time - start_time).total_seconds()
-        log_data_transfer(source_table_name, dest_table_name, schedule_type,
-                          datetime.utcnow(), "Success", msg, records_count, data_size, email, job_id,time_taken_seconds,inserted_count, updated_count, skipped_count)
-        update_last_transfer_status(source_table_name, dest_table_name, "Success", msg)
+
         return {"success": True, "message": msg}
 
     except Exception as e:
@@ -11084,9 +11347,12 @@ Regards,
         print(traceback.format_exc())
         if email:
             send_notification_email(email, "Data Transfer Failed", error_msg)
-        log_data_transfer(source_table_name, dest_table_name, schedule_type,
-                          datetime.utcnow(), "Failed", error_msg, 0, 0.0, email, job_id,0.0,inserted_count=0, updated_count=0, skipped_count=0)
+        log_id = log_data_transfer(source_table_name, dest_table_name, schedule_type,
+                                   datetime.utcnow(), "Failed", error_msg, 0, 0.0, email,
+                                   job_id, 0.0, destination_config, user_id, 0, 0, 0)
+        update_last_transfer_status(source_table_name, dest_table_name, "Failed", error_msg, destination_config, log_id)
         return {"success": False, "error": error_msg}
+
 
 # @app.route('/api/transfer_data', methods=['POST'])
 # def transfer_and_verify_data():
@@ -11214,6 +11480,7 @@ def transfer_and_verify_data():
     company_name = destination_config.get("dbName")  # ⚡ assume company DB
     email = data.get('email')
     print("dest_table_name",dest_table_name)
+    user_id=data.get('user_id')
 
     # if not dest_table_name:
 
@@ -11300,7 +11567,8 @@ def transfer_and_verify_data():
         "create_view_if_exists": create_view_if_exists,
         "email": email,
         "schedule_type": schedule_type or "instant",
-        "job_id": job_id
+        "job_id": job_id,
+        "user_id":user_id
     }
     print("job_kwargs",job_kwargs)
     if not schedule_type or schedule_type == '':
@@ -13436,7 +13704,7 @@ def save_api_data():
 #         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/system_summary', methods=['GET'])
-@token_required
+
 def system_summary():
     try:
         company_name = request.args.get('company_name')
@@ -13488,6 +13756,23 @@ def system_summary():
             latest_table_name, table_created_time = latest_table
         else:
             latest_table_name, table_created_time = "N/A", "N/A"
+        admin_cur.execute("""
+            SELECT dtl.destination_table, lts.last_transfer_time, lts.status
+            FROM last_transfer_status lts
+            JOIN data_transfer_logs dtl ON lts.log_id = dtl.id
+            WHERE dtl.company_name = %s
+            ORDER BY lts.last_transfer_time DESC
+            LIMIT 1;
+        """, (company_name,))
+
+        last_transfer = admin_cur.fetchone()
+
+        if last_transfer:
+            last_table_name, last_transfer_time, transfer_status = last_transfer
+        else:
+            last_table_name, last_transfer_time, transfer_status = "N/A", None, "Unknown"
+
+
 
         # ---- 4️⃣ Fetch total projects ----
         cur.execute("""
@@ -13529,6 +13814,7 @@ def system_summary():
         active_users = len(set(active_users_list))
         inactive_users = len(set(all_users) - set(active_users_list))
         total_users = len(set(all_users))
+        
 
 
         # ---- 7️⃣ Mock data growth (placeholder for now) ----
@@ -13554,7 +13840,10 @@ def system_summary():
             "most_used_chart": most_used_chart,
             "active_users": active_users,
             "inactive_users": inactive_users,
-            "data_growth_percentage": data_growth_percentage
+            "data_growth_percentage": data_growth_percentage,
+            "last_transfer_time": last_transfer_time,
+            "transfer_status": transfer_status,
+            "last_table_name": last_table_name,
         })
 
     except Exception as e:
