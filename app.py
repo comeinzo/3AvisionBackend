@@ -2144,7 +2144,76 @@ def get_bar_chart_route():
         print("Single treeHierarchy chart")
 
         try:
-            
+            temp_df = new_df.copy()
+            # ============== DATE GRANULARITY PROCESSING ==============
+            # Handle date granularity - convert date columns to specified granularity
+            if dateGranularity and isinstance(dateGranularity, dict):
+                for date_col, granularity in dateGranularity.items():
+                    if date_col in temp_df.columns and date_col in x_axis_columns:
+                        print(f"Applying date granularity: {date_col} -> {granularity}")
+                        
+                        # Ensure the column is datetime
+                        temp_df[date_col] = pd.to_datetime(temp_df[date_col], errors='coerce')
+                        
+                        # Create new column name for the granularity
+                        granularity_col = f"{date_col}_{granularity}"
+                        
+                        # Extract based on granularity
+                        granularity_lower = granularity.lower()
+                        if granularity_lower == 'year':
+                            temp_df[granularity_col] = temp_df[date_col].dt.year.astype(str)
+                        elif granularity_lower == 'quarter':
+                            temp_df[granularity_col] = 'Q' + temp_df[date_col].dt.quarter.astype(str)
+                        elif granularity_lower == 'month':
+                            # Extract month as full name (January, February, etc.)
+                            temp_df[granularity_col] = temp_df[date_col].dt.strftime('%B')
+                        elif granularity_lower == 'week':
+                            # Week number with year (e.g., "Week 1", "Week 2")
+                            temp_df[granularity_col] = 'Week ' + temp_df[date_col].dt.isocalendar().week.astype(str)
+                        elif granularity_lower == 'day':
+                            temp_df[granularity_col] = temp_df[date_col].dt.date.astype(str)
+                        # FORMAT X-AXIS DATE PROPERLY AND MAKE SURE GROUPING WORKS
+                        # if granularity_lower == 'year':
+                        #     temp_df[granularity_col] = temp_df[date_col].dt.to_period("Y").dt.to_timestamp()
+
+                        # elif granularity_lower == 'quarter':
+                        #     temp_df[granularity_col] = temp_df[date_col].dt.to_period("Q").dt.to_timestamp()
+
+                        # elif granularity_lower == 'month':
+                        #     temp_df[granularity_col] = temp_df[date_col].dt.to_period("M").dt.to_timestamp()
+
+                        # elif granularity_lower == 'week':
+                        #     temp_df[granularity_col] = temp_df[date_col].dt.to_period("W").dt.to_timestamp()
+
+                        # elif granularity_lower == 'day':
+                        #     temp_df[granularity_col] = temp_df[date_col].dt.normalize()
+
+                        else:
+                            raise ValueError(f"Unsupported date granularity: {granularity}")
+                        
+                        # Replace the date column in x_axis_columns with the granularity column
+                        x_axis_columns = [granularity_col if col == date_col else col for col in x_axis_columns]
+                        
+                        print(f"Created granularity column '{granularity_col}' from '{date_col}'")
+                        print(f"Sample values: {temp_df[granularity_col].head()}")
+                    # ============== END DATE GRANULARITY PROCESSING ==============
+
+                    x_axis_columns_str = x_axis_columns
+
+                    # Build filter options for x-axis
+                    options = []
+                    for col in x_axis_columns:
+                        if col in filter_options:
+                            options.extend(filter_options[col])
+                    options = list(map(str, options))
+                    # print("options:", options)
+
+                    # Filter again based on x-axis
+                    if options:
+                        new_df = temp_df[temp_df[x_axis_columns[0]].isin(options)]
+                    else:
+                        new_df = temp_df
+                    
             # Check if we need aggregation
             if aggregation and y_axis_columns:
                 if aggregation == "sum":
@@ -2787,43 +2856,196 @@ def get_edit_chart_route():
     
     elif chartType  == "tablechart"  and len(x_axis_columns) > 0: 
     # elif chartType == "treeHierarchy" and len(x_axis_columns) > 0:  # Tree Hierarchy logic
-        print("treeHierarchy-----------------------------")
+        # print("treeHierarchy-----------------------------")
+        # try:
+        #     conn = get_company_db_connection(db_nameeee)
+
+        #     new_df = fetch_chart_data(conn, table_name)
+        #     # new_df = fetch_tree_data(db_nameeee, table_name, x_axis_columns, y_axis_columns,checked_option, selectedUser)
+        #     temp_df = new_df.copy()
+        #     # ============== DATE GRANULARITY PROCESSING ==============
+        #     # Handle date granularity - convert date columns to specified granularity
+        #     if dateGranularity and isinstance(dateGranularity, dict):
+        #         for date_col, granularity in dateGranularity.items():
+        #             if date_col in temp_df.columns and date_col in x_axis_columns:
+        #                 print(f"Applying date granularity: {date_col} -> {granularity}")
+                        
+        #                 # Ensure the column is datetime
+        #                 temp_df[date_col] = pd.to_datetime(temp_df[date_col], errors='coerce')
+                        
+        #                 # Create new column name for the granularity
+        #                 granularity_col = f"{date_col}_{granularity}"
+                        
+        #                 # Extract based on granularity
+        #                 granularity_lower = granularity.lower()
+        #                 if granularity_lower == 'year':
+        #                     temp_df[granularity_col] = temp_df[date_col].dt.year.astype(str)
+        #                 elif granularity_lower == 'quarter':
+        #                     temp_df[granularity_col] = 'Q' + temp_df[date_col].dt.quarter.astype(str)
+        #                 elif granularity_lower == 'month':
+        #                     # Extract month as full name (January, February, etc.)
+        #                     temp_df[granularity_col] = temp_df[date_col].dt.strftime('%B')
+        #                 elif granularity_lower == 'week':
+        #                     # Week number with year (e.g., "Week 1", "Week 2")
+        #                     temp_df[granularity_col] = 'Week ' + temp_df[date_col].dt.isocalendar().week.astype(str)
+        #                 elif granularity_lower == 'day':
+        #                     temp_df[granularity_col] = temp_df[date_col].dt.date.astype(str)
+        #                 else:
+        #                     raise ValueError(f"Unsupported date granularity: {granularity}")
+                        
+        #                 # Replace the date column in x_axis_columns with the granularity column
+        #                 x_axis_columns = [granularity_col if col == date_col else col for col in x_axis_columns]
+                        
+        #                 print(f"Created granularity column '{granularity_col}' from '{date_col}'")
+        #                 print(f"Sample values: {temp_df[granularity_col].head()}")
+        #             # ============== END DATE GRANULARITY PROCESSING ==============
+
+        #             x_axis_columns_str = x_axis_columns
+
+        #             # Build filter options for x-axis
+        #             options = []
+        #             for col in x_axis_columns:
+        #                 if col in checked_option:
+        #                     options.extend(checked_option[col])
+        #             options = list(map(str, options))
+        #             # print("options:", options)
+
+        #             # Filter again based on x-axis
+        #             if options:
+        #                 new_df = temp_df[temp_df[x_axis_columns[0]].isin(options)]
+        #             else:
+        #                 new_df = temp_df
+        #     # Check if we need aggregation
+        #     if aggregation and y_axis_columns:
+        #         if aggregation == "sum":
+        #             new_df = new_df.groupby(x_axis_columns, as_index=False)[y_axis_columns[0]].sum()
+        #         elif aggregation == "count":
+        #             new_df = new_df.groupby(x_axis_columns, as_index=False)[y_axis_columns[0]].count()
+        #         elif aggregation == "mean":
+        #             new_df = new_df.groupby(x_axis_columns, as_index=False)[y_axis_columns[0]].mean()
+        #         else:
+        #             return jsonify({"error": f"Unsupported aggregation type: {aggregation}"})
+            
+        #     # Prepare data for tree hierarchy
+        #     categories = []
+        #     values = []
+
+        #     for index, row in new_df.iterrows():
+        #         category = {col: row[col] for col in x_axis_columns}  # Hierarchy levels
+        #         categories.append(category)
+        #         values.append(row[y_axis_columns[0]] if y_axis_columns else 1)  # Use aggregated value
+        #     print("aggregation",aggregation)
+        #     return jsonify({
+        #         "categories": categories,
+        #         "values": values,
+        #         "chartType": "treeHierarchy",
+        #     })
+           
+
+        # except Exception as e:
+        #     print("Error preparing Tree Hierarchy data:", e)
+        #     return jsonify({"error": str(e)})
+        print("treeHierarchy -----------------------------")
+
         try:
             conn = get_company_db_connection(db_nameeee)
 
-            new_df = fetch_chart_data(conn, table_name)
-            # new_df = fetch_tree_data(db_nameeee, table_name, x_axis_columns, y_axis_columns,checked_option, selectedUser)
+            # Fetch raw data
+            df = fetch_chart_data(conn, table_name)
+            temp_df = df.copy()
 
-            # Check if we need aggregation
+            # ============================================
+            #         DATE GRANULARITY PROCESSING
+            # ============================================
+            if dateGranularity and isinstance(dateGranularity, dict):
+                for date_col, granularity in dateGranularity.items():
+
+                    # Check if column exists and is part of X-axis
+                    if date_col in temp_df.columns and date_col in x_axis_columns:
+                        print(f"Applying date granularity: {date_col} → {granularity}")
+
+                        temp_df[date_col] = pd.to_datetime(temp_df[date_col], errors="coerce")
+
+                        # New column
+                        granularity_col = f"{date_col}_{granularity.lower()}"
+
+                        g = granularity.lower()
+                        if g == "year":
+                            temp_df[granularity_col] = temp_df[date_col].dt.year.astype(str)
+                        elif g == "quarter":
+                            temp_df[granularity_col] = "Q" + temp_df[date_col].dt.quarter.astype(str)
+                        elif g == "month":
+                            temp_df[granularity_col] = temp_df[date_col].dt.strftime("%B")
+                        elif g == "week":
+                            temp_df[granularity_col] = (
+                                "Week " + temp_df[date_col].dt.isocalendar().week.astype(str)
+                            )
+                        elif g == "day":
+                            temp_df[granularity_col] = temp_df[date_col].dt.date.astype(str)
+                        else:
+                            raise ValueError(f"Unsupported date granularity: {granularity}")
+
+                        # Replace the original X-axis column with granularity column
+                        x_axis_columns = [
+                            granularity_col if col == date_col else col
+                            for col in x_axis_columns
+                        ]
+
+                        print(f"Created {granularity_col} from {date_col}")
+                        print("Sample values:", temp_df[granularity_col].head())
+
+            # ============================================
+            #              APPLY FILTERS
+            # ============================================
+            filter_values = []
+            for col in x_axis_columns:
+                if col in checked_option:
+                    filter_values.extend(checked_option[col])
+
+            filter_values = list(map(str, filter_values))
+
+            if filter_values:
+                df_filtered = temp_df[temp_df[x_axis_columns[0]].isin(filter_values)]
+            else:
+                df_filtered = temp_df
+
+            # ============================================
+            #              APPLY AGGREGATION
+            # ============================================
             if aggregation and y_axis_columns:
+                y_col = y_axis_columns[0]
+
                 if aggregation == "sum":
-                    new_df = new_df.groupby(x_axis_columns, as_index=False)[y_axis_columns[0]].sum()
+                    df_filtered = df_filtered.groupby(x_axis_columns, as_index=False)[y_col].sum()
                 elif aggregation == "count":
-                    new_df = new_df.groupby(x_axis_columns, as_index=False)[y_axis_columns[0]].count()
+                    df_filtered = df_filtered.groupby(x_axis_columns, as_index=False)[y_col].count()
                 elif aggregation == "mean":
-                    new_df = new_df.groupby(x_axis_columns, as_index=False)[y_axis_columns[0]].mean()
+                    df_filtered = df_filtered.groupby(x_axis_columns, as_index=False)[y_col].mean()
                 else:
                     return jsonify({"error": f"Unsupported aggregation type: {aggregation}"})
-            
-            # Prepare data for tree hierarchy
+
+            # ============================================
+            #              PREPARE TREE DATA
+            # ============================================
             categories = []
             values = []
 
-            for index, row in new_df.iterrows():
-                category = {col: row[col] for col in x_axis_columns}  # Hierarchy levels
-                categories.append(category)
-                values.append(row[y_axis_columns[0]] if y_axis_columns else 1)  # Use aggregated value
-            print("aggregation",aggregation)
+            for _, row in df_filtered.iterrows():
+                categories.append({col: row[col] for col in x_axis_columns})
+                values.append(row[y_col] if y_axis_columns else 1)
+
+            print("aggregation:", aggregation)
+
             return jsonify({
                 "categories": categories,
                 "values": values,
                 "chartType": "treeHierarchy",
             })
-           
 
         except Exception as e:
             print("Error preparing Tree Hierarchy data:", e)
             return jsonify({"error": str(e)})
+
     elif chartType == "timeSeriesDecomposition":
         print("Time Series Decomposition Chart")
         if not x_axis_columns or not y_axis_columns:
@@ -2947,6 +3169,63 @@ def get_edit_chart_route():
         print("treeHierarchy-----------------------------")
         try:
             # new_df = fetch_tree_data(db_nameeee, table_name, x_axis_columns, y_axis_columns,checked_option, selectedUser)
+            temp_df = df.copy()
+
+            # ============================================
+            #         DATE GRANULARITY PROCESSING
+            # ============================================
+            if dateGranularity and isinstance(dateGranularity, dict):
+                for date_col, granularity in dateGranularity.items():
+
+                    # Check if column exists and is part of X-axis
+                    if date_col in temp_df.columns and date_col in x_axis_columns:
+                        print(f"Applying date granularity: {date_col} → {granularity}")
+
+                        temp_df[date_col] = pd.to_datetime(temp_df[date_col], errors="coerce")
+
+                        # New column
+                        granularity_col = f"{date_col}_{granularity.lower()}"
+
+                        g = granularity.lower()
+                        if g == "year":
+                            temp_df[granularity_col] = temp_df[date_col].dt.year.astype(str)
+                        elif g == "quarter":
+                            temp_df[granularity_col] = "Q" + temp_df[date_col].dt.quarter.astype(str)
+                        elif g == "month":
+                            temp_df[granularity_col] = temp_df[date_col].dt.strftime("%B")
+                        elif g == "week":
+                            temp_df[granularity_col] = (
+                                "Week " + temp_df[date_col].dt.isocalendar().week.astype(str)
+                            )
+                        elif g == "day":
+                            temp_df[granularity_col] = temp_df[date_col].dt.date.astype(str)
+                        else:
+                            raise ValueError(f"Unsupported date granularity: {granularity}")
+
+                        # Replace the original X-axis column with granularity column
+                        x_axis_columns = [
+                            granularity_col if col == date_col else col
+                            for col in x_axis_columns
+                        ]
+
+                        print(f"Created {granularity_col} from {date_col}")
+                        print("Sample values:", temp_df[granularity_col].head())
+
+            # ============================================
+            #              APPLY FILTERS
+            # ============================================
+            filter_values = []
+            for col in x_axis_columns:
+                if col in checked_option:
+                    filter_values.extend(checked_option[col])
+
+            filter_values = list(map(str, filter_values))
+
+            if filter_values:
+                df_filtered = temp_df[temp_df[x_axis_columns[0]].isin(filter_values)]
+            else:
+                df_filtered = temp_df
+            new_df = df_filtered
 
             # Check if we need aggregation
             if aggregation and y_axis_columns:
@@ -5227,6 +5506,7 @@ def receive_chart_details():
     chart_heading = data.get('chart_heading')
     optimizeData= data.get('optimizeData')
     user_id=data.get('user_id')
+    dateGranularity = data.get("selectedFrequency", {})
     try:
         filter_options_str = data.get('filter_options').replace('null', 'null') #this line is not needed.
         filter_options = json.loads(data.get('filter_options')) #use json.loads instead of ast.literal_eval.
@@ -5510,7 +5790,6 @@ def receive_chart_details():
                     print("Dual y-axis chart detected")
                     # print("filter_options====================", filter_options)
                     # print("filtertype====================", type(filter_options))
-                    dateGranularity= data.get("selectedFrequency",)
                     data = fetch_data_for_duel(tableName, x_axis, filter_options, y_axis, aggregate, databaseName, selectedUser,calculation_data,dateGranularity)
                     # print("Data from fetch_data_for_duel:")  # Print before returning
                     # print("Categories:", [row[0] for row in data])
@@ -5534,7 +5813,6 @@ def receive_chart_details():
                     })
             if chart_type == "duealChart"  :
                     print("Dual y-axis chart detected")
-                    dateGranularity= data.get("selectedFrequency",)
                     # print("filter_options====================", filter_options)
                     # print("filtertype====================", type(filter_options))
                     data = fetch_data_for_duel(tableName, x_axis, filter_options, y_axis, aggregate, databaseName, selectedUser,calculation_data,dateGranularity)
@@ -5609,7 +5887,6 @@ def receive_chart_details():
                 df, x_axis, y_axis = apply_calculation_to_df(df, calculation_data, x_axis, y_axis)
 
                 # ---------- DATE GRANULARITY (COUNT SECTION) ----------
-                dateGranularity = data.get("selectedFrequency", {})
                 if isinstance(dateGranularity, str):
                     try:
                         dateGranularity = json.loads(dateGranularity)
@@ -5761,7 +6038,7 @@ def receive_chart_details():
                     df, x_axis, y_axis = apply_calculation_to_df(df, calculation_data, x_axis, y_axis)
 
                     # ---------- DATE GRANULARITY (DUAL-AXIS SECTION) ----------
-                    dateGranularity = data.get("selectedFrequency", {})
+                  
                     if isinstance(dateGranularity, str):
                         try:
                             dateGranularity = json.loads(dateGranularity)
@@ -5865,7 +6142,7 @@ def receive_chart_details():
                     df, x_axis, y_axis = apply_calculation_to_df(df, calculation_data, x_axis, y_axis)
 
                     # ---------- DATE GRANULARITY (BUTTERFLY SECTION) ----------
-                    dateGranularity = data.get("selectedFrequency", {})
+                    
                     if isinstance(dateGranularity, str):
                         try:
                             dateGranularity = json.loads(dateGranularity)
@@ -6310,7 +6587,6 @@ def receive_chart_details():
                     # ----------------------------- START REPLACEMENT BLOCK -----------------------------
 
                     # Convert selectedFrequency string → dict
-                    dateGranularity = data.get("selectedFrequency", {})
                     if isinstance(dateGranularity, str):
                         try:
                             dateGranularity = json.loads(dateGranularity)
@@ -6523,8 +6799,8 @@ def receive_chart_details():
                     # Separate back into categories and values
             optimized_categories = [pair[0] for pair in optimized_pairs]
             optimized_values = [pair[1] for pair in optimized_pairs]
-            print("categories",categories)
-            print("values",values)
+            # print("categories",categories)
+            # print("values",values)
             # Return the filtered data
             description = f"{user_name} viewed the chart '{chart}' from table '{tableName}'."
             log_activity(
@@ -14060,6 +14336,61 @@ def check_login_status_route():
             cur.close()
         if conn:
             conn.close()
+
+
+@app.route('/column_types', methods=['GET'])
+def get_column_types():
+    try:
+        database = request.args.get("database")
+        table = request.args.get("table")
+        columns = request.args.get("columns", "")
+
+        if not database or not table or not columns:
+            return jsonify({
+                "status": "error",
+                "message": "Missing required parameters: database, table, columns"
+            }), 400
+
+        column_list = columns.split(",")
+
+        conn = psycopg2.connect(
+            host=HOST,
+            database=database,
+            user=USER_NAME,
+            password=PASSWORD,
+            port=PORT
+        )
+        cur = conn.cursor()
+
+        result = {}
+
+        for col in column_list:
+            cur.execute(f"""
+                SELECT data_type 
+                FROM information_schema.columns 
+                WHERE table_schema = 'public'
+                AND table_name = %s 
+                AND column_name = %s
+            """, (table, col))
+
+            row = cur.fetchone()
+            result[col] = row[0] if row else "unknown"
+
+        cur.close()
+        conn.close()
+
+        return jsonify({
+            "status": "success",
+            "data": result
+        })
+
+    except Exception as e:
+        print("Error in /column_types:", e)
+        return jsonify({
+            "status": "error",
+            "message": str(e)
+        }), 500
+
 
 # app.register_blueprint(license_bp)
 
