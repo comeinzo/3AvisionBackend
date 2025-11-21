@@ -6,6 +6,11 @@ from sqlalchemy import create_engine
 import json
 from psycopg2 import sql
 from load import GLOBAL_CACHE
+import paramiko
+import socket
+import threading
+from dashboard_design import get_db_connection_or_path
+
 global_df = None  # Ensure global_df is initialized to None
 global_column_names = None
 def is_numeric(value):
@@ -21,30 +26,236 @@ def remove_symbols(value):
     return value
 
 
-def get_column_names(db_name, username, password, table_name, selected_user, host='localhost', port='5432', connection_type='local'):
-    """
-    Retrieves numeric and text column names for a given table by querying database metadata.
-    This function avoids loading the entire table into memory, preventing MemoryErrors.
+# def get_column_names(db_name, username, password, table_name, selected_user, host='localhost', port='5432', connection_type='local'):
+#     """
+#     Retrieves numeric and text column names for a given table by querying database metadata.
+#     This function avoids loading the entire table into memory, preventing MemoryErrors.
 
-    Args:
-        db_name (str): The name of the database.
-        username (str): Database username.
-        password (str): Database password.
-        table_name (str): The name of the table to inspect.
-        selected_user (str): The selected user for external connections.
-        host (str): Database host address.
-        port (str): Database port number.
-        connection_type (str): Type of connection ('local' or 'external').
+#     Args:
+#         db_name (str): The name of the database.
+#         username (str): Database username.
+#         password (str): Database password.
+#         table_name (str): The name of the table to inspect.
+#         selected_user (str): The selected user for external connections.
+#         host (str): Database host address.
+#         port (str): Database port number.
+#         connection_type (str): Type of connection ('local' or 'external').
 
-    Returns:
-        dict: A dictionary containing lists of 'numeric_columns' and 'text_columns'.
-              Includes an 'error' key if an exception occurs.
+#     Returns:
+#         dict: A dictionary containing lists of 'numeric_columns' and 'text_columns'.
+#               Includes an 'error' key if an exception occurs.
+#     """
+#     conn = None
+#     cursor = None
+#     try:
+#         print("connection_type:", connection_type)
+#         # Establish database connection based on connection_type
+#         # if connection_type == 'local' or connection_type == 'null' or connection_type =='none': # 'null' for compatibility if frontend sends it
+#         if not connection_type or connection_type.lower() in ('local', 'null', 'none'):
+#             conn = psycopg2.connect(
+#                 dbname=db_name,
+#                 user=username,
+#                 password=password,
+#                 host=host,
+#                 port=port
+#             )
+#         # else:  # External database connection
+#         #     connection_details = fetch_external_db_connection(db_name, selected_user)
+#         #     if not connection_details:
+#         #         raise Exception(f"Unable to fetch external database connection details for {db_name}.")
+
+#         #     # Ensure all required details are present and correctly mapped
+#         #     db_details = {
+#         #         "host": connection_details[3],
+#         #         "database": connection_details[7],
+#         #         "user": connection_details[4],
+#         #         "password": connection_details[5],
+#         #         "port": int(connection_details[6]) # Ensure port is an integer
+#         #     }
+#         #     print("External DB Details:", db_details)
+#         else:
+#             # ✅ EXTERNAL CONNECTION
+#             connection_details = fetch_external_db_connection(db_name, selected_user)
+#             print("fetched connection details:",connection_details)
+#             if not connection_details:
+#                 raise Exception(f"Unable to fetch external database connection details for user '{selected_user}'")
+
+#             db_details = {
+#                 "name": connection_details[1],
+#                 "dbType": connection_details[2],
+#                 "host": connection_details[3],
+#                 "user": connection_details[4],
+#                 "password": connection_details[5],
+#                 "port": int(connection_details[6]),
+#                 "database": connection_details[7],
+#                 "use_ssh": connection_details[8],
+#                 "ssh_host": connection_details[9],
+#                 "ssh_port": int(connection_details[10]),
+#                 "ssh_username": connection_details[11],
+#                 "ssh_key_path": connection_details[12],
+#             }
+
+#             print(f"🔹 External DB Connection Details: {db_details}")
+
+#             host = db_details["host"]
+#             port = db_details["port"]
+
+#             # ✅ Start SSH tunnel if required
+#             if db_details["use_ssh"]:
+#                 print("🔐 Establishing SSH tunnel manually (Paramiko)...")
+
+#                 private_key = paramiko.RSAKey.from_private_key_file(db_details["ssh_key_path"])
+#                 ssh_client = paramiko.SSHClient()
+#                 ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+#                 ssh_client.connect(
+#                     db_details["ssh_host"],
+#                     username=db_details["ssh_username"],
+#                     pkey=private_key,
+#                     port=db_details["ssh_port"],
+#                     timeout=10
+#                 )
+
+#                 # Find a free local port
+#                 local_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+#                 local_sock.bind(('127.0.0.1', 0))
+#                 local_port = local_sock.getsockname()[1]
+#                 local_sock.listen(1)
+#                 print(f"✅ Local forwarder listening on 127.0.0.1:{local_port}")
+
+#                 transport = ssh_client.get_transport()
+
+#                 def pipe(src, dst):
+#                     try:
+#                         while True:
+#                             data = src.recv(1024)
+#                             if not data:
+#                                 break
+#                             dst.sendall(data)
+#                     except Exception:
+#                         pass
+#                     finally:
+#                         src.close()
+#                         dst.close()
+
+#                 def forward_tunnel():
+#                     while not stop_event.is_set():
+#                         client_sock, _ = local_sock.accept()
+#                         try:
+#                             chan = transport.open_channel(
+#                                 "direct-tcpip",
+#                                 ("127.0.0.1", 5432),  # 🔹 Always map to PostgreSQL inside EC2
+#                                 client_sock.getsockname()
+#                             )
+#                             threading.Thread(target=pipe, args=(client_sock, chan)).start()
+#                             threading.Thread(target=pipe, args=(chan, client_sock)).start()
+#                         except Exception as e:
+#                             print(f"❌ Channel open failed: {e}")
+#                             client_sock.close()
+
+#                 tunnel_thread = threading.Thread(target=forward_tunnel, daemon=True)
+#                 tunnel_thread.start()
+
+#                 host = "127.0.0.1"
+#                 port = local_port
+
+#             # ✅ Connect to external PostgreSQL through tunnel/local port
+#             print(f"🧩 Connecting to external PostgreSQL at {host}:{port} ...")
+#             conn = psycopg2.connect(
+#                 dbname=db_details['database'],
+#                 user=db_details['user'],
+#                 password=db_details['password'],
+#                 host=db_details['host'],
+#                 port=db_details['port']
+#             )
+
+#         cursor = conn.cursor()
+
+#         # Query information_schema to get column names and their data types
+#         # This is the key change to avoid MemoryError by not fetching all rows.
+#         # It's crucial that your application has permissions to read information_schema.
+#         # current_schema() will use the default schema (e.g., 'public'),
+#         # if your tables are in a different schema, you'll need to specify it.
+#         cursor.execute(f"""
+#             SELECT column_name, data_type
+#             FROM information_schema.columns
+#             WHERE table_schema = current_schema()
+#             AND table_name = %s;
+#         """, (table_name,)) # Use parameterized query to prevent SQL injection
+
+#         columns_metadata = cursor.fetchall()
+
+#         numeric_columns = []
+#         text_columns = []
+
+#         # Define common numeric and text data types for PostgreSQL.
+#         # You can expand these lists based on the specific data types in your database.
+#         numeric_types = [
+#             'smallint', 'integer', 'bigint', 'decimal', 'numeric', 'real',
+#             'double precision', 'serial', 'bigserial', 'money'
+#         ]
+#         text_types = [
+#             'character varying', 'varchar', 'character', 'char', 'text', 'citext',
+#             'json', 'jsonb', 'xml', 'uuid', 'bytea', 'tsquery', 'tsvector',
+#             'inet', 'cidr', 'macaddr' # Network address types often treated as text
+#         ]
+#         # Date/Time types
+#         datetime_types = [
+#             'date', 'timestamp', 'timestamptz', 'time', 'timetz', 'interval'
+#         ]
+#         # Boolean type
+#         boolean_type = ['boolean']
+
+#         for column_name, data_type in columns_metadata:
+#             # PostgreSQL data types are generally lowercase.
+#             # Convert to lowercase to ensure consistent matching.
+#             data_type_lower = data_type.lower()
+#             if data_type_lower in numeric_types:
+#                 numeric_columns.append(column_name)
+#             elif data_type_lower in text_types or data_type_lower in datetime_types or data_type_lower in boolean_type:
+#                 # Group date/time and boolean as text for charting purposes if not numeric
+#                 text_columns.append(column_name)
+#             else:
+#                 # Default unknown types to text
+#                 text_columns.append(column_name)
+
+#         # print("Identified Numeric columns:", numeric_columns)
+#         # print("Identified Text columns:", text_columns)
+
+#         return {
+#             'numeric_columns': numeric_columns,
+#             'text_columns': text_columns
+#         }
+
+#     except psycopg2.Error as e:
+#         print(f"Database error occurred: {e}")
+#         return {'numeric_columns': [], 'text_columns': [], 'error': f"Database error: {e}"}
+#     except Exception as e:
+#         print(f"An unexpected error occurred: {e}")
+#         return {'numeric_columns': [], 'text_columns': [], 'error': f"An unexpected error occurred: {e}"}
+#     finally:
+#         # Ensure cursor and connection are closed
+#         if cursor:
+#             cursor.close()
+#         if conn:
+#             conn.close()
+def get_column_names(db_name, username, password, table_name, selected_user,
+                     host='localhost', port='5432', connection_type='local'):
     """
+    Retrieve numeric and text column names from a given table
+    for both local and external (SSH) PostgreSQL connections.
+    """
+    print("kconnect",connection_type)
     conn = None
     cursor = None
+    ssh_client = None
+    local_sock = None
+    stop_event = threading.Event()
+    tunnel_thread = None
+
     try:
-        # Establish database connection based on connection_type
-        # if connection_type == 'local' or connection_type == 'null' or connection_type =='none': # 'null' for compatibility if frontend sends it
+        print("connection_type:", connection_type)
+
+        # ✅ 1️⃣ LOCAL DATABASE CONNECTION
         if not connection_type or connection_type.lower() in ('local', 'null', 'none'):
             conn = psycopg2.connect(
                 dbname=db_name,
@@ -53,49 +264,115 @@ def get_column_names(db_name, username, password, table_name, selected_user, hos
                 host=host,
                 port=port
             )
-        else:  # External database connection
-            connection_details = fetch_external_db_connection(db_name, selected_user)
-            if not connection_details:
-                raise Exception(f"Unable to fetch external database connection details for {db_name}.")
 
-            # Ensure all required details are present and correctly mapped
+        # ✅ 2️⃣ EXTERNAL DATABASE CONNECTION (via SSH tunnel)
+        else:
+            connection_details = fetch_external_db_connection(db_name, selected_user)
+            print("fetched connection details:", connection_details)
+            if not connection_details:
+                raise Exception(f"Unable to fetch external database connection details for user '{selected_user}'")
+
             db_details = {
+                "name": connection_details[1],
+                "dbType": connection_details[2],
                 "host": connection_details[3],
-                "database": connection_details[7],
                 "user": connection_details[4],
                 "password": connection_details[5],
-                "port": int(connection_details[6]) # Ensure port is an integer
+                "port": int(connection_details[6]),
+                "database": connection_details[7],
+                "use_ssh": connection_details[8],
+                "ssh_host": connection_details[9],
+                "ssh_port": int(connection_details[10]),
+                "ssh_username": connection_details[11],
+                "ssh_key_path": connection_details[12],
             }
-            print("External DB Details:", db_details)
+
+            print(f"🔹 External DB Connection Details: {db_details}")
+
+            # ✅ Start SSH tunnel if needed
+            if db_details["use_ssh"]:
+                print("🔐 Establishing SSH tunnel manually (Paramiko)...")
+                private_key = paramiko.RSAKey.from_private_key_file(db_details["ssh_key_path"])
+
+                ssh_client = paramiko.SSHClient()
+                ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+                ssh_client.connect(
+                    db_details["ssh_host"],
+                    username=db_details["ssh_username"],
+                    pkey=private_key,
+                    port=db_details["ssh_port"],
+                    timeout=10
+                )
+
+                # Find free local port for tunnel
+                local_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                local_sock.bind(('127.0.0.1', 0))
+                local_port = local_sock.getsockname()[1]
+                local_sock.listen(1)
+                print(f"✅ Local forwarder listening on 127.0.0.1:{local_port}")
+
+                transport = ssh_client.get_transport()
+
+                def pipe(src, dst):
+                    try:
+                        while True:
+                            data = src.recv(1024)
+                            if not data:
+                                break
+                            dst.sendall(data)
+                    except Exception:
+                        pass
+                    finally:
+                        src.close()
+                        dst.close()
+
+                def forward_tunnel():
+                    while not stop_event.is_set():
+                        try:
+                            client_sock, _ = local_sock.accept()
+                            chan = transport.open_channel(
+                                "direct-tcpip",
+                                ("127.0.0.1", 5432),
+                                client_sock.getsockname()
+                            )
+                            if chan is None:
+                                client_sock.close()
+                                continue
+                            threading.Thread(target=pipe, args=(client_sock, chan), daemon=True).start()
+                            threading.Thread(target=pipe, args=(chan, client_sock), daemon=True).start()
+                        except Exception as e:
+                            print(f"❌ Channel open failed: {e}")
+
+                tunnel_thread = threading.Thread(target=forward_tunnel, daemon=True)
+                tunnel_thread.start()
+
+                # Override host and port for local tunnel
+                host = "127.0.0.1"
+                port = local_port
+
+            print(f"🧩 Connecting to external PostgreSQL at {host}:{port} ...")
             conn = psycopg2.connect(
                 dbname=db_details['database'],
                 user=db_details['user'],
                 password=db_details['password'],
-                host=db_details['host'],
-                port=db_details['port']
+                host=host,       # ✅ Use tunneled host
+                port=port        # ✅ Use tunneled port
             )
 
+        # ✅ Fetch column names and types
         cursor = conn.cursor()
-
-        # Query information_schema to get column names and their data types
-        # This is the key change to avoid MemoryError by not fetching all rows.
-        # It's crucial that your application has permissions to read information_schema.
-        # current_schema() will use the default schema (e.g., 'public'),
-        # if your tables are in a different schema, you'll need to specify it.
-        cursor.execute(f"""
+        cursor.execute("""
             SELECT column_name, data_type
             FROM information_schema.columns
             WHERE table_schema = current_schema()
             AND table_name = %s;
-        """, (table_name,)) # Use parameterized query to prevent SQL injection
+        """, (table_name,))
 
         columns_metadata = cursor.fetchall()
 
         numeric_columns = []
         text_columns = []
 
-        # Define common numeric and text data types for PostgreSQL.
-        # You can expand these lists based on the specific data types in your database.
         numeric_types = [
             'smallint', 'integer', 'bigint', 'decimal', 'numeric', 'real',
             'double precision', 'serial', 'bigserial', 'money'
@@ -103,48 +380,40 @@ def get_column_names(db_name, username, password, table_name, selected_user, hos
         text_types = [
             'character varying', 'varchar', 'character', 'char', 'text', 'citext',
             'json', 'jsonb', 'xml', 'uuid', 'bytea', 'tsquery', 'tsvector',
-            'inet', 'cidr', 'macaddr' # Network address types often treated as text
+            'inet', 'cidr', 'macaddr'
         ]
-        # Date/Time types
-        datetime_types = [
-            'date', 'timestamp', 'timestamptz', 'time', 'timetz', 'interval'
-        ]
-        # Boolean type
+        datetime_types = ['date', 'timestamp', 'timestamptz', 'time', 'timetz', 'interval']
         boolean_type = ['boolean']
 
         for column_name, data_type in columns_metadata:
-            # PostgreSQL data types are generally lowercase.
-            # Convert to lowercase to ensure consistent matching.
             data_type_lower = data_type.lower()
             if data_type_lower in numeric_types:
                 numeric_columns.append(column_name)
             elif data_type_lower in text_types or data_type_lower in datetime_types or data_type_lower in boolean_type:
-                # Group date/time and boolean as text for charting purposes if not numeric
                 text_columns.append(column_name)
             else:
-                # Default unknown types to text
                 text_columns.append(column_name)
 
-        # print("Identified Numeric columns:", numeric_columns)
-        # print("Identified Text columns:", text_columns)
-
-        return {
-            'numeric_columns': numeric_columns,
-            'text_columns': text_columns
-        }
+        return {'numeric_columns': numeric_columns, 'text_columns': text_columns}
 
     except psycopg2.Error as e:
         print(f"Database error occurred: {e}")
         return {'numeric_columns': [], 'text_columns': [], 'error': f"Database error: {e}"}
+
     except Exception as e:
         print(f"An unexpected error occurred: {e}")
         return {'numeric_columns': [], 'text_columns': [], 'error': f"An unexpected error occurred: {e}"}
+
     finally:
-        # Ensure cursor and connection are closed
+        # ✅ Close resources
         if cursor:
             cursor.close()
         if conn:
             conn.close()
+        if ssh_client:
+            stop_event.set()
+            ssh_client.close()
+            print("🔒 SSH Tunnel closed.")
 
 
 
@@ -188,32 +457,140 @@ def edit_fetch_data(table_name, x_axis_columns, checked_option, y_axis_column, a
         print("Fetching data from the database...")
         try:
             # Establish database connection
-            if not selectedUser or str(selectedUser).lower() == 'null':
-                print("Using default database connection...")
-                connection_string = f"dbname={db_name} user={USER_NAME} password={PASSWORD} host={HOST}"
-                conn = psycopg2.connect(connection_string)
-            else:
-                print(f"Using connection for user: {selectedUser}")
-                connection_string = fetch_external_db_connection(db_name, selectedUser)
-                if not connection_string:
-                    raise Exception("Unable to fetch external database connection details.")
+            # if not selectedUser or str(selectedUser).lower() == 'null':
+            #     print("Using default database connection...")
+            #     connection_string = f"dbname={db_name} user={USER_NAME} password={PASSWORD} host={HOST}"
+            #     conn = psycopg2.connect(connection_string)
+            # else:
+            #     print(f"Using connection for user: {selectedUser}")
+            #     connection_string = fetch_external_db_connection(db_name, selectedUser)
+            #     if not connection_string:
+            #         raise Exception("Unable to fetch external database connection details.")
 
-                db_details = {
-                    "host": connection_string[3],
-                    "database": connection_string[7],
-                    "user": connection_string[4],
-                    "password": connection_string[5],
-                    "port": int(connection_string[6])
-                }
+            #     db_details = {
+            #         "host": connection_string[3],
+            #         "database": connection_string[7],
+            #         "user": connection_string[4],
+            #         "password": connection_string[5],
+            #         "port": int(connection_string[6])
+            #     }
 
-                conn = psycopg2.connect(
-                    dbname=db_details['database'],
-                    user=db_details['user'],
-                    password=db_details['password'],
-                    host=db_details['host'],
-                    port=db_details['port']
-                )
+            #     conn = psycopg2.connect(
+            #         dbname=db_details['database'],
+            #         user=db_details['user'],
+            #         password=db_details['password'],
+            #         host=db_details['host'],
+            #         port=db_details['port']
+            #     )
+            # if not selectedUser or selectedUser.lower() == 'null':
+            #     print("🟢 Using default local database connection...")
+            #     connection_string = f"dbname={db_name} user={USER_NAME} password={PASSWORD} host={HOST} port={PORT}"
+            #     conn = psycopg2.connect(connection_string)
 
+            # else:
+            #     print(f"🟡 Using external database connection for user: {selectedUser}")
+            #     connection_details = fetch_external_db_connection(db_name, selectedUser)
+
+            #     if not connection_details:
+            #         raise Exception(f"❌ Unable to fetch external database connection details for user '{selectedUser}'")
+
+            #     db_details = {
+            #         "name": connection_details[1],
+            #         "dbType": connection_details[2],
+            #         "host": connection_details[3],
+            #         "user": connection_details[4],
+            #         "password": connection_details[5],
+            #         "port": int(connection_details[6]),
+            #         "database": connection_details[7],
+            #         "use_ssh": connection_details[8],
+            #         "ssh_host": connection_details[9],
+            #         "ssh_port": int(connection_details[10]),
+            #         "ssh_username": connection_details[11],
+            #         "ssh_key_path": connection_details[12],
+            #     }
+
+            #     print(f"🔹 External DB Connection Details: {db_details}")
+
+            #     # Initialize SSH tunnel-related variables
+            #     ssh_client = None
+            #     local_sock = None
+            #     stop_event = threading.Event()
+            #     tunnel_thread = None
+
+            #     # ✅ SSH Tunnel Setup if required
+            #     if db_details["use_ssh"]:
+            #         print("🔐 Establishing SSH tunnel manually (Paramiko)...")
+            #         private_key = paramiko.RSAKey.from_private_key_file(db_details["ssh_key_path"])
+
+            #         ssh_client = paramiko.SSHClient()
+            #         ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            #         ssh_client.connect(
+            #             db_details["ssh_host"],
+            #             username=db_details["ssh_username"],
+            #             pkey=private_key,
+            #             port=db_details["ssh_port"],
+            #             timeout=10
+            #         )
+
+            #         # Find a free local port for tunnel forwarding
+            #         local_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            #         local_sock.bind(('127.0.0.1', 0))
+            #         local_port = local_sock.getsockname()[1]
+            #         local_sock.listen(1)
+            #         print(f"✅ Local forwarder listening on 127.0.0.1:{local_port}")
+
+            #         transport = ssh_client.get_transport()
+
+            #         def pipe(src, dst):
+            #             try:
+            #                 while True:
+            #                     data = src.recv(1024)
+            #                     if not data:
+            #                         break
+            #                     dst.sendall(data)
+            #             except Exception:
+            #                 pass
+            #             finally:
+            #                 src.close()
+            #                 dst.close()
+
+            #         def forward_tunnel():
+            #             while not stop_event.is_set():
+            #                 try:
+            #                     client_sock, _ = local_sock.accept()
+            #                     chan = transport.open_channel(
+            #                         "direct-tcpip",
+            #                         ("127.0.0.1", 5432),
+            #                         client_sock.getsockname()
+            #                     )
+            #                     if chan is None:
+            #                         client_sock.close()
+            #                         continue
+            #                     threading.Thread(target=pipe, args=(client_sock, chan), daemon=True).start()
+            #                     threading.Thread(target=pipe, args=(chan, client_sock), daemon=True).start()
+            #                 except Exception as e:
+            #                     print(f"❌ Channel open failed: {e}")
+
+            #         tunnel_thread = threading.Thread(target=forward_tunnel, daemon=True)
+            #         tunnel_thread.start()
+
+            #         # Override host and port to tunnel
+            #         host = "127.0.0.1"
+            #         port = local_port
+            #     else:
+            #         host = db_details["host"]
+            #         port = db_details["port"]
+
+            #     print(f"🧩 Connecting to external PostgreSQL at {host}:{port} ...")
+
+            #     conn = psycopg2.connect(
+            #         dbname=db_details["database"],
+            #         user=db_details["user"],
+            #         password=db_details["password"],
+            #         host=host,
+            #         port=port
+            #     )
+            conn = get_db_connection_or_path(selectedUser, db_name)
             cur = conn.cursor()
             query = f"SELECT {', '.join([x_axis_columns[0], y_axis_column[0]])} FROM {table_name}"
             cur.execute(query)
@@ -327,21 +704,22 @@ def count_function(table_name, x_axis_columns, checked_option, y_axis_column, ag
     return result
 
 
-def fetch_data(table_name, x_axis_columns, filter_options, y_axis_column, aggregation, db_name, selectedUser, calculationData):
-    # print("data",table_name, x_axis_columns, filter_options, y_axis_column, aggregation, db_name, selectedUser, calculationData)
+
+
+def fetch_data(table_name, x_axis_columns, filter_options, y_axis_column, aggregation, db_name, selectedUser, calculationData, dateGranularity):
     import numpy as np
     import json
     import re
-    print("data",filter_options)
-  
+    print("dateGranularity......................", dateGranularity)
+
     global global_df
     # print("global_df",global_df)
     if global_df is None:
         print("Fetching data from the database...")
         if not selectedUser or selectedUser.lower() == 'null':
             print("Using default database connection...")
-            connection_string = f"dbname={db_name} user={USER_NAME} password={PASSWORD} host={HOST}"
-            connection = psycopg2.connect(connection_string)
+            # connection_string = f"dbname={db_name} user={USER_NAME} password={PASSWORD} host={HOST}"
+            # connection = psycopg2.connect(connection_string)
         else:
             connection_details = fetch_external_db_connection(db_name, selectedUser)
             if not connection_details:
@@ -371,6 +749,20 @@ def fetch_data(table_name, x_axis_columns, filter_options, y_axis_column, aggreg
         global_df = pd.DataFrame(data, columns=colnames)
 
     temp_df = global_df.copy()
+    # ------------------- PROTECT DATE COLUMNS -------------------
+    # ------------------- PROTECT DATE COLUMNS -------------------
+    date_cols = [col for col in temp_df.columns if "date" in col.lower()]
+    for dcol in date_cols:
+        # Try converting safely WITHOUT using errors='ignore'
+        try:
+            temp_df[dcol] = pd.to_datetime(temp_df[dcol], dayfirst=True)
+        except Exception:
+            # If conversion fails, do NOT modify the column
+            print(f"{dcol} is not a valid date column. No conversion applied.")
+            pass
+
+
+        
 
     # Handle calculation logic
     # if calculationData and calculationData.get('calculation') and calculationData.get('columnName'):
@@ -406,298 +798,343 @@ def fetch_data(table_name, x_axis_columns, filter_options, y_axis_column, aggreg
             if x_axis_columns:
                 x_axis_columns = [new_col_name if col == replace_col else col for col in x_axis_columns]
 
-                    # if new_col_name in y_axis_column:
+                # if new_col_name in y_axis_column:
 
-                # Handle "if (...) then ... else ..." expressions
-                if calc_formula.strip().lower().startswith("if"):
-                    match = re.match(r"if\s*\((.+?)\)\s*then\s*'?(.*?)'?\s*else\s*'?(.*?)'?$", calc_formula.strip(), re.IGNORECASE)
-                    if not match:
-                        raise ValueError("Invalid if-then-else format in calculation.")
+            # Handle "if (...) then ... else ..." expressions
+            if calc_formula.strip().lower().startswith("if"):
+                match = re.match(r"if\s*\((.+?)\)\s*then\s*'?(.*?)'?\s*else\s*'?(.*?)'?$", calc_formula.strip(), re.IGNORECASE)
+                if not match:
+                    raise ValueError("Invalid if-then-else format in calculation.")
 
-                    condition_expr, then_val, else_val = match.groups()
+                condition_expr, then_val, else_val = match.groups()
 
-                    # def replace_column(match):
-                    #     col_name = match.group(1)
-                    #     if col_name in temp_df.columns:
-                    #         return f"temp_df['{col_name}']"
-                    #     else:
-                    #         raise ValueError(f"Column {col_name} not found in DataFrame.")
+                condition_expr_python = re.sub(r'\[(.*?)\]', replace_column, condition_expr)
+                then_val = then_val.strip('"').strip("'")
+                else_val = else_val.strip('"').strip("'")
 
-                    condition_expr_python = re.sub(r'\[(.*?)\]', replace_column, condition_expr)
+                print("Evaluating formula as np.where:", f"np.where({condition_expr_python}, {then_val}, {else_val})")
+                temp_df[new_col_name] = np.where(eval(condition_expr_python),f"{then_val}",f"{else_val}")
+            elif calc_formula.lower().startswith("switch"):
+                switch_match = re.match(r"switch\s*\(\s*\[([^\]]+)\](.*?)\)", calc_formula, re.IGNORECASE)
+                if not switch_match:
+                    raise ValueError("Invalid SWITCH syntax")
 
-                    # print("Evaluating formula as np.where:", f"np.where({condition_expr_python}, '{then_val}', '{else_val}')")
-                    # Strip any unnecessary wrapping quotes from then/else values
-                    then_val = then_val.strip('"').strip("'")
-                    else_val = else_val.strip('"').strip("'")
+                col_name, rest = switch_match.groups()
+                if col_name not in temp_df.columns:
+                    raise ValueError(f"Column '{col_name}' not found in DataFrame")
 
-                    print("Evaluating formula as np.where:", f"np.where({condition_expr_python}, {then_val}, {else_val})")
-                    temp_df[new_col_name] = np.where(eval(condition_expr_python),f"{then_val}",f"{else_val}")
+                cases = re.findall(r'"(.*?)"\s*,\s*"(.*?)"', rest)
+                default_match = re.search(r'["\']?default["\']?\s*,\s*["\']?(.*?)["\']?\s*$', rest, re.IGNORECASE)
+                default_value = default_match.group(1) if default_match else None
+            elif calc_formula.lower().startswith("iferror"):
+                match = re.match(r"iferror\s*\((.+?)\s*,\s*(.+?)\)", calc_formula.strip(), re.IGNORECASE)
+                if not match:
+                    raise ValueError("Invalid IFERROR format")
 
-                    # temp_df[new_col_name] = np.where(eval(condition_expr_python), then_val, else_val)
-                elif calc_formula.lower().startswith("switch"):
-                    switch_match = re.match(r"switch\s*\(\s*\[([^\]]+)\](.*?)\)", calc_formula, re.IGNORECASE)
-                    if not switch_match:
-                        raise ValueError("Invalid SWITCH syntax")
+                expr, fallback = match.groups()
+                expr_python = re.sub(r'\[(.*?)\]', replace_column, expr)
+                fallback = fallback.strip()
+                print("Evaluating IFERROR formula:", expr_python)
 
-                    col_name, rest = switch_match.groups()
-                    if col_name not in temp_df.columns:
-                        raise ValueError(f"Column '{col_name}' not found in DataFrame")
+                try:
+                    temp_df[new_col_name] = eval(expr_python)
+                    temp_df[new_col_name] = temp_df[new_col_name].fillna(fallback)
+                except Exception as e:
+                    print("Error in IFERROR eval:", e)
+                    temp_df[new_col_name] = fallback
 
-                    cases = re.findall(r'"(.*?)"\s*,\s*"(.*?)"', rest)
-                    default_match = re.search(r'["\']?default["\']?\s*,\s*["\']?(.*?)["\']?\s*$', rest, re.IGNORECASE)
-                    default_value = default_match.group(1) if default_match else None
-                elif calc_formula.lower().startswith("iferror"):
-                    match = re.match(r"iferror\s*\((.+?)\s*,\s*(.+?)\)", calc_formula.strip(), re.IGNORECASE)
-                    if not match:
-                        raise ValueError("Invalid IFERROR format")
+            # Case 4: CALCULATE(SUM([col]), [filter] = 'X')
+            elif calc_formula.lower().startswith("calculate"):
+                match = re.match(r"calculate\s*\(\s*(sum|avg|count|max|min)\s*\(\s*\[([^\]]+)\]\s*\)\s*,\s*\[([^\]]+)\]\s*=\s*['\"](.*?)['\"]\s*\)", calc_formula.strip(), re.IGNORECASE)
+                if not match:
+                    raise ValueError("Invalid CALCULATE format")
 
-                    expr, fallback = match.groups()
-                    expr_python = re.sub(r'\[(.*?)\]', replace_column, expr)
-                    fallback = fallback.strip()
-                    print("Evaluating IFERROR formula:", expr_python)
+                agg_func, value_col, filter_col, filter_val = match.groups()
+                print(f"Applying CALCULATE: {agg_func.upper()}({value_col}) WHERE {filter_col} = {filter_val}")
 
-                    try:
-                        temp_df[new_col_name] = eval(expr_python)
-                        temp_df[new_col_name] = temp_df[new_col_name].fillna(fallback)
-                    except Exception as e:
-                        print("Error in IFERROR eval:", e)
-                        temp_df[new_col_name] = fallback
+                df_filtered = temp_df[temp_df[filter_col] == filter_val]
+                if agg_func == "sum":
+                    result_val = df_filtered[value_col].astype(float).sum()
+                elif agg_func == "avg":
+                    result_val = df_filtered[value_col].astype(float).mean()
+                elif agg_func == "count":
+                    result_val = df_filtered[value_col].count()
+                elif agg_func == "max":
+                    result_val = df_filtered[value_col].astype(float).max()
+                elif agg_func == "min":
+                    result_val = df_filtered[value_col].astype(float).min()
+                else:
+                    raise ValueError("Unsupported aggregate in CALCULATE")
 
-                # Case 4: CALCULATE(SUM([col]), [filter] = 'X')
-                elif calc_formula.lower().startswith("calculate"):
-                    match = re.match(r"calculate\s*\(\s*(sum|avg|count|max|min)\s*\(\s*\[([^\]]+)\]\s*\)\s*,\s*\[([^\]]+)\]\s*=\s*['\"](.*?)['\"]\s*\)", calc_formula.strip(), re.IGNORECASE)
-                    if not match:
-                        raise ValueError("Invalid CALCULATE format")
+                temp_df[new_col_name] = result_val
+            elif calc_formula.lower().startswith("maxx") or calc_formula.lower().startswith("minx"):
+                match = re.match(r'(maxx|minx)\s*\(\s*\[([^\]]+)\]\s*\)', calc_formula, re.IGNORECASE)
+                if not match:
+                    raise ValueError("Invalid MAXX/MINX syntax.")
+                func, col = match.groups()
+                if col not in temp_df.columns:
+                    raise ValueError(f"Column '{col}' not found.")
+                result_val = temp_df[col].max() if func.lower() == "maxx" else temp_df[col].min()
+                temp_df[new_col_name] = result_val
+            elif calc_formula.lower().startswith("abs"):
+                match = re.match(r'abs\s*\(\s*\[([^\]]+)\]\s*\)', calc_formula, re.IGNORECASE)
+                if not match:
+                    raise ValueError("Invalid ABS syntax.")
+                col = match.group(1)
+                if col not in temp_df.columns:
+                    raise ValueError(f"Column '{col}' not found.")
+                temp_df[new_col_name] = temp_df[col].abs()
+            elif calc_formula.lower().startswith("len"):
+                match = re.match(r'len\s*\(\s*(?:\[([^\]]+)\]|"([^"]+)")\s*\)', calc_formula, re.IGNORECASE)
+                col = match.group(1) or match.group(2)
+                if col not in temp_df.columns:
+                    raise ValueError(f"Column '{col}' not found.")
+                temp_df[new_col_name] = temp_df[col].astype(str).str.len()
+            elif calc_formula.lower().startswith("lower"):
+                match = re.match(r'lower\s*\(\s*\[([^\]]+)\]\s*\)', calc_formula, re.IGNORECASE)
+                col = match.group(1)
+                temp_df[new_col_name] = temp_df[col].astype(str).str.lower()
 
-                    agg_func, value_col, filter_col, filter_val = match.groups()
-                    print(f"Applying CALCULATE: {agg_func.upper()}({value_col}) WHERE {filter_col} = {filter_val}")
+            elif calc_formula.lower().startswith("upper"):
+                match = re.match(r'upper\s*\(\s*\[([^\]]+)\]\s*\)', calc_formula, re.IGNORECASE)
+                col = match.group(1)
+                temp_df[new_col_name] = temp_df[col].astype(str).str.upper()
+            elif calc_formula.lower().startswith("concat"):
+                match = re.match(r'concat\s*\((.+)\)', calc_formula, re.IGNORECASE)
+                if match:
+                    parts = [p.strip() for p in re.split(r',(?![^\[]*\])', match.group(1))]
+                    concat_parts = []
+                    for part in parts:
+                        if part.startswith('[') and part.endswith(']'):
+                            col = part[1:-1]
+                            if col not in temp_df.columns:
+                                raise ValueError(f"Column '{col}' not found.")
+                            concat_parts.append(temp_df[col].astype(str))
+                        else:
+                            concat_parts.append(part.strip('"').strip("'"))
+                    from functools import reduce
+                    temp_df[new_col_name] = reduce(lambda x, y: x + y, [p if isinstance(p, pd.Series) else pd.Series([p]*len(temp_df)) for p in concat_parts])
 
-                    df_filtered = temp_df[temp_df[filter_col] == filter_val]
-                    if agg_func == "sum":
-                        result_val = df_filtered[value_col].astype(float).sum()
-                    elif agg_func == "avg":
-                        result_val = df_filtered[value_col].astype(float).mean()
-                    elif agg_func == "count":
-                        result_val = df_filtered[value_col].count()
-                    elif agg_func == "max":
-                        result_val = df_filtered[value_col].astype(float).max()
-                    elif agg_func == "min":
-                        result_val = df_filtered[value_col].astype(float).min()
-                    else:
-                        raise ValueError("Unsupported aggregate in CALCULATE")
+            elif re.match(r'(year|month|day)\s*\(\s*\[([^\]]+)\]\s*\)', calc_formula, re.IGNORECASE):
+                match = re.match(r'(year|month|day)\s*\(\s*\[([^\]]+)\]\s*\)', calc_formula, re.IGNORECASE)
+                func, col = match.groups()
+                if col not in temp_df.columns:
+                    raise ValueError(f"Column '{col}' not found.")
+                temp_df[col] = pd.to_datetime(temp_df[col], errors='coerce')
+                if func.lower() == "year":
+                    temp_df[new_col_name] = temp_df[col].dt.year
+                elif func.lower() == "month":
+                    temp_df[new_col_name] = temp_df[col].dt.month
+                elif func.lower() == "day":
+                    temp_df[new_col_name] = temp_df[col].dt.day
 
-                    temp_df[new_col_name] = result_val
-                elif calc_formula.lower().startswith("maxx") or calc_formula.lower().startswith("minx"):
-                    match = re.match(r'(maxx|minx)\s*\(\s*\[([^\]]+)\]\s*\)', calc_formula, re.IGNORECASE)
-                    if not match:
-                        raise ValueError("Invalid MAXX/MINX syntax.")
-                    func, col = match.groups()
+            elif calc_formula.lower().startswith("isnull"):
+                match = re.match(r'isnull\s*\(\s*\[([^\]]+)\]\s*,\s*["\']?(.*?)["\']?\s*\)', calc_formula, re.IGNORECASE)
+                if match:
+                    col, fallback = match.groups()
                     if col not in temp_df.columns:
                         raise ValueError(f"Column '{col}' not found.")
-                    result_val = temp_df[col].max() if func.lower() == "maxx" else temp_df[col].min()
-                    temp_df[new_col_name] = result_val
-                elif calc_formula.lower().startswith("abs"):
-                    match = re.match(r'abs\s*\(\s*\[([^\]]+)\]\s*\)', calc_formula, re.IGNORECASE)
-                    if not match:
-                        raise ValueError("Invalid ABS syntax.")
-                    col = match.group(1)
-                    if col not in temp_df.columns:
-                        raise ValueError(f"Column '{col}' not found.")
-                    temp_df[new_col_name] = temp_df[col].abs()
-                elif calc_formula.lower().startswith("len"):
-                    match = re.match(r'len\s*\(\s*(?:\[([^\]]+)\]|"([^"]+)")\s*\)', calc_formula, re.IGNORECASE)
-                    col = match.group(1) or match.group(2)
-                    if col not in temp_df.columns:
-                        raise ValueError(f"Column '{col}' not found.")
-                    temp_df[new_col_name] = temp_df[col].astype(str).str.len()
-                elif calc_formula.lower().startswith("lower"):
-                    match = re.match(r'lower\s*\(\s*\[([^\]]+)\]\s*\)', calc_formula, re.IGNORECASE)
-                    col = match.group(1)
-                    temp_df[new_col_name] = temp_df[col].astype(str).str.lower()
+                    temp_df[new_col_name] = temp_df[col].fillna(fallback)
+            elif re.match(r'(?:\[([^\]]+)\]|"([^"]+)")\s+in\s*\((.*?)\)', calc_formula, re.IGNORECASE):
+                match = re.match(r'(?:\[([^\]]+)\]|"([^"]+)")\s+in\s*\((.*?)\)', calc_formula, re.IGNORECASE)
+                col = match.group(1) or match.group(2)
+                raw_values = match.group(3)
 
-                elif calc_formula.lower().startswith("upper"):
-                    match = re.match(r'upper\s*\(\s*\[([^\]]+)\]\s*\)', calc_formula, re.IGNORECASE)
-                    col = match.group(1)
-                    temp_df[new_col_name] = temp_df[col].astype(str).str.upper()
-                elif calc_formula.lower().startswith("concat"):
-                    match = re.match(r'concat\s*\((.+)\)', calc_formula, re.IGNORECASE)
-                    if match:
-                        parts = [p.strip() for p in re.split(r',(?![^\[]*\])', match.group(1))]
-                        concat_parts = []
-                        for part in parts:
-                            if part.startswith('[') and part.endswith(']'):
-                                col = part[1:-1]
-                                if col not in temp_df.columns:
-                                    raise ValueError(f"Column '{col}' not found.")
-                                concat_parts.append(temp_df[col].astype(str))
-                            else:
-                                concat_parts.append(part.strip('"').strip("'"))
-                        from functools import reduce
-                        temp_df[new_col_name] = reduce(lambda x, y: x + y, [p if isinstance(p, pd.Series) else pd.Series([p]*len(temp_df)) for p in concat_parts])
+                # Parse the values correctly
+                cleaned_values = []
+                for v in raw_values.split(','):
+                    v = v.strip().strip('"').strip("'")
+                    cleaned_values.append(v)
 
-                elif re.match(r'(year|month|day)\s*\(\s*\[([^\]]+)\]\s*\)', calc_formula, re.IGNORECASE):
-                    match = re.match(r'(year|month|day)\s*\(\s*\[([^\]]+)\]\s*\)', calc_formula, re.IGNORECASE)
-                    func, col = match.groups()
-                    if col not in temp_df.columns:
-                        raise ValueError(f"Column '{col}' not found.")
-                    temp_df[col] = pd.to_datetime(temp_df[col], errors='coerce')
-                    if func.lower() == "year":
-                        temp_df[new_col_name] = temp_df[col].dt.year
-                    elif func.lower() == "month":
-                        temp_df[new_col_name] = temp_df[col].dt.month
-                    elif func.lower() == "day":
-                        temp_df[new_col_name] = temp_df[col].dt.day
+                if col not in temp_df.columns:
+                    raise ValueError(f"Column '{col}' not found in DataFrame.")
 
-                elif calc_formula.lower().startswith("isnull"):
-                    match = re.match(r'isnull\s*\(\s*\[([^\]]+)\]\s*,\s*["\']?(.*?)["\']?\s*\)', calc_formula, re.IGNORECASE)
-                    if match:
-                        col, fallback = match.groups()
-                        if col not in temp_df.columns:
-                            raise ValueError(f"Column '{col}' not found.")
-                        temp_df[new_col_name] = temp_df[col].fillna(fallback)
-                elif re.match(r'(?:\[([^\]]+)\]|"([^"]+)")\s+in\s*\((.*?)\)', calc_formula, re.IGNORECASE):
-                    match = re.match(r'(?:\[([^\]]+)\]|"([^"]+)")\s+in\s*\((.*?)\)', calc_formula, re.IGNORECASE)
-                    col = match.group(1) or match.group(2)
-                    raw_values = match.group(3)
+                temp_df[new_col_name] = temp_df[col].isin(cleaned_values)
+                print("temp_df[new_col_name]",temp_df[new_col_name])
+            elif calc_formula.lower().startswith("datediff"):
+                match = re.match(r'datediff\s*\(\s*\[([^\]]+)\]\s*,\s*\[([^\]]+)\]\s*\)', calc_formula, re.IGNORECASE)
+                if not match:
+                    raise ValueError("Invalid DATEDIFF format.")
+                end_col, start_col = match.groups()
+                temp_df[end_col] = pd.to_datetime(temp_df[end_col], errors='coerce')
+                temp_df[start_col] = pd.to_datetime(temp_df[start_col], errors='coerce')
+                temp_df[new_col_name] = (temp_df[end_col] - temp_df[start_col]).dt.days
 
-                    # Parse the values correctly
-                    cleaned_values = []
-                    for v in raw_values.split(','):
-                        v = v.strip().strip('"').strip("'")
-                        cleaned_values.append(v)
-
-                    if col not in temp_df.columns:
-                        raise ValueError(f"Column '{col}' not found in DataFrame.")
-
-                    temp_df[new_col_name] = temp_df[col].isin(cleaned_values)
-                    print("temp_df[new_col_name]",temp_df[new_col_name])
-                elif calc_formula.lower().startswith("datediff"):
-                    match = re.match(r'datediff\s*\(\s*\[([^\]]+)\]\s*,\s*\[([^\]]+)\]\s*\)', calc_formula, re.IGNORECASE)
-                    if not match:
-                        raise ValueError("Invalid DATEDIFF format.")
-                    end_col, start_col = match.groups()
-                    temp_df[end_col] = pd.to_datetime(temp_df[end_col], errors='coerce')
-                    temp_df[start_col] = pd.to_datetime(temp_df[start_col], errors='coerce')
-                    temp_df[new_col_name] = (temp_df[end_col] - temp_df[start_col]).dt.days
-
-                # elif calc_formula.lower().startswith("today()"):
-                #     temp_df[new_col_name] = pd.Timestamp.today().normalize()
-                elif calc_formula.lower().startswith("today()"):
-                    # Assign today's date (normalized to midnight) to each row
-                    temp_df[new_col_name] = pd.to_datetime(pd.Timestamp.today().normalize())
+            # elif calc_formula.lower().startswith("today()"):
+            #     temp_df[new_col_name] = pd.Timestamp.today().normalize()
+            elif calc_formula.lower().startswith("today()"):
+                # Assign today's date (normalized to midnight) to each row
+                temp_df[new_col_name] = pd.to_datetime(pd.Timestamp.today().normalize())
 
 
-                elif calc_formula.lower().startswith("now()"):
-                    temp_df[new_col_name] = pd.Timestamp.now()
+            elif calc_formula.lower().startswith("now()"):
+                temp_df[new_col_name] = pd.Timestamp.now()
+
+        
+            elif calc_formula.lower().startswith("dateadd"):
+                match = re.match(
+                    r'dateadd\s*\(\s*\[([^\]]+)\]\s*,\s*(-?\d+)\s*,\s*["\'](day|month|year)["\']\s*\)',
+                    calc_formula,
+                    re.IGNORECASE
+                )
+                if not match:
+                    raise ValueError("Invalid DATEADD format. Use: dateadd([column], number, 'unit')")
+
+                col, interval, unit = match.groups()
+                interval = int(interval)
+
+                # Step 1: Ensure the source column exists
+                if col not in temp_df.columns:
+                    raise ValueError(f"DATEADD error: Column '{col}' not found in dataframe")
+
+                # Step 2: Convert to datetime (NaNs will be handled)
+                temp_df[col] = pd.to_datetime(temp_df[col], errors='coerce')
+
+                # Step 3: Apply the offset
+                if unit == "day":
+                    temp_df[new_col_name] = temp_df[col] + pd.to_timedelta(interval, unit='d')
+                elif unit == "month":
+                    temp_df[new_col_name] = temp_df[col] + pd.DateOffset(months=interval)
+                elif unit == "year":
+                    temp_df[new_col_name] = temp_df[col] + pd.DateOffset(years=interval)
+                else:
+                    raise ValueError("DATEADD error: Unsupported time unit. Use 'day', 'month', or 'year'")
+
+                # Step 4: Normalize the new date column (remove time for consistent filtering)
+                temp_df[new_col_name] = temp_df[new_col_name].dt.normalize()
 
             
-                elif calc_formula.lower().startswith("dateadd"):
-                    match = re.match(
-                        r'dateadd\s*\(\s*\[([^\]]+)\]\s*,\s*(-?\d+)\s*,\s*["\'](day|month|year)["\']\s*\)',
-                        calc_formula,
-                        re.IGNORECASE
-                    )
-                    if not match:
-                        raise ValueError("Invalid DATEADD format. Use: dateadd([column], number, 'unit')")
+                print("DATEADD applied — preview:")
+                print(temp_df[[col, new_col_name]].dropna().head(10))
+                print("Nulls in source column:", temp_df[col].isna().sum())
+                print("Nulls in new column:", temp_df[new_col_name].isna().sum())
 
-                    col, interval, unit = match.groups()
-                    interval = int(interval)
 
-                    # Step 1: Ensure the source column exists
-                    if col not in temp_df.columns:
-                        raise ValueError(f"DATEADD error: Column '{col}' not found in dataframe")
 
-                    # Step 2: Convert to datetime (NaNs will be handled)
-                    temp_df[col] = pd.to_datetime(temp_df[col], errors='coerce')
-
-                    # Step 3: Apply the offset
-                    if unit == "day":
-                        temp_df[new_col_name] = temp_df[col] + pd.to_timedelta(interval, unit='d')
-                    elif unit == "month":
-                        temp_df[new_col_name] = temp_df[col] + pd.DateOffset(months=interval)
-                    elif unit == "year":
-                        temp_df[new_col_name] = temp_df[col] + pd.DateOffset(years=interval)
-                    else:
-                        raise ValueError("DATEADD error: Unsupported time unit. Use 'day', 'month', or 'year'")
-
-                    # Step 4: Normalize the new date column (remove time for consistent filtering)
-                    temp_df[new_col_name] = temp_df[new_col_name].dt.normalize()
-
+            elif calc_formula.lower().startswith("formatdate"):
+                match = re.match(r'formatdate\s*\(\s*(?:\[([^\]]+)\]|"([^"]+)")\s*,\s*["\'](.+?)["\']\s*\)', calc_formula, re.IGNORECASE)
+                if not match:
+                    raise ValueError("Invalid FORMATDATE format.")
                 
-                    print("DATEADD applied — preview:")
-                    print(temp_df[[col, new_col_name]].dropna().head(10))
-                    print("Nulls in source column:", temp_df[col].isna().sum())
-                    print("Nulls in new column:", temp_df[new_col_name].isna().sum())
+                col = match.group(1) or match.group(2)
+                fmt = match.group(3)
+
+                temp_df[col] = pd.to_datetime(temp_df[col], errors='coerce')
+                # temp_df[new_col_name] = temp_df[col].dt.strftime(fmt)
+                temp_df[new_col_name] = temp_df[col].dt.strftime(fmt.replace("YYYY", "%Y").replace("MM", "%m").replace("DD", "%d"))
 
 
 
-                elif calc_formula.lower().startswith("formatdate"):
-                    match = re.match(r'formatdate\s*\(\s*(?:\[([^\]]+)\]|"([^"]+)")\s*,\s*["\'](.+?)["\']\s*\)', calc_formula, re.IGNORECASE)
-                    if not match:
-                        raise ValueError("Invalid FORMATDATE format.")
-                    
-                    col = match.group(1) or match.group(2)
-                    fmt = match.group(3)
+            elif calc_formula.lower().startswith("replace"):
+                match = re.match(r'replace\s*\(\s*\[([^\]]+)\]\s*,\s*["\'](.*?)["\']\s*,\s*["\'](.*?)["\']\s*\)', calc_formula, re.IGNORECASE)
+                if not match:
+                    raise ValueError("Invalid REPLACE format.")
+                col, old, new = match.groups()
+                temp_df[new_col_name] = temp_df[col].astype(str).str.replace(old, new, regex=False)
 
-                    temp_df[col] = pd.to_datetime(temp_df[col], errors='coerce')
-                    # temp_df[new_col_name] = temp_df[col].dt.strftime(fmt)
-                    temp_df[new_col_name] = temp_df[col].dt.strftime(fmt.replace("YYYY", "%Y").replace("MM", "%m").replace("DD", "%d"))
+            elif calc_formula.lower().startswith("trim"):
+                match = re.match(r'trim\s*\(\s*\[([^\]]+)\]\s*\)', calc_formula, re.IGNORECASE)
+                if not match:
+                    raise ValueError("Invalid TRIM format.")
+                col = match.group(1)
+                temp_df[new_col_name] = temp_df[col].astype(str).str.strip()
+            # Case 5: Math formula like [A] * [B] - [C]
+            else:
+                calc_formula_python = re.sub(r'\[(.*?)\]', replace_column, calc_formula)
+                print("Evaluating math formula:", calc_formula_python)
+                temp_df[new_col_name] = eval(calc_formula_python)
 
-
-
-                elif calc_formula.lower().startswith("replace"):
-                    match = re.match(r'replace\s*\(\s*\[([^\]]+)\]\s*,\s*["\'](.*?)["\']\s*,\s*["\'](.*?)["\']\s*\)', calc_formula, re.IGNORECASE)
-                    if not match:
-                        raise ValueError("Invalid REPLACE format.")
-                    col, old, new = match.groups()
-                    temp_df[new_col_name] = temp_df[col].astype(str).str.replace(old, new, regex=False)
-
-                elif calc_formula.lower().startswith("trim"):
-                    match = re.match(r'trim\s*\(\s*\[([^\]]+)\]\s*\)', calc_formula, re.IGNORECASE)
-                    if not match:
-                        raise ValueError("Invalid TRIM format.")
-                    col = match.group(1)
-                    temp_df[new_col_name] = temp_df[col].astype(str).str.strip()
-
-
-
-
-
-
-                # Case 5: Math formula like [A] * [B] - [C]
-                else:
-                    calc_formula_python = re.sub(r'\[(.*?)\]', replace_column, calc_formula)
-                    print("Evaluating math formula:", calc_formula_python)
-                    temp_df[new_col_name] = eval(calc_formula_python)
-
-                # print(f"New column '{new_col_name}' created.")
-                # y_axis_column = [new_col_name]
-                if y_axis_column:
-                    y_axis_column = [new_col_name if col == replace_col else col for col in y_axis_column]
-                if x_axis_columns:
-                    x_axis_columns = [new_col_name if col == replace_col else col for col in x_axis_columns]
+            # print(f"New column '{new_col_name}' created.")
+            # y_axis_column = [new_col_name]
+            if y_axis_column:
+                y_axis_column = [new_col_name if col == replace_col else col for col in y_axis_column]
+            if x_axis_columns:
+                x_axis_columns = [new_col_name if col == replace_col else col for col in x_axis_columns]
 
 
 
     # Apply filters
     if isinstance(filter_options, str):
         filter_options = json.loads(filter_options)
-
-    # for col, filters in filter_options.items():
-    #     if col in temp_df.columns:
-    #         temp_df[col] = temp_df[col].astype(str)
-    #         temp_df = temp_df[temp_df[col].isin(filters)]
     for col, filters in filter_options.items():
         if col in temp_df.columns:
+            if temp_df[col].dtype != 'datetime64[ns]':  
+                temp_df[col] = temp_df[col].astype(str)
+
+        # if col in temp_df.columns:
+        #     temp_df[col] = temp_df[col].astype(str)
+                filters = list(map(str, filters))  # <-- convert filter values to string too
+                temp_df = temp_df[temp_df[col].isin(filters)]
+
+    # ============== DATE GRANULARITY PROCESSING ==============
+    # Handle date granularity - convert date columns to specified granularity
+    if dateGranularity and isinstance(dateGranularity, dict):
+        for date_col, granularity in dateGranularity.items():
+            if date_col in temp_df.columns and date_col in x_axis_columns:
+                print(f"Applying date granularity: {date_col} -> {granularity}")
+                
+                # Ensure the column is datetime
+                # temp_df[date_col] = pd.to_datetime(temp_df[date_col], errors='coerce')
+                temp_df[date_col] = pd.to_datetime(temp_df[date_col], errors='coerce', dayfirst=True)
+
+                
+                # Create new column name for the granularity
+                granularity_col = f"{date_col}_{granularity}"
+                
+                # Extract based on granularity
+                granularity_lower = granularity.lower()
+                if granularity_lower == 'year':
+                    temp_df[granularity_col] = temp_df[date_col].dt.year.astype(str)
+                elif granularity_lower == 'quarter':
+                    temp_df[granularity_col] = 'Q' + temp_df[date_col].dt.quarter.astype(str)
+                elif granularity_lower == 'month':
+                    # Extract month as full name (January, February, etc.)
+                    temp_df[granularity_col] = temp_df[date_col].dt.strftime('%B')
+                elif granularity_lower == 'week':
+                    # Week number with year (e.g., "Week 1", "Week 2")
+                    temp_df[granularity_col] = 'Week ' + temp_df[date_col].dt.isocalendar().week.astype(str)
+                elif granularity_lower == 'day':
+                    temp_df[granularity_col] = temp_df[date_col].dt.date.astype(str)
+                # FORMAT X-AXIS DATE PROPERLY AND MAKE SURE GROUPING WORKS
+                # if granularity_lower == 'year':
+                #     temp_df[granularity_col] = temp_df[date_col].dt.to_period("Y").dt.to_timestamp()
+
+                # elif granularity_lower == 'quarter':
+                #     temp_df[granularity_col] = temp_df[date_col].dt.to_period("Q").dt.to_timestamp()
+
+                # elif granularity_lower == 'month':
+                #     temp_df[granularity_col] = temp_df[date_col].dt.to_period("M").dt.to_timestamp()
+
+                # elif granularity_lower == 'week':
+                #     temp_df[granularity_col] = temp_df[date_col].dt.to_period("W").dt.to_timestamp()
+
+                # elif granularity_lower == 'day':
+                #     temp_df[granularity_col] = temp_df[date_col].dt.normalize()
+
+                else:
+                    raise ValueError(f"Unsupported date granularity: {granularity}")
+                
+                # Replace the date column in x_axis_columns with the granularity column
+                x_axis_columns = [granularity_col if col == date_col else col for col in x_axis_columns]
+                
+                print(f"Created granularity column '{granularity_col}' from '{date_col}'")
+                print(f"Sample values: {temp_df[granularity_col].head()}")
+    # ============== END DATE GRANULARITY PROCESSING ==============
+        # ========== APPLY FILTERS AFTER GRANULARITY ==========
+    for col, values in filter_options.items():
+        values = list(map(str, values))
+
+        # If granularity column exists, filter on it
+        gran_col = None
+        if dateGranularity and col in dateGranularity:
+            gran_col = f"{col}_{dateGranularity[col]}"
+
+        if gran_col and gran_col in temp_df.columns:
+            temp_df = temp_df[temp_df[gran_col].isin(values)]
+        elif col in temp_df.columns:
             temp_df[col] = temp_df[col].astype(str)
-            filters = list(map(str, filters))  # <-- convert filter values to string too
-            temp_df = temp_df[temp_df[col].isin(filters)]
+            temp_df = temp_df[temp_df[col].isin(values)]
 
-
-    # Convert x_axis columns to string for grouping
-    # for col in x_axis_columns:
-    #     if col in temp_df.columns:
-    #         temp_df[col] = temp_df[col].astype(str)
 
     x_axis_columns_str = x_axis_columns
 
@@ -710,7 +1147,10 @@ def fetch_data(table_name, x_axis_columns, filter_options, y_axis_column, aggreg
     # print("options:", options)
 
     # Filter again based on x-axis
-    filtered_df = temp_df[temp_df[x_axis_columns[0]].isin(options)]
+    if options:
+        filtered_df = temp_df[temp_df[x_axis_columns[0]].isin(options)]
+    else:
+        filtered_df = temp_df
 
     # Perform aggregation
     if aggregation == "sum":
@@ -730,9 +1170,6 @@ def fetch_data(table_name, x_axis_columns, filter_options, y_axis_column, aggreg
 
     result = [tuple(x) for x in grouped_df.to_numpy()]
     return result
-
-
-
 
 def fetch_data_tree(table_name, x_axis_columns, filter_options, y_axis_column, aggregation, db_name, selectedUser,calculationData):
     import pandas as pd
@@ -758,28 +1195,29 @@ def fetch_data_tree(table_name, x_axis_columns, filter_options, y_axis_column, a
 
         # Fetch data from database
         print("Fetching data from the database...")
-        if not selectedUser or selectedUser.lower() == 'null':
-            print("Using default database connection...")
-            connection_string = f"dbname={db_name} user={USER_NAME} password={PASSWORD} host={HOST}"
-            connection = psycopg2.connect(connection_string)
-        else:
-            connection_details = fetch_external_db_connection(db_name, selectedUser)
-            if not connection_details:
-                raise Exception("Unable to fetch external database connection details.")
-            db_details = {
-                "host": connection_details[3],
-                "database": connection_details[7],
-                "user": connection_details[4],
-                "password": connection_details[5],
-                "port": int(connection_details[6])
-            }
-            connection = psycopg2.connect(
-                dbname=db_details['database'],
-                user=db_details['user'],
-                password=db_details['password'],
-                host=db_details['host'],
-                port=db_details['port'],
-            )
+        # if not selectedUser or selectedUser.lower() == 'null':
+        #     print("Using default database connection...")
+        #     connection_string = f"dbname={db_name} user={USER_NAME} password={PASSWORD} host={HOST}"
+        #     connection = psycopg2.connect(connection_string)
+        # else:
+        #     connection_details = fetch_external_db_connection(db_name, selectedUser)
+        #     if not connection_details:
+        #         raise Exception("Unable to fetch external database connection details.")
+        #     db_details = {
+        #         "host": connection_details[3],
+        #         "database": connection_details[7],
+        #         "user": connection_details[4],
+        #         "password": connection_details[5],
+        #         "port": int(connection_details[6])
+        #     }
+        #     connection = psycopg2.connect(
+        #         dbname=db_details['database'],
+        #         user=db_details['user'],
+        #         password=db_details['password'],
+        #         host=db_details['host'],
+        #         port=db_details['port'],
+            # )
+        connection = get_db_connection_or_path(selectedUser, db_name)
 
         cur = connection.cursor()
         query = f'SELECT * FROM "{table_name}"'
@@ -1208,86 +1646,273 @@ def drill_down(clicked_category, x_axis_columns, y_axis_column, aggregation):
 
 
 
-def fetch_data_for_duel(table_name, x_axis_columns, filter_options, y_axis_columns, aggregation, db_nameeee, selectedUser, calculationData=None):
-    print("data====================", table_name, x_axis_columns, filter_options, y_axis_columns, aggregation, db_nameeee, selectedUser,calculationData)
+# def fetch_data_for_duel(table_name, x_axis_columns, filter_options, y_axis_columns, aggregation, db_nameeee, selectedUser, calculationData=None):
+#     print("data====================", table_name, x_axis_columns, filter_options, y_axis_columns, aggregation, db_nameeee, selectedUser,calculationData)
 
-    conn = None
-    cur = None
+    
+#     try:
+        
+#         conn = get_db_connection_or_path(selectedUser, db_nameeee)
+
+#         cur = conn.cursor()
+
+#         # Populate global_df.columns with actual column names from the table
+#         # This is crucial for formula parsing functions to know valid column names.
+#         global global_df
+#         cur.execute(f"SELECT * FROM {table_name} LIMIT 0") # Limit 0 to get schema without fetching data
+#         colnames = [desc[0] for desc in cur.description]
+#         global_df = pd.DataFrame(columns=colnames)
+#         print(f"Schema columns loaded: {global_df.columns.tolist()}")
+
+#         # Initialize filter_clause BEFORE the if block
+#         filter_clause = ""
+#         # Build WHERE clause
+#         if filter_options:
+#             where_clauses = []
+#             # for col, filters in filter_options.items():
+#             #     if col in global_df.columns: # Ensure the column exists in the table schema
+#             #         # Ensure filters_str is not empty
+#             #         valid_filters = [f for f in filters if f is not None]
+#             #         if valid_filters:
+#             #             filters_str = ', '.join(["'{}'".format(str(f).replace("'", "''")) for f in valid_filters]) # Convert to string before replace
+#             #             where_clauses.append(f'"{col}" IN ({filters_str})')
+#             #         else:
+#             #             print(f"Warning: No valid filters provided for column '{col}'. Skipping filter.")
+#             #     else:
+#             #         print(f"Warning: Filter column '{col}' not found in table '{table_name}' schema. Skipping filter.")
+#             for col, filters in filter_options.items():
+#                 matched_calc = next((calc for calc in calculationData or [] if calc.get("columnName") == col and calc.get("calculation")), None)
+#                 valid_filters = [f for f in filters if f is not None]
+#                 if not valid_filters:
+#                     continue
+
+#                 filters_str = ', '.join(["'{}'".format(str(f).replace("'", "''")) for f in valid_filters])
+
+#                 if matched_calc:
+#                     try:
+#                         raw_formula = matched_calc["calculation"].strip()
+#                         formula_sql = convert_calculation_to_sql(raw_formula, dataframe_columns=global_df.columns.tolist())
+#                         where_clauses.append(f'({formula_sql}) IN ({filters_str})')
+#                     except Exception as e:
+#                         print(f"Error parsing formula for filter column '{col}': {e}")
+#                 elif col in global_df.columns:
+#                     where_clauses.append(f'"{col}" IN ({filters_str})')
+#                 else:
+#                     print(f"Warning: Filter column '{col}' not found in table and not calculated. Skipping.")
+
+#             if where_clauses:
+#                 filter_clause = "WHERE " + " AND ".join(where_clauses)
+#             # else: filter_clause remains "" which is correct
+
+#         # Validate aggregation
+#         agg_func = {
+#             "sum": "SUM",
+#             "average": "AVG",
+#             "count": "COUNT",
+#             "maximum": "MAX",
+#             "minimum": "MIN"
+#         }.get(aggregation.lower())
+#         if not agg_func:
+#             raise ValueError(f"Unsupported aggregation type: {aggregation}")
+
+#         if not x_axis_columns:
+#             raise ValueError("x_axis_columns cannot be empty.")
+
+#         x_axis_exprs = []
+#         group_by_x_axis_aliases = [] # Store aliases for GROUP BY clause
+
+#         # Move X-axis processing outside any Y-axis loop
+#         for x_col in x_axis_columns:
+          
+#         # select_exprs = []
+#             for x_col in x_axis_columns:
+#                 matched_calc = next((calc for calc in calculationData or [] if calc.get("columnName") == x_col and calc.get("calculation")), None)
+            
+#                 if matched_calc:
+#                     raw_formula = matched_calc["calculation"].strip()
+#                     # raw_formula = calculationData["calculation"].strip()
+#                     formula_sql = convert_calculation_to_sql(raw_formula, dataframe_columns=global_df.columns.tolist())
+#                     alias_name = f"{x_col}_calculated"
+#                     x_axis_exprs.append(f'({formula_sql}) AS "{alias_name}"')
+#                     group_by_x_axis_aliases.append(f'"{alias_name}"')
+#                 else:
+#                     # Include normal column if not in calculation
+#                     x_axis_exprs.append(f'"{x_col}"')
+#                     group_by_x_axis_aliases.append(f'"{x_col}"')
+
+#         print("y_axis_columns", y_axis_columns)
+#         select_x_axis_str = ', '.join(x_axis_exprs)
+#         group_by_x_axis_str = ', '.join(group_by_x_axis_aliases)
+
+#         select_exprs = []
+#         # Y-axis processing loop
+#         for y_col in y_axis_columns:
+#             # if calculationData and y_col == calculationData.get("columnName") and calculationData.get("calculation"):
+#             matched_calc = next((calc for calc in calculationData or [] if calc.get("columnName") == y_col and calc.get("calculation")), None)
+            
+#             if matched_calc:
+#                 raw_formula = matched_calc["calculation"].strip()
+
+#                 # raw_formula = calculationData["calculation"].strip()
+#                 try:
+#                     formula_sql = convert_calculation_to_sql(raw_formula, dataframe_columns=global_df.columns.tolist())
+#                     alias_name = f"{y_col}_calculated"
+#                     print("formula_sql",formula_sql)
+#                     # Apply aggregation if not already present
+#                     if re.search(r'\b(SUM|AVG|COUNT|MAX|MIN)\b', formula_sql, re.IGNORECASE):
+#                         select_exprs.append(f'{formula_sql} AS "{alias_name}"')
+#                     else:
+#                         select_exprs.append(f'{agg_func}(({formula_sql})::numeric) AS "{alias_name}"')
+#                 except Exception as e:
+#                     raise ValueError(f"Error parsing formula for {y_col}: {e}")
+#             else:
+#                 if agg_func == "COUNT":
+#                     select_exprs.append(f'{agg_func}("{y_col}") AS "{y_col}"')
+#                 else:
+#                     select_exprs.append(f'{agg_func}("{y_col}"::numeric) AS "{y_col}"')
+
+        
+#         # Final SQL
+#         query = f"""
+#         SELECT {select_x_axis_str}, {", ".join(select_exprs)}
+#         FROM {table_name}
+#         {filter_clause}
+#         GROUP BY {group_by_x_axis_str};
+#         """
+#         print("Constructed Query:", cur.mogrify(query).decode('utf-8'))
+#         cur.execute(query)
+#         rows = cur.fetchall()
+#         print("rows", rows)
+#         return rows
+
+#     except Exception as e:
+#         print(f"An error occurred: {e}")
+#         raise # Re-raise the exception after printing
+#     finally:
+#         if cur:
+#             cur.close()
+#         if conn:
+#             conn.close()
+
+
+def fetch_data_for_duel(
+    table_name,
+    x_axis_columns,
+    filter_options,
+    y_axis_columns,
+    aggregation,
+    db_nameeee,
+    selectedUser,
+    calculationData=None,
+    dateGranularity=None
+):
+    import pandas as pd
+    import psycopg2
+    import re
+        # 🔥 FIX: Convert JSON string → Python dict
+    if isinstance(dateGranularity, str):
+        try:
+            import json
+            dateGranularity = json.loads(dateGranularity)
+        except:
+            dateGranularity = {}
+
+
+    print("data====================", table_name, x_axis_columns, filter_options, y_axis_columns,
+          aggregation, db_nameeee, selectedUser, calculationData, dateGranularity)
+
     try:
-        if not selectedUser or selectedUser.lower() == 'null':
-            print("Using default database connection...")
-            connection_string = f"dbname={db_nameeee} user={USER_NAME} password={PASSWORD} host={HOST}"
-            conn = psycopg2.connect(connection_string)
-        else:
-            connection_details = fetch_external_db_connection(db_nameeee, selectedUser)
-            if not connection_details:
-                raise Exception("Unable to fetch external database connection details.")
-            db_details = {
-                "host": connection_details[3],
-                "database": connection_details[7],
-                "user": connection_details[4],
-                "password": connection_details[5],
-                "port": int(connection_details[6])
-            }
-            conn = psycopg2.connect(
-                dbname=db_details['database'],
-                user=db_details['user'],
-                password=db_details['password'],
-                host=db_details['host'],
-                port=db_details['port'],
-            )
-
+        conn = get_db_connection_or_path(selectedUser, db_nameeee)
         cur = conn.cursor()
 
-        # Populate global_df.columns with actual column names from the table
-        # This is crucial for formula parsing functions to know valid column names.
-        global global_df
-        cur.execute(f"SELECT * FROM {table_name} LIMIT 0") # Limit 0 to get schema without fetching data
+        # Load schema for calculation parsing
+        cur.execute(f"SELECT * FROM {table_name} LIMIT 0")
         colnames = [desc[0] for desc in cur.description]
         global_df = pd.DataFrame(columns=colnames)
         print(f"Schema columns loaded: {global_df.columns.tolist()}")
 
-        # Initialize filter_clause BEFORE the if block
+        # ---------------------- DATE GRANULARITY (SQL-BASED) ----------------------
+        def build_date_granularity_sql(col, gran):
+            g = gran.lower()
+            alias = f"{col}_{g}"
+
+            if g == "year":
+                return f"EXTRACT(YEAR FROM \"{col}\")::text AS \"{alias}\"", f"\"{alias}\""
+
+            elif g == "quarter":
+                return f"'Q' || EXTRACT(QUARTER FROM \"{col}\") AS \"{alias}\"", f"\"{alias}\""
+
+            elif g == "month":
+                return f"TO_CHAR(\"{col}\", 'Month') AS \"{alias}\"", f"\"{alias}\""
+
+            elif g == "week":
+                return f"'Week ' || EXTRACT(WEEK FROM \"{col}\") AS \"{alias}\"", f"\"{alias}\""
+
+            elif g == "day":
+                return f"\"{col}\"::date AS \"{alias}\"", f"\"{alias}\""
+
+            else:
+                raise ValueError(f"Unsupported date granularity: {gran}")
+
+        # ---------------------- FILTER CLAUSE ----------------------
         filter_clause = ""
-        # Build WHERE clause
         if filter_options:
             where_clauses = []
-            # for col, filters in filter_options.items():
-            #     if col in global_df.columns: # Ensure the column exists in the table schema
-            #         # Ensure filters_str is not empty
-            #         valid_filters = [f for f in filters if f is not None]
-            #         if valid_filters:
-            #             filters_str = ', '.join(["'{}'".format(str(f).replace("'", "''")) for f in valid_filters]) # Convert to string before replace
-            #             where_clauses.append(f'"{col}" IN ({filters_str})')
-            #         else:
-            #             print(f"Warning: No valid filters provided for column '{col}'. Skipping filter.")
-            #     else:
-            #         print(f"Warning: Filter column '{col}' not found in table '{table_name}' schema. Skipping filter.")
+
             for col, filters in filter_options.items():
-                matched_calc = next((calc for calc in calculationData or [] if calc.get("columnName") == col and calc.get("calculation")), None)
+                if not filters:
+                    continue
+
                 valid_filters = [f for f in filters if f is not None]
                 if not valid_filters:
                     continue
 
-                filters_str = ', '.join(["'{}'".format(str(f).replace("'", "''")) for f in valid_filters])
+                filters_str = ", ".join(["'{}'".format(str(f).replace("'", "''")) for f in valid_filters])
+
+                matched_calc = next(
+                    (calc for calc in (calculationData or []) if calc.get("columnName") == col and calc.get("calculation")),
+                    None
+                )
 
                 if matched_calc:
-                    try:
-                        raw_formula = matched_calc["calculation"].strip()
-                        formula_sql = convert_calculation_to_sql(raw_formula, dataframe_columns=global_df.columns.tolist())
-                        where_clauses.append(f'({formula_sql}) IN ({filters_str})')
-                    except Exception as e:
-                        print(f"Error parsing formula for filter column '{col}': {e}")
+                    formula_sql = convert_calculation_to_sql(
+                        matched_calc["calculation"].strip(),
+                        dataframe_columns=global_df.columns.tolist()
+                    )
+                    where_clauses.append(f"({formula_sql}) IN ({filters_str})")
+
+                # elif col in global_df.columns:
+                #     where_clauses.append(f"\"{col}\" IN ({filters_str})")
                 elif col in global_df.columns:
-                    where_clauses.append(f'"{col}" IN ({filters_str})')
-                else:
-                    print(f"Warning: Filter column '{col}' not found in table and not calculated. Skipping.")
+
+                    # 🔥 If date granularity applied, filter on alias — NOT original column
+                    if dateGranularity and col in dateGranularity:
+                        gran = dateGranularity[col].lower()
+                        alias = f"{col}_{gran}"
+
+                        if gran == "year":
+                            where_clauses.append(f"EXTRACT(YEAR FROM \"{col}\")::text IN ({filters_str})")
+
+                        elif gran == "quarter":
+                            where_clauses.append(f"'Q' || EXTRACT(QUARTER FROM \"{col}\") IN ({filters_str})")
+
+                        elif gran == "month":
+                            where_clauses.append(f"TO_CHAR(\"{col}\", 'Month') IN ({filters_str})")
+
+                        elif gran == "week":
+                            where_clauses.append(f"'Week ' || EXTRACT(WEEK FROM \"{col}\") IN ({filters_str})")
+
+                        elif gran == "day":
+                            where_clauses.append(f"\"{col}\"::date IN ({filters_str})")
+
+                    else:
+                        where_clauses.append(f"\"{col}\" IN ({filters_str})")
+
 
             if where_clauses:
                 filter_clause = "WHERE " + " AND ".join(where_clauses)
-            # else: filter_clause remains "" which is correct
 
-        # Validate aggregation
+        # ---------------------- AGGREGATION ----------------------
         agg_func = {
             "sum": "SUM",
             "average": "AVG",
@@ -1295,88 +1920,109 @@ def fetch_data_for_duel(table_name, x_axis_columns, filter_options, y_axis_colum
             "maximum": "MAX",
             "minimum": "MIN"
         }.get(aggregation.lower())
-        if not agg_func:
-            raise ValueError(f"Unsupported aggregation type: {aggregation}")
 
-        if not x_axis_columns:
+        if not agg_func:
+            raise ValueError(f"Unsupported aggregation: {aggregation}")
+
+        # ---------------------- X-AXIS EXPRESSIONS ----------------------
+        x_axis_exprs = []
+        group_by_aliases = []
+
+        for x_col in x_axis_columns:
+            # If date granularity applies
+            if dateGranularity and x_col in dateGranularity:
+                gran = dateGranularity[x_col]
+                print(f"Applying date granularity: {x_col} -> {gran}")
+
+                expr, alias = build_date_granularity_sql(x_col, gran)
+                x_axis_exprs.append(expr)
+                group_by_aliases.append(alias)
+                continue
+
+            # Otherwise normal column
+            matched_calc = next(
+                (calc for calc in (calculationData or []) if calc.get("columnName") == x_col and calc.get("calculation")),
+                None
+            )
+
+            if matched_calc:
+                formula_sql = convert_calculation_to_sql(
+                    matched_calc["calculation"].strip(),
+                    dataframe_columns=global_df.columns.tolist()
+                )
+                alias = f"{x_col}_calculated"
+                x_axis_exprs.append(f"({formula_sql}) AS \"{alias}\"")
+                group_by_aliases.append(f"\"{alias}\"")
+            else:
+                x_axis_exprs.append(f"\"{x_col}\"")
+                group_by_aliases.append(f"\"{x_col}\"")
+
+        if not x_axis_exprs:
             raise ValueError("x_axis_columns cannot be empty.")
 
-        x_axis_exprs = []
-        group_by_x_axis_aliases = [] # Store aliases for GROUP BY clause
-
-        # Move X-axis processing outside any Y-axis loop
-        for x_col in x_axis_columns:
-          
-        # select_exprs = []
-            for x_col in x_axis_columns:
-                matched_calc = next((calc for calc in calculationData or [] if calc.get("columnName") == x_col and calc.get("calculation")), None)
-            
-                if matched_calc:
-                    raw_formula = matched_calc["calculation"].strip()
-                    # raw_formula = calculationData["calculation"].strip()
-                    formula_sql = convert_calculation_to_sql(raw_formula, dataframe_columns=global_df.columns.tolist())
-                    alias_name = f"{x_col}_calculated"
-                    x_axis_exprs.append(f'({formula_sql}) AS "{alias_name}"')
-                    group_by_x_axis_aliases.append(f'"{alias_name}"')
-                else:
-                    # Include normal column if not in calculation
-                    x_axis_exprs.append(f'"{x_col}"')
-                    group_by_x_axis_aliases.append(f'"{x_col}"')
-
-        print("y_axis_columns", y_axis_columns)
-        select_x_axis_str = ', '.join(x_axis_exprs)
-        group_by_x_axis_str = ', '.join(group_by_x_axis_aliases)
-
+        # ---------------------- Y-AXIS EXPRESSIONS ----------------------
         select_exprs = []
-        # Y-axis processing loop
+
         for y_col in y_axis_columns:
-            # if calculationData and y_col == calculationData.get("columnName") and calculationData.get("calculation"):
-            matched_calc = next((calc for calc in calculationData or [] if calc.get("columnName") == y_col and calc.get("calculation")), None)
-            
+
+            # detect datatype based on sample row
+            cur.execute(f'SELECT "{y_col}" FROM {table_name} LIMIT 1')
+            sample_value = cur.fetchone()[0]
+            is_numeric = True
+            try:
+                float(sample_value)
+            except Exception:
+                is_numeric = False
+
+            matched_calc = next(
+                (calc for calc in (calculationData or []) if calc.get("columnName") == y_col and calc.get("calculation")),
+                None
+            )
+
             if matched_calc:
-                raw_formula = matched_calc["calculation"].strip()
+                formula_sql = convert_calculation_to_sql(
+                    matched_calc["calculation"].strip(),
+                    dataframe_columns=global_df.columns.tolist()
+                )
+                alias = f"{y_col}_calculated"
 
-                # raw_formula = calculationData["calculation"].strip()
-                try:
-                    formula_sql = convert_calculation_to_sql(raw_formula, dataframe_columns=global_df.columns.tolist())
-                    alias_name = f"{y_col}_calculated"
-                    print("formula_sql",formula_sql)
-                    # Apply aggregation if not already present
-                    if re.search(r'\b(SUM|AVG|COUNT|MAX|MIN)\b', formula_sql, re.IGNORECASE):
-                        select_exprs.append(f'{formula_sql} AS "{alias_name}"')
-                    else:
-                        select_exprs.append(f'{agg_func}(({formula_sql})::numeric) AS "{alias_name}"')
-                except Exception as e:
-                    raise ValueError(f"Error parsing formula for {y_col}: {e}")
-            else:
-                if agg_func == "COUNT":
-                    select_exprs.append(f'{agg_func}("{y_col}") AS "{y_col}"')
+                if re.search(r"\b(SUM|AVG|COUNT|MAX|MIN)\b", formula_sql, re.IGNORECASE):
+                    select_exprs.append(f"{formula_sql} AS \"{alias}\"")
                 else:
-                    select_exprs.append(f'{agg_func}("{y_col}"::numeric) AS "{y_col}"')
+                    if is_numeric:
+                        select_exprs.append(f"{agg_func}(({formula_sql})::numeric) AS \"{alias}\"")
+                    else:
+                        select_exprs.append(f"COUNT(({formula_sql})) AS \"{alias}\"")
 
-        
-        # Final SQL
+            else:
+                if is_numeric:
+                    select_exprs.append(f"{agg_func}(\"{y_col}\"::numeric) AS \"{y_col}\"")
+                else:
+                    select_exprs.append(f"COUNT(\"{y_col}\") AS \"{y_col}\"")
+
+        # ---------------------- FINAL QUERY ----------------------
         query = f"""
-        SELECT {select_x_axis_str}, {", ".join(select_exprs)}
+        SELECT {', '.join(x_axis_exprs)}, {', '.join(select_exprs)}
         FROM {table_name}
         {filter_clause}
-        GROUP BY {group_by_x_axis_str};
+        GROUP BY {', '.join(group_by_aliases)};
         """
-        print("Constructed Query:", cur.mogrify(query).decode('utf-8'))
+
+        print("Constructed Query:", cur.mogrify(query).decode("utf-8"))
+
         cur.execute(query)
         rows = cur.fetchall()
-        print("rows", rows)
         return rows
 
     except Exception as e:
-        print(f"An error occurred: {e}")
-        raise # Re-raise the exception after printing
+        print("❌ Error:", e)
+        raise
+
     finally:
         if cur:
             cur.close()
         if conn:
             conn.close()
-
 
 import psycopg2
 import pandas as pd
@@ -1714,38 +2360,166 @@ def replace_brackets(expr: str) -> str:
     return re.sub(r'\[([^\]]+)\]', r'"\1"::numeric', expr)
 
 
-def fetch_data_for_duel_bar(table_name, x_axis_columns, filter_options, y_axis_columns, aggregation, db_nameeee, selectedUser, calculationData=None):
-    # print("data====================", table_name, x_axis_columns, filter_options, y_axis_columns, aggregation, db_nameeee, selectedUser)
-    
-    if not selectedUser or selectedUser.lower() == 'null':
-        print("Using default database connection...")
-        connection_string = f"dbname={db_nameeee} user={USER_NAME} password={PASSWORD} host={HOST}"
-        conn = psycopg2.connect(connection_string)
-    else:
-        connection_details = fetch_external_db_connection(db_nameeee, selectedUser)
-        if not connection_details:
-            raise Exception("Unable to fetch external database connection details.")
-        db_details = {
-            "host": connection_details[3],
-            "database": connection_details[7],
-            "user": connection_details[4],
-            "password": connection_details[5],
-            "port": int(connection_details[6])
-        }
-        conn = psycopg2.connect(**db_details)
+# def fetch_data_for_duel_bar(table_name, x_axis_columns, filter_options, y_axis_columns, aggregation, db_nameeee, selectedUser, calculationData=None,dateGranularity=None):
+#     # print("data====================", table_name, x_axis_columns, filter_options, y_axis_columns, aggregation, db_nameeee, selectedUser)
+#     print("data====================", dateGranularity)
+#     conn = get_db_connection_or_path(selectedUser, db_nameeee)
+#     cur = conn.cursor()
+#     global global_df
+#     cur.execute(f"SELECT * FROM {table_name} LIMIT 0") # Limit 0 to get schema without fetching data
+#     colnames = [desc[0] for desc in cur.description]
+#     global_df = pd.DataFrame(columns=colnames)
+#     print(f"Schema columns loaded: {global_df.columns.tolist()}")
 
+
+#     # Format x-axis
+#     x_axis_columns_str = ', '.join(f'"{col}"' for col in x_axis_columns)
+
+#     # Get aggregation function
+#     agg_func = {
+#         "sum": "SUM",
+#         "average": "AVG",
+#         "count": "COUNT",
+#         "maximum": "MAX",
+#         "minimum": "MIN"
+#     }.get(aggregation.lower())
+#     if not agg_func:
+#         raise ValueError(f"Unsupported aggregation type: {aggregation}")
+
+#     # Build WHERE clause
+#     filter_clause = ""
+#     if filter_options:
+#         where_clauses = []
+#         # for col, filters in filter_options.items():
+#         #     filters_str = ', '.join(f"'{val}'" for val in filters if val is not None)
+#         #     where_clauses.append(f'"{col}" IN ({filters_str})')
+#         for col, filters in filter_options.items():
+#             matched_calc = next((calc for calc in calculationData or [] if calc.get("columnName") == col and calc.get("calculation")), None)
+#             # filters_str = ', '.join(f"'{val}'" for val in filters if val is not None)
+#             filters_str = ', '.join("'" + str(val).replace("'", "''") + "'" for val in filters if val is not None)
+
+#             if matched_calc:
+#                 raw_formula = matched_calc["calculation"].strip()
+#                 formula_sql = convert_calculation_to_sql(raw_formula, dataframe_columns=global_df.columns.tolist())
+#                 where_clauses.append(f'({formula_sql}) IN ({filters_str})')
+#             else:
+#                 where_clauses.append(f'"{col}" IN ({filters_str})')
+
+#         if where_clauses:
+#             filter_clause = "WHERE " + " AND ".join(where_clauses)
+
+#     y_axis_exprs = []
+
+#     for y_col in y_axis_columns:
+#             # if calculationData and y_col == calculationData.get("columnName") and calculationData.get("calculation"):
+#             matched_calc = next((calc for calc in calculationData or [] if calc.get("columnName") == y_col and calc.get("calculation")), None)
+            
+#             if matched_calc:
+#                 raw_formula = matched_calc["calculation"].strip()
+#                 # raw_formula = calculationData["calculation"].strip()
+#                 try:
+#                     formula_sql = convert_calculation_to_sql(raw_formula, dataframe_columns=global_df.columns.tolist())
+#                     alias_name = f"{y_col}"
+#                     print("formula_sql",formula_sql)
+#                     # Apply aggregation if not already present
+#                     if re.search(r'\b(SUM|AVG|COUNT|MAX|MIN)\b', formula_sql, re.IGNORECASE):
+#                         y_axis_exprs.append(f'{formula_sql} AS "{alias_name}"')
+#                     else:
+#                         y_axis_exprs.append(f'{agg_func}(({formula_sql})::numeric) AS "{alias_name}"')
+#                 except Exception as e:
+#                     raise ValueError(f"Error parsing formula for {y_col}: {e}")
+#             else:
+#                 if agg_func == "COUNT":
+#                     y_axis_exprs.append(f'{agg_func}("{y_col}") AS "{y_col}"')
+#                 else:
+#                     y_axis_exprs.append(f'{agg_func}("{y_col}"::numeric) AS "{y_col}"')
+#     x_axis_exprs = []
+#     for x_col in x_axis_columns:
+       
+        
+#             # if calculationData and x_col == calculationData.get("columnName") and calculationData.get("calculation"):
+#             matched_calc = next((calc for calc in calculationData or [] if calc.get("columnName") == x_col and calc.get("calculation")), None)
+    
+#             if matched_calc:
+#                 raw_formula = matched_calc["calculation"].strip()
+#                 # raw_formula = calculationData["calculation"].strip()
+#                 formula_sql = convert_calculation_to_sql(raw_formula, dataframe_columns=global_df.columns.tolist())
+#                 # alias_name = f"{x_col}_calculated"
+#                 # x_axis_exprs.append(f'({formula_sql}) AS "{alias_name}"')
+#                 x_axis_exprs.append(f'({formula_sql}) AS "{x_col}"')
+
+                
+#             else:
+#                     # Include normal column if not in calculation
+#                 x_axis_exprs.append(f'"{x_col}"')
+                   
+
+
+    
+#     select_x_axis_str = ', '.join(x_axis_exprs)
+#     # group_by_x_axis_str = ', '.join([f'"{col}_calculated"' if col == calculationData.get("columnName") and calculationData.get("calculation") else f'"{col}"' for col in x_axis_columns])
+#     # group_by_x_axis_str = ', '.join([
+#     #     f'"{col}_calculated"' if isinstance(calculationData, dict) and col == calculationData.get("columnName") and calculationData.get("calculation") else f'"{col}"'
+#     #     for col in x_axis_columns
+#     # ])
+#     # group_by_x_axis_str = ', '.join([
+#     #     f'"{col}_calculated"' if any(calc.get("columnName") == col and calc.get("calculation") for calc in calculationData or []) else f'"{col}"'
+#     #     for col in x_axis_columns
+#     # ])
+#     group_by_x_axis_str = ', '.join(f'"{col}"' for col in x_axis_columns)
+
+
+
+#     # Final SQL
+#     query = f"""
+#     SELECT {select_x_axis_str}, {', '.join(y_axis_exprs)}
+#     FROM {table_name}
+#     {filter_clause}
+#     GROUP BY {group_by_x_axis_str};
+#     """
+
+#     print("Constructed Query:", cur.mogrify(query).decode("utf-8"))
+#     cur.execute(query)
+#     rows = cur.fetchall()
+#     cur.close()
+#     conn.close()
+#     # print("Rows from database:", rows)
+#     return rows
+def fetch_data_for_duel_bar(
+    table_name,
+    x_axis_columns,
+    filter_options,
+    y_axis_columns,
+    aggregation,
+    db_nameeee,
+    selectedUser,
+    calculationData=None,
+    dateGranularity=None
+):
+    import pandas as pd
+    import psycopg2
+    import re
+    print("data====================", dateGranularity)
+
+    # 🔥 FIX: Convert JSON string → Python dict
+    if isinstance(dateGranularity, str):
+        try:
+            import json
+            dateGranularity = json.loads(dateGranularity)
+        except:
+            dateGranularity = {}
+
+
+    conn = get_db_connection_or_path(selectedUser, db_nameeee)
     cur = conn.cursor()
-    global global_df
-    cur.execute(f"SELECT * FROM {table_name} LIMIT 0") # Limit 0 to get schema without fetching data
+
+    # Load schema
+    cur.execute(f"SELECT * FROM {table_name} LIMIT 0")
     colnames = [desc[0] for desc in cur.description]
     global_df = pd.DataFrame(columns=colnames)
     print(f"Schema columns loaded: {global_df.columns.tolist()}")
 
-
-    # Format x-axis
-    x_axis_columns_str = ', '.join(f'"{col}"' for col in x_axis_columns)
-
-    # Get aggregation function
+    # ------------------------- AGG FUNCTION -------------------------
     agg_func = {
         "sum": "SUM",
         "average": "AVG",
@@ -1753,122 +2527,301 @@ def fetch_data_for_duel_bar(table_name, x_axis_columns, filter_options, y_axis_c
         "maximum": "MAX",
         "minimum": "MIN"
     }.get(aggregation.lower())
+
     if not agg_func:
         raise ValueError(f"Unsupported aggregation type: {aggregation}")
 
-    # Build WHERE clause
+    # ------------------------- DATE GRANULARITY -------------------------
+    def build_date_granularity_sql(col, gran):
+        g = gran.lower()
+        alias = f"{col}_{g}"
+
+        if g == "year":
+            return f"EXTRACT(YEAR FROM \"{col}\")::text AS \"{alias}\"", alias
+        elif g == "quarter":
+            return f"'Q' || EXTRACT(QUARTER FROM \"{col}\") AS \"{alias}\"", alias
+        elif g == "month":
+            return f"TO_CHAR(\"{col}\", 'Month') AS \"{alias}\"", alias
+        elif g == "week":
+            return f"'Week ' || EXTRACT(WEEK FROM \"{col}\") AS \"{alias}\"", alias
+        elif g == "day":
+            return f"\"{col}\"::date AS \"{alias}\"", alias
+        else:
+            raise ValueError(f"Unsupported date granularity: {gran}")
+
+    # ------------------------- WHERE FILTERS -------------------------
     filter_clause = ""
     if filter_options:
         where_clauses = []
-        # for col, filters in filter_options.items():
-        #     filters_str = ', '.join(f"'{val}'" for val in filters if val is not None)
-        #     where_clauses.append(f'"{col}" IN ({filters_str})')
+
         for col, filters in filter_options.items():
-            matched_calc = next((calc for calc in calculationData or [] if calc.get("columnName") == col and calc.get("calculation")), None)
-            # filters_str = ', '.join(f"'{val}'" for val in filters if val is not None)
-            filters_str = ', '.join("'" + str(val).replace("'", "''") + "'" for val in filters if val is not None)
+
+            matched_calc = next(
+                (calc for calc in (calculationData or []) if calc.get("columnName") == col and calc.get("calculation")),
+                None
+            )
+
+            valid_filters = [f for f in filters if f is not None]
+            filters_str = ", ".join("'" + str(v).replace("'", "''") + "'" for v in valid_filters)
 
             if matched_calc:
-                raw_formula = matched_calc["calculation"].strip()
-                formula_sql = convert_calculation_to_sql(raw_formula, dataframe_columns=global_df.columns.tolist())
-                where_clauses.append(f'({formula_sql}) IN ({filters_str})')
-            else:
-                where_clauses.append(f'"{col}" IN ({filters_str})')
+                fsql = convert_calculation_to_sql(
+                    matched_calc["calculation"].strip(),
+                    dataframe_columns=global_df.columns.tolist()
+                )
+                where_clauses.append(f"({fsql}) IN ({filters_str})")
+
+            elif col in global_df.columns:
+            #     where_clauses.append(f"\"{col}\" IN ({filters_str})")
+                            # 🔥 If date granularity applied, filter on alias — NOT original column
+                if dateGranularity and col in dateGranularity:
+                    gran = dateGranularity[col].lower()
+                    alias = f"{col}_{gran}"
+
+                    if gran == "year":
+                        where_clauses.append(f"EXTRACT(YEAR FROM \"{col}\")::text IN ({filters_str})")
+
+                    elif gran == "quarter":
+                        where_clauses.append(f"'Q' || EXTRACT(QUARTER FROM \"{col}\") IN ({filters_str})")
+
+                    elif gran == "month":
+                        where_clauses.append(f"TO_CHAR(\"{col}\", 'Month') IN ({filters_str})")
+
+                    elif gran == "week":
+                        where_clauses.append(f"'Week ' || EXTRACT(WEEK FROM \"{col}\") IN ({filters_str})")
+
+                    elif gran == "day":
+                        where_clauses.append(f"\"{col}\"::date IN ({filters_str})")
+
+                else:
+                    where_clauses.append(f"\"{col}\" IN ({filters_str})")
+
 
         if where_clauses:
             filter_clause = "WHERE " + " AND ".join(where_clauses)
 
+    # ------------------------- Y-AXIS EXPRESSIONS -------------------------
     y_axis_exprs = []
 
     for y_col in y_axis_columns:
-            # if calculationData and y_col == calculationData.get("columnName") and calculationData.get("calculation"):
-            matched_calc = next((calc for calc in calculationData or [] if calc.get("columnName") == y_col and calc.get("calculation")), None)
-            
-            if matched_calc:
-                raw_formula = matched_calc["calculation"].strip()
-                # raw_formula = calculationData["calculation"].strip()
-                try:
-                    formula_sql = convert_calculation_to_sql(raw_formula, dataframe_columns=global_df.columns.tolist())
-                    alias_name = f"{y_col}"
-                    print("formula_sql",formula_sql)
-                    # Apply aggregation if not already present
-                    if re.search(r'\b(SUM|AVG|COUNT|MAX|MIN)\b', formula_sql, re.IGNORECASE):
-                        y_axis_exprs.append(f'{formula_sql} AS "{alias_name}"')
-                    else:
-                        y_axis_exprs.append(f'{agg_func}(({formula_sql})::numeric) AS "{alias_name}"')
-                except Exception as e:
-                    raise ValueError(f"Error parsing formula for {y_col}: {e}")
+        matched_calc = next(
+            (calc for calc in (calculationData or []) if calc.get("columnName") == y_col and calc.get("calculation")),
+            None
+        )
+
+        # Detect numeric values
+        cur.execute(f'SELECT "{y_col}" FROM {table_name} LIMIT 1')
+        sample_value = cur.fetchone()[0]
+        is_numeric = True
+        try:
+            float(sample_value)
+        except:
+            is_numeric = False
+
+        if matched_calc:
+            formula_sql = convert_calculation_to_sql(
+                matched_calc["calculation"].strip(),
+                dataframe_columns=global_df.columns.tolist()
+            )
+
+            alias = f"{y_col}"
+
+            if re.search(r"\b(SUM|AVG|COUNT|MAX|MIN)\b", formula_sql, re.IGNORECASE):
+                y_axis_exprs.append(f"{formula_sql} AS \"{alias}\"")
             else:
-                if agg_func == "COUNT":
-                    y_axis_exprs.append(f'{agg_func}("{y_col}") AS "{y_col}"')
+                if is_numeric:
+                    y_axis_exprs.append(f"{agg_func}(({formula_sql})::numeric) AS \"{alias}\"")
                 else:
-                    y_axis_exprs.append(f'{agg_func}("{y_col}"::numeric) AS "{y_col}"')
-    x_axis_exprs = []
-    for x_col in x_axis_columns:
-       
-        
-            # if calculationData and x_col == calculationData.get("columnName") and calculationData.get("calculation"):
-            matched_calc = next((calc for calc in calculationData or [] if calc.get("columnName") == x_col and calc.get("calculation")), None)
-    
-            if matched_calc:
-                raw_formula = matched_calc["calculation"].strip()
-                # raw_formula = calculationData["calculation"].strip()
-                formula_sql = convert_calculation_to_sql(raw_formula, dataframe_columns=global_df.columns.tolist())
-                # alias_name = f"{x_col}_calculated"
-                # x_axis_exprs.append(f'({formula_sql}) AS "{alias_name}"')
-                x_axis_exprs.append(f'({formula_sql}) AS "{x_col}"')
+                    y_axis_exprs.append(f"COUNT(({formula_sql})) AS \"{alias}\"")
 
-                
+        else:
+            if is_numeric:
+                y_axis_exprs.append(f"{agg_func}(\"{y_col}\"::numeric) AS \"{y_col}\"")
             else:
-                    # Include normal column if not in calculation
-                x_axis_exprs.append(f'"{x_col}"')
-                   
+                y_axis_exprs.append(f"COUNT(\"{y_col}\") AS \"{y_col}\"")
 
+    # ------------------------- X-AXIS EXPRESSIONS -------------------------
+    x_axis_exprs = []
+    group_by_aliases = []
 
-    
-    select_x_axis_str = ', '.join(x_axis_exprs)
-    # group_by_x_axis_str = ', '.join([f'"{col}_calculated"' if col == calculationData.get("columnName") and calculationData.get("calculation") else f'"{col}"' for col in x_axis_columns])
-    # group_by_x_axis_str = ', '.join([
-    #     f'"{col}_calculated"' if isinstance(calculationData, dict) and col == calculationData.get("columnName") and calculationData.get("calculation") else f'"{col}"'
-    #     for col in x_axis_columns
-    # ])
-    # group_by_x_axis_str = ', '.join([
-    #     f'"{col}_calculated"' if any(calc.get("columnName") == col and calc.get("calculation") for calc in calculationData or []) else f'"{col}"'
-    #     for col in x_axis_columns
-    # ])
-    group_by_x_axis_str = ', '.join(f'"{col}"' for col in x_axis_columns)
+    for x_col in x_axis_columns:
 
+        # DATE GRANULARITY
+        if dateGranularity and x_col in dateGranularity:
+            gran = dateGranularity[x_col]
+            print(f"Applying date granularity: {x_col} -> {gran}")
 
+            expr, alias = build_date_granularity_sql(x_col, gran)
+            x_axis_exprs.append(expr)
+            group_by_aliases.append(f"\"{alias}\"")
+            continue
 
-    # Final SQL
+        # CALCULATED X
+        matched_calc = next(
+            (calc for calc in (calculationData or []) if calc.get("columnName") == x_col and calc.get("calculation")),
+            None
+        )
+
+        if matched_calc:
+            formula_sql = convert_calculation_to_sql(
+                matched_calc["calculation"].strip(),
+                dataframe_columns=global_df.columns.tolist()
+            )
+            alias = f"{x_col}"
+            x_axis_exprs.append(f"({formula_sql}) AS \"{alias}\"")
+            group_by_aliases.append(f"\"{alias}\"")
+        else:
+            x_axis_exprs.append(f"\"{x_col}\"")
+            group_by_aliases.append(f"\"{x_col}\"")
+
+    # ------------------------- FINAL QUERY -------------------------
     query = f"""
-    SELECT {select_x_axis_str}, {', '.join(y_axis_exprs)}
+    SELECT {', '.join(x_axis_exprs)}, {', '.join(y_axis_exprs)}
     FROM {table_name}
     {filter_clause}
-    GROUP BY {group_by_x_axis_str};
+    GROUP BY {', '.join(group_by_aliases)};
     """
 
     print("Constructed Query:", cur.mogrify(query).decode("utf-8"))
+
     cur.execute(query)
     rows = cur.fetchall()
+
     cur.close()
     conn.close()
-    # print("Rows from database:", rows)
+
     return rows
 
 
 
-def fetch_column_name(table_name, x_axis_columns, db_name,calculation_expr,calc_column, selectedUser='null'):
+
+# def fetch_column_name(table_name, x_axis_columns, db_name,calculation_expr,calc_column, selectedUser='null'):
+#     """
+#     Fetch distinct values for one or more columns.
+#     If multiple columns are provided as a comma-separated string,
+#     returns a dictionary with each column's distinct values.
+#     """
+#     print("selectedUser:", selectedUser)
+    
+#     print("calculationData:", calculation_expr,calc_column)
+#     # Establish database connection
+#     # try:
+#     #     if not selectedUser or selectedUser.lower() == 'null':
+#     #         conn = psycopg2.connect(f"dbname={db_name} user={USER_NAME} password={PASSWORD} host={HOST}")
+#     #     else:
+#     #         connection_details = fetch_external_db_connection(db_name, selectedUser)
+#     #         if not connection_details:
+#     #             raise Exception("Unable to fetch external database connection details.")
+            
+#     #         db_details = {
+#     #             "host": connection_details[3],
+#     #             "database": connection_details[7],
+#     #             "user": connection_details[4],
+#     #             "password": connection_details[5],
+#     #             "port": int(connection_details[6])
+#     #         }
+#     #         conn = psycopg2.connect(
+#     #             dbname=db_details['database'],
+#     #             user=db_details['user'],
+#     #             password=db_details['password'],
+#     #             host=db_details['host'],
+#     #             port=db_details['port'],
+#     #         )
+    
+
+#     try:
+#         # ✅ 1️⃣ LOCAL DATABASE CONNECTION
+#         conn= get_db_connection_or_path(selectedUser, db_name)
+#         results = {}
+
+#         with conn.cursor() as cur:  # ✅ Use a regular cursor instead of a named cursor
+#             # Split multiple columns if needed
+#             columns = [col.strip() for col in x_axis_columns.split(',')] if ',' in x_axis_columns else [x_axis_columns.strip()]
+            
+#             for col in columns:
+#                 # Check the data type of the column
+#                 type_query = """
+#                     SELECT data_type FROM information_schema.columns 
+#                     WHERE table_name = %s AND column_name = %s
+#                 """
+#                 cur.execute(type_query, (table_name, col))
+#                 column_type = cur.fetchone()
+
+#                 # # Build the SQL query dynamically based on data type
+#                 # if column_type and column_type[0] in ('date', 'timestamp', 'timestamp with time zone'):
+#                 #     query = sql.SQL("SELECT DISTINCT TO_CHAR({col}, 'YYYY-MM-DD') FROM {table}")
+#                 # else:
+#                 #     query = sql.SQL("SELECT DISTINCT {col} FROM {table}")
+
+#                 from psycopg2 import sql
+
+               
+#                 if calculation_expr and col == calc_column:
+#                     try:
+#                         raw_formula = calculation_expr.strip()
+#                         # calculation_expr_sql = convert_calculation_to_sql(raw_formula, global_df.columns)
+#                         # calculation_expr_sql = convert_calculation_to_sql(raw_formula, list(global_df.columns))
+#                         calculation_expr_sql = convert_calculation_to_sql(raw_formula, list(global_df.columns))
+
+
+#                         print("Parsed SQL expression:", calculation_expr_sql)
+
+#                         query = sql.SQL(
+#                             "SELECT DISTINCT {alias} FROM (SELECT {calc_expr} AS {alias} FROM {table}) AS sub"
+#                         ).format(
+#                             calc_expr=sql.SQL(calculation_expr_sql),
+#                             alias=sql.Identifier(calc_column),
+#                             table=sql.Identifier(table_name)
+#                         )
+#                         print("Generated SQL query:", query.as_string(conn))
+#                         cur.execute(query)
+
+#                     except Exception as e:
+#                         print("⚠️ Error parsing or executing calculation expression:", str(e))
+#                         results[col] = []
+#                         return
+
+
+#                 else:
+#                     # Fallback: direct column fetch
+#                     if column_type and column_type[0] in ('date', 'timestamp', 'timestamp with time zone'):
+#                         query = sql.SQL("SELECT DISTINCT TO_CHAR({col}, 'YYYY-MM-DD') FROM {table}").format(
+#                             col=sql.Identifier(col),
+#                             table=sql.Identifier(table_name)
+#                         )
+#                     else:
+#                         query = sql.SQL("SELECT DISTINCT {col} FROM {table}").format(
+#                             col=sql.Identifier(col),
+#                             table=sql.Identifier(table_name)
+#                         )
+#                     cur.execute(query)
+
+#                 # Final result processing
+#                 rows = cur.fetchall()
+#                 results[col] = [row[0] for row in rows]
+#                 print("results[col]",results[col])
+
+
+#         conn.close()
+#         return results
+
+#     except Exception as e:
+#         raise Exception(f"Error fetching distinct column values from {table_name}: {str(e)}")
+def fetch_column_name(table_name, x_axis_columns, db_name, calculation_expr, calc_column, selectedUser='null'):
     """
     Fetch distinct values for one or more columns.
     If multiple columns are provided as a comma-separated string,
     returns a dictionary with each column's distinct values.
+    
+    **NEW**: If a column is a date type, it returns a dictionary 
+    of date parts (years, months, quarters, etc.)
     """
     print("selectedUser:", selectedUser)
+    print("calculationData:", calculation_expr, calc_column)
     
-    print("calculationData:", calculation_expr,calc_column)
-    # Establish database connection
+    conn = None # Initialize conn
     try:
+        # Establish database connection
         if not selectedUser or selectedUser.lower() == 'null':
             conn = psycopg2.connect(f"dbname={db_name} user={USER_NAME} password={PASSWORD} host={HOST}")
         else:
@@ -1893,8 +2846,7 @@ def fetch_column_name(table_name, x_axis_columns, db_name,calculation_expr,calc_
 
         results = {}
 
-        with conn.cursor() as cur:  # ✅ Use a regular cursor instead of a named cursor
-            # Split multiple columns if needed
+        with conn.cursor() as cur:
             columns = [col.strip() for col in x_axis_columns.split(',')] if ',' in x_axis_columns else [x_axis_columns.strip()]
             
             for col in columns:
@@ -1904,24 +2856,16 @@ def fetch_column_name(table_name, x_axis_columns, db_name,calculation_expr,calc_
                     WHERE table_name = %s AND column_name = %s
                 """
                 cur.execute(type_query, (table_name, col))
-                column_type = cur.fetchone()
+                column_type_row = cur.fetchone()
+                column_type = column_type_row[0] if column_type_row else None
 
-                # # Build the SQL query dynamically based on data type
-                # if column_type and column_type[0] in ('date', 'timestamp', 'timestamp with time zone'):
-                #     query = sql.SQL("SELECT DISTINCT TO_CHAR({col}, 'YYYY-MM-DD') FROM {table}")
-                # else:
-                #     query = sql.SQL("SELECT DISTINCT {col} FROM {table}")
-
-                from psycopg2 import sql
-
-               
                 if calculation_expr and col == calc_column:
                     try:
                         raw_formula = calculation_expr.strip()
-                        # calculation_expr_sql = convert_calculation_to_sql(raw_formula, global_df.columns)
-                        # calculation_expr_sql = convert_calculation_to_sql(raw_formula, list(global_df.columns))
-                        calculation_expr_sql = convert_calculation_to_sql(raw_formula, list(global_df.columns))
-
+                        # Assuming global_df.columns is available or passed differently
+                        # This part might need adjustment if global_df is not defined here
+                        # For this example, I'll assume convert_calculation_to_sql is defined
+                        calculation_expr_sql = convert_calculation_to_sql(raw_formula, []) 
 
                         print("Parsed SQL expression:", calculation_expr_sql)
 
@@ -1934,38 +2878,108 @@ def fetch_column_name(table_name, x_axis_columns, db_name,calculation_expr,calc_
                         )
                         print("Generated SQL query:", query.as_string(conn))
                         cur.execute(query)
+                        rows = cur.fetchall()
+                        results[col] = [row[0] for row in rows]
+                        print("results[col]", results[col])
 
                     except Exception as e:
                         print("⚠️ Error parsing or executing calculation expression:", str(e))
-                        results[col] = []
-                        return
+                        results[col] = [] # Set empty on error
+                        continue # Move to the next column
 
+                # --- This is the new/modified block ---
+                elif column_type and column_type in ('date', 'timestamp', 'timestamp without time zone', 'timestamp with time zone'):
+                    print(f"Column {col} is a date type. Fetching date parts.")
+                    
+                    date_parts_data = {
+                        "is_date": True,
+                        "years": [],
+                        "quarters": [],
+                        "months": [],       # Numeric (1-12)
+                        "weeks": [],        # Week of year (1-53)
+                        "day_of_month": [], # (1-31)
+                        "day_of_week": [],  # (0=Sun, 6=Sat)
+                        "month_names": [],  # e.g., {"num": 1, "name": "January"}
+                        "day_names": []     # e.g., {"num": 0, "name": "Sunday"}
+                    }
+                    
+                    # (dictionary_key, sql_extract_part)
+                    parts_to_query = [
+                        ('years', 'YEAR'),
+                        ('quarters', 'QUARTER'),
+                        ('months', 'MONTH'),
+                        ('weeks', 'WEEK'),
+                        ('day_of_month', 'DAY'),
+                        ('day_of_week', 'DOW')
+                    ]
+
+                    for part_key, sql_part in parts_to_query:
+                        try:
+                            part_query = sql.SQL(
+                                "SELECT DISTINCT EXTRACT({sql_part} FROM {col}) "
+                                "FROM {table} WHERE {col} IS NOT NULL ORDER BY 1"
+                            ).format(
+                                sql_part=sql.SQL(sql_part),
+                                col=sql.Identifier(col),
+                                table=sql.Identifier(table_name)
+                            )
+                            cur.execute(part_query)
+                            rows = cur.fetchall()
+                            # EXTRACT returns float-like, so cast to int
+                            date_parts_data[part_key] = sorted([int(row[0]) for row in rows])
+                        except Exception as e:
+                            print(f"Error fetching date part {sql_part} for {col}: {e}")
+                            date_parts_data[part_key] = []
+                    
+                    # Get Month Names
+                    try:
+                        month_name_query = sql.SQL(
+                            "SELECT DISTINCT EXTRACT(MONTH FROM {col}) as month_num, TO_CHAR({col}, 'Month') as month_name "
+                            "FROM {table} WHERE {col} IS NOT NULL ORDER BY month_num"
+                        ).format(col=sql.Identifier(col), table=sql.Identifier(table_name))
+                        cur.execute(month_name_query)
+                        rows = cur.fetchall()
+                        date_parts_data['month_names'] = [{"num": int(row[0]), "name": row[1].strip()} for row in rows]
+                    except Exception as e:
+                        print(f"Error fetching month names for {col}: {e}")
+
+                    # Get Day of Week Names
+                    try:
+                        day_name_query = sql.SQL(
+                            "SELECT DISTINCT EXTRACT(DOW FROM {col}) as dow_num, TO_CHAR({col}, 'Day') as day_name "
+                            "FROM {table} WHERE {col} IS NOT NULL ORDER BY dow_num"
+                        ).format(col=sql.Identifier(col), table=sql.Identifier(table_name))
+                        cur.execute(day_name_query)
+                        rows = cur.fetchall()
+                        date_parts_data['day_names'] = [{"num": int(row[0]), "name": row[1].strip()} for row in rows]
+                    except Exception as e:
+                        print(f"Error fetching day names for {col}: {e}")
+
+                    results[col] = date_parts_data
 
                 else:
-                    # Fallback: direct column fetch
-                    if column_type and column_type[0] in ('date', 'timestamp', 'timestamp with time zone'):
-                        query = sql.SQL("SELECT DISTINCT TO_CHAR({col}, 'YYYY-MM-DD') FROM {table}").format(
-                            col=sql.Identifier(col),
-                            table=sql.Identifier(table_name)
-                        )
-                    else:
-                        query = sql.SQL("SELECT DISTINCT {col} FROM {table}").format(
-                            col=sql.Identifier(col),
-                            table=sql.Identifier(table_name)
-                        )
+                    # Original logic for non-date, non-calculated columns
+                    query = sql.SQL("SELECT DISTINCT {col} FROM {table}").format(
+                        col=sql.Identifier(col),
+                        table=sql.Identifier(table_name)
+                    )
                     cur.execute(query)
-
-                # Final result processing
-                rows = cur.fetchall()
-                results[col] = [row[0] for row in rows]
-                print("results[col]",results[col])
-
-
+                    rows = cur.fetchall()
+                    results[col] = [row[0] for row in rows]
+                    print("results[col]", results[col])
+        
         conn.close()
+
+        print("Final results:", results)
         return results
 
     except Exception as e:
-        raise Exception(f"Error fetching distinct column values from {table_name}: {str(e)}")
+        if conn:
+            conn.close()
+        # Ensure to handle undefined variables if connection fails early
+        raise Exception(f"Error fetching distinct column values: {str(e)}")
+
+
 
 def calculationFetch(db_name, dbTableName='book13', selectedUser=None):
     global global_df
@@ -1974,15 +2988,16 @@ def calculationFetch(db_name, dbTableName='book13', selectedUser=None):
         if 'global_df' in globals() and global_df is not None and not global_df.empty:
             return global_df
 
-        if selectedUser is None:
-            print("Using direct connection to company DB:", db_name)
-            connection_string = f"dbname={db_name} user={USER_NAME} password={PASSWORD} host={HOST}"
-            connection = psycopg2.connect(connection_string)
-        else:
-            print("Using external DB connection for user:", selectedUser)
-            connection = fetch_external_db_connection(db_name, selectedUser)
-            if not connection:
-                raise Exception("Could not get external DB connection")
+        # if selectedUser is None:
+        #     print("Using direct connection to company DB:", db_name)
+        #     connection_string = f"dbname={db_name} user={USER_NAME} password={PASSWORD} host={HOST}"
+        #     connection = psycopg2.connect(connection_string)
+        # else:
+        #     print("Using external DB connection for user:", selectedUser)
+        #     connection = fetch_external_db_connection(db_name, selectedUser)
+        #     if not connection:
+        #         raise Exception("Could not get external DB connection")
+        connection = get_db_connection_or_path(selectedUser, db_name)
 
         cursor = connection.cursor()
 
@@ -2441,36 +3456,10 @@ def fetchText_data(databaseName, table_Name, x_axis, aggregate,selectedUser):
     'maximum': 'max'
 }.get(aggregate, 'sum')  # Default to 'sum' if no match
 
-    # # Connect to the database
-    # conn = psycopg2.connect(f"dbname={databaseName} user={USER_NAME} password={PASSWORD} host={HOST}")
-    # cur = conn.cursor()
-    # if selectedUser == None:
-    if not selectedUser or selectedUser.lower() == 'null':
-    # Handle local database connection
-
-        conn = psycopg2.connect(f"dbname={databaseName} user={USER_NAME} password={PASSWORD} host={HOST}")
-
-    else:  # External connection
-        connection_details = fetch_external_db_connection(databaseName,selectedUser)
-        if connection_details:
-            db_details = {
-                "host": connection_details[3],
-                "database": connection_details[7],
-                "user": connection_details[4],
-                "password": connection_details[5],
-                "port": int(connection_details[6])
-            }
-        if not connection_details:
-            raise Exception("Unable to fetch external database connection details.")
-        
-        conn = psycopg2.connect(
-            dbname=db_details['database'],
-            user=db_details['user'],
-            password=db_details['password'],
-            host=db_details['host'],
-            port=db_details['port'],
-        )
     
+    conn = get_db_connection_or_path(selectedUser, databaseName)
+
+        
     cur = conn.cursor()
 
     # Check the data type of the x_axis column
@@ -2600,31 +3589,8 @@ def fetch_hierarchical_data(table_name, db_name,selectedUser):
     if global_df is None:
         print("Fetching data from the database...")
         try:
-            # conn = psycopg2.connect(f"dbname={db_name} user={USER_NAME} password={PASSWORD} host={HOST}")
-            # cur = conn.cursor()
-            if not selectedUser or selectedUser.lower() == 'null':
-                conn = psycopg2.connect(f"dbname={db_name} user={USER_NAME} password={PASSWORD} host={HOST}")
-            else:  # External connection
-                connection_details = fetch_external_db_connection(db_name,selectedUser)
-                if connection_details:
-                    db_details = {
-                        "host": connection_details[3],
-                        "database": connection_details[7],
-                        "user": connection_details[4],
-                        "password": connection_details[5],
-                        "port": int(connection_details[6])
-                    }
-                if not connection_details:
-                    raise Exception("Unable to fetch external database connection details.")
-                
-                conn = psycopg2.connect(
-                    dbname=db_details['database'],
-                    user=db_details['user'],
-                    password=db_details['password'],
-                    host=db_details['host'],
-                    port=db_details['port'],
-                )
-            
+           
+            conn = get_db_connection_or_path(selectedUser, db_name)
             cur = conn.cursor()
 
             print("conn",conn)

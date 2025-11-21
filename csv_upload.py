@@ -12,9 +12,10 @@ from flask import Flask, request, jsonify # Assuming these are part of a larger 
 import io
 import time
 import random
+from config import PASSWORD, USER_NAME, HOST, PORT,DB_NAME
 # --- Existing Helper Functions (kept for context, some are already optimized) ---
 def is_table_used_in_charts(table_name):
-    conn = get_db_connection(dbname="datasource")
+    conn = get_db_connection(dbname=DB_NAME)
     cur = conn.cursor()
     cur.execute(
         """
@@ -196,9 +197,81 @@ def bulk_insert_with_copy(cur, conn, table_name, df, primary_key_col):
         pass
 
 # Modified optimized_batch_insert to support UPSERT
+# def optimized_batch_insert(cur, conn, table_name, df, primary_key_col, batch_size=5000):
+#     try:
+#         rows_to_insert = []
+#         for _, row in df.iterrows():
+#             processed_row = []
+#             for col in df.columns:
+#                 value = row[col]
+#                 if pd.isna(value):
+#                     processed_row.append(None)
+#                 elif pd.api.types.is_datetime64_any_dtype(df[col]) and pd.notna(value):
+#                     processed_row.append(value.to_pydatetime() if hasattr(value, 'to_pydatetime') else value)
+#                 else:
+#                     processed_row.append(value)
+#             rows_to_insert.append(tuple(processed_row))
+
+#         columns = df.columns.tolist()
+#         placeholders = ', '.join(['%s'] * len(columns))
+        
+#         # Build the UPSERT clause
+#         insert_query_base = sql.SQL("INSERT INTO {} ({}) VALUES %s").format(
+#             sql.Identifier(table_name),
+#             sql.SQL(', ').join(map(sql.Identifier, columns))
+#         )
+        
+#         upsert_query = insert_query_base
+#         if primary_key_col:
+#             update_columns = [col for col in columns if col != primary_key_col]
+#             if update_columns:
+#                 update_set_clause = sql.SQL(', ').join(
+#                     sql.SQL("{0} = EXCLUDED.{0}").format(sql.Identifier(col))
+#                     for col in update_columns
+#                 )
+#                 upsert_query = sql.SQL("{} ON CONFLICT ({}) DO UPDATE SET {}").format(
+#                     insert_query_base,
+#                     sql.Identifier(primary_key_col),
+#                     update_set_clause
+#                 )
+#             else: # Only PK column, no other columns to update
+#                  upsert_query = sql.SQL("{} ON CONFLICT ({}) DO NOTHING").format(
+#                     insert_query_base,
+#                     sql.Identifier(primary_key_col)
+#                 )
+
+#         print(f"Batch UPSERT query: {upsert_query.as_string(conn)}")
+
+#         with tqdm(total=len(rows_to_insert), desc=f"Inserting/Updating into {table_name}", unit="row") as pbar:
+#             for i in range(0, len(rows_to_insert), batch_size):
+#                 batch = rows_to_insert[i:i + batch_size]
+#                 execute_values(
+#                     cur,
+#                     upsert_query.as_string(conn),
+#                     batch,
+#                     template=f"({placeholders})",
+#                     page_size=batch_size
+#                 )
+#                 # Commit less frequently for performance, but ensure commits happen
+#                 if (i // batch_size) % 5 == 0 or (i + batch_size) >= len(rows_to_insert):
+#                     conn.commit()
+#                 pbar.update(len(batch))
+
+#         print(f"Optimized batch UPSERTed {len(rows_to_insert)} rows into table '{table_name}'.")
+
+#     except Exception as e:
+#         print(f"Error during optimized batch insert/update: {str(e)}")
+#         traceback.print_exc()
+#         if conn:
+#             conn.rollback()
+#         raise e
 def optimized_batch_insert(cur, conn, table_name, df, primary_key_col, batch_size=5000):
     try:
         rows_to_insert = []
+        inserted_count = 0
+        updated_count = 0
+        skipped_count = 0
+
         for _, row in df.iterrows():
             processed_row = []
             for col in df.columns:
@@ -213,13 +286,13 @@ def optimized_batch_insert(cur, conn, table_name, df, primary_key_col, batch_siz
 
         columns = df.columns.tolist()
         placeholders = ', '.join(['%s'] * len(columns))
-        
-        # Build the UPSERT clause
+
+        # Build UPSERT with RETURNING clause
         insert_query_base = sql.SQL("INSERT INTO {} ({}) VALUES %s").format(
             sql.Identifier(table_name),
             sql.SQL(', ').join(map(sql.Identifier, columns))
         )
-        
+
         upsert_query = insert_query_base
         if primary_key_col:
             update_columns = [col for col in columns if col != primary_key_col]
@@ -228,13 +301,17 @@ def optimized_batch_insert(cur, conn, table_name, df, primary_key_col, batch_siz
                     sql.SQL("{0} = EXCLUDED.{0}").format(sql.Identifier(col))
                     for col in update_columns
                 )
-                upsert_query = sql.SQL("{} ON CONFLICT ({}) DO UPDATE SET {}").format(
+                # Return a flag whether inserted or updated
+                upsert_query = sql.SQL("""
+                    {} ON CONFLICT ({}) DO UPDATE SET {}
+                    RETURNING (xmax = 0) AS inserted;
+                """).format(
                     insert_query_base,
                     sql.Identifier(primary_key_col),
                     update_set_clause
                 )
-            else: # Only PK column, no other columns to update
-                 upsert_query = sql.SQL("{} ON CONFLICT ({}) DO NOTHING").format(
+            else:
+                upsert_query = sql.SQL("{} ON CONFLICT ({}) DO NOTHING RETURNING (xmax = 0) AS inserted;").format(
                     insert_query_base,
                     sql.Identifier(primary_key_col)
                 )
@@ -244,19 +321,40 @@ def optimized_batch_insert(cur, conn, table_name, df, primary_key_col, batch_siz
         with tqdm(total=len(rows_to_insert), desc=f"Inserting/Updating into {table_name}", unit="row") as pbar:
             for i in range(0, len(rows_to_insert), batch_size):
                 batch = rows_to_insert[i:i + batch_size]
-                execute_values(
-                    cur,
-                    upsert_query.as_string(conn),
-                    batch,
-                    template=f"({placeholders})",
-                    page_size=batch_size
-                )
-                # Commit less frequently for performance, but ensure commits happen
-                if (i // batch_size) % 5 == 0 or (i + batch_size) >= len(rows_to_insert):
-                    conn.commit()
-                pbar.update(len(batch))
+                cur.execute("SAVEPOINT before_batch;")
+                try:
+                    # Run UPSERT with RETURNING
+                    execute_values(
+                        cur,
+                        upsert_query.as_string(conn),
+                        batch,
+                        template=f"({placeholders})",
+                        page_size=batch_size
+                    )
 
-        print(f"Optimized batch UPSERTed {len(rows_to_insert)} rows into table '{table_name}'.")
+                    # Count inserted vs updated from returned rows
+                    try:
+                        results = cur.fetchall()
+                        for res in results:
+                            if res[0]:
+                                inserted_count += 1
+                            else:
+                                updated_count += 1
+                    except Exception:
+                        # Some cases (like DO NOTHING) will return nothing
+                        skipped_count += len(batch)
+
+                    if (i // batch_size) % 5 == 0 or (i + batch_size) >= len(rows_to_insert):
+                        conn.commit()
+                except Exception as e:
+                    print(f"Error inserting batch: {str(e)}")
+                    cur.execute("ROLLBACK TO SAVEPOINT before_batch;")
+                    skipped_count += len(batch)
+                finally:
+                    pbar.update(len(batch))
+
+        print(f"Inserted: {inserted_count}, Updated: {updated_count}, Skipped: {skipped_count}")
+        return inserted_count, updated_count, skipped_count
 
     except Exception as e:
         print(f"Error during optimized batch insert/update: {str(e)}")
@@ -264,6 +362,7 @@ def optimized_batch_insert(cur, conn, table_name, df, primary_key_col, batch_siz
         if conn:
             conn.rollback()
         raise e
+
 
 def process_csv_in_chunks(csv_file_path, chunk_size=50000):
     for chunk in pd.read_csv(csv_file_path, chunksize=chunk_size, low_memory=False, dtype_backend='numpy_nullable'):
@@ -299,13 +398,41 @@ def upload_csv_to_postgresql(database_name, username, password, csv_file_name, h
         directory_name = os.path.splitext(os.path.basename(csv_file_name))[0]
         directory_path = os.path.join(UPLOAD_FOLDER, directory_name)
         os.makedirs(directory_path, exist_ok=True)
+        rows_added_total = 0
+        rows_updated_total = 0
+        rows_skipped_total = 0
+        rows_deleted_total = 0
+
 
         table_name = sanitize_column_name(directory_name)
 
         file_size_mb = os.path.getsize(csv_file_path) / (1024 * 1024)
         process_in_chunks = file_size_mb > 100
 
-        initial_df = pd.read_csv(csv_file_path, nrows=1000, low_memory=False, dtype_backend='numpy_nullable')
+        # initial_df = pd.read_csv(csv_file_path, nrows=1000, low_memory=False, dtype_backend='numpy_nullable')
+       # Read only a small sample for schema inference
+        schema_df = pd.read_csv(csv_file_path, nrows=1000, low_memory=False, dtype_backend='numpy_nullable')
+        print(f"Processing CSV for schema inference: {schema_df.shape[0]} rows.")
+
+        schema_df = preprocess_dates(schema_df)
+        schema_df = clean_data(schema_df)
+        schema_df.columns = [sanitize_column_name(col) for col in schema_df.columns]
+
+        duplicate_columns = check_repeating_columns(schema_df)
+        if duplicate_columns:
+            return f"Error: Duplicate columns found in the CSV: {', '.join(duplicate_columns)}"
+
+        primary_key_column_from_csv = identify_primary_key(schema_df)
+        db_primary_key_column = 'id'
+
+        # 🧠 After schema inference, read the **full file** or process in chunks:
+        if process_in_chunks:
+            # large file, handled below in chunks
+            pass
+        else:
+            # Read the entire CSV for smaller datasets
+            initial_df = pd.read_csv(csv_file_path, low_memory=False, dtype_backend='numpy_nullable')
+
         print(f"Processing CSV for schema inference: {initial_df.shape[0]} rows.")
 
         initial_df = preprocess_dates(initial_df)
@@ -550,7 +677,12 @@ def upload_csv_to_postgresql(database_name, username, password, csv_file_name, h
                         # Pass the detected PK for UPSERT
                         copy_success = bulk_insert_with_copy(cur, conn, table_name, chunk_df, actual_pk_for_upsert)
                         if not copy_success:
-                            optimized_batch_insert(cur, conn, table_name, chunk_df, actual_pk_for_upsert, batch_size=5000)
+                            inserted, updated, skipped = optimized_batch_insert(cur, conn, table_name, initial_df, actual_pk_for_upsert, batch_size=5000)
+                            rows_added_total += inserted
+                            rows_updated_total += updated
+                            rows_skipped_total += skipped
+
+                            # optimized_batch_insert(cur, conn, table_name, chunk_df, actual_pk_for_upsert, batch_size=5000)
                     chunk_num += 1
                 print(f"Finished inserting all chunks into table '{table_name}'.")
 
@@ -569,9 +701,19 @@ def upload_csv_to_postgresql(database_name, username, password, csv_file_name, h
                     if not copy_success:
                         print("COPY FROM failed, using optimized batch UPSERT...")
                         optimized_batch_insert(cur, conn, table_name, initial_df, actual_pk_for_upsert, batch_size=5000)
+                        inserted, updated, skipped = optimized_batch_insert(cur, conn, table_name, initial_df, actual_pk_for_upsert, batch_size=5000)
+                        rows_added_total += inserted
+                        rows_updated_total += updated
+                        rows_skipped_total += skipped
+
                 else:
                     print("Using optimized batch UPSERT...")
-                    optimized_batch_insert(cur, conn, table_name, initial_df, actual_pk_for_upsert, batch_size=2000)
+                    # optimized_batch_insert(cur, conn, table_name, initial_df, actual_pk_for_upsert, batch_size=2000)
+                    inserted, updated, skipped = optimized_batch_insert(cur, conn, table_name, initial_df, actual_pk_for_upsert, batch_size=2000)
+                    rows_added_total += inserted
+                    rows_updated_total += updated
+                    rows_skipped_total += skipped
+
 
             # ... (rest of your code for saving processed CSV, datasource table) ...
             cur.execute("""
@@ -588,7 +730,9 @@ def upload_csv_to_postgresql(database_name, username, password, csv_file_name, h
                     CREATE TABLE datasource (
                         id SERIAL PRIMARY KEY,
                         data_source_name VARCHAR(255),
-                        data_source_path VARCHAR(255)
+                        data_source_path VARCHAR(255),
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                     );
                 """)
                 print("Created 'datasource' table.")
@@ -596,15 +740,35 @@ def upload_csv_to_postgresql(database_name, username, password, csv_file_name, h
             cur.execute("SELECT id FROM datasource WHERE data_source_name = %s;", (directory_name,))
             existing_data_source = cur.fetchone()
 
+            # if existing_data_source:
+            #     print(f"Data source '{directory_name}' already exists in 'datasource' table. Skipping insertion.")
+            # else:
+            #     insert_query = sql.SQL("""
+            #         INSERT INTO datasource (data_source_name, data_source_path)
+            #         VALUES (%s, %s)
+            #     """)
+            #     cur.execute(insert_query, (directory_name, directory_path))
+            #     print(f"Inserted '{directory_name}' into 'datasource' table.")
+
+            # conn.commit()
             if existing_data_source:
-                print(f"Data source '{directory_name}' already exists in 'datasource' table. Skipping insertion.")
+                # ✅ Update existing record
+                update_query = sql.SQL("""
+                    UPDATE datasource
+                    SET data_source_path = %s,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE data_source_name = %s;
+                """)
+                cur.execute(update_query, (directory_path, directory_name))
+                print(f"Updated existing data source '{directory_name}' in 'datasource' table.")
             else:
+                # 🆕 Insert new record
                 insert_query = sql.SQL("""
                     INSERT INTO datasource (data_source_name, data_source_path)
                     VALUES (%s, %s)
                 """)
                 cur.execute(insert_query, (directory_name, directory_path))
-                print(f"Inserted '{directory_name}' into 'datasource' table.")
+                print(f"Inserted new data source '{directory_name}' into 'datasource' table.")
 
             conn.commit()
 
@@ -639,5 +803,27 @@ def upload_csv_to_postgresql(database_name, username, password, csv_file_name, h
         if conn:
             conn.close()
             print("Database connection closed.")
+    operation_summary = []
 
-    return "Upload successful"
+    if rows_added_total > 0:
+        operation_summary.append("insert")
+    if rows_updated_total > 0:
+        operation_summary.append("update")
+    if rows_deleted_total > 0:
+        operation_summary.append("delete")
+    if rows_skipped_total > 0:
+        operation_summary.append("skip")
+
+    # Default action type if none performed
+    if not operation_summary:
+        operation_summary.append("no_change")
+    # return "Upload successful"
+    return {
+    "message": "Upload successful",
+    "table_name": table_name,
+    "actions_performed": operation_summary,
+    "rows_added": rows_added_total,
+    "rows_updated": rows_updated_total,
+    "rows_skipped": rows_skipped_total,
+    "rows_deleted": rows_deleted_total
+}

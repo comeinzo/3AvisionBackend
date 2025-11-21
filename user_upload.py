@@ -3,10 +3,10 @@ from flask import jsonify
 import psycopg2
 import bcrypt
 from signup.signup import encrypt_password
-from config import PASSWORD, USER_NAME, HOST, PORT
+from config import PASSWORD, USER_NAME, HOST, PORT,DB_NAME
 
 # Connect to a database (defaults to datasource)
-def get_db_connection(dbname="datasource"):
+def get_db_connection(dbname=DB_NAME):
     return psycopg2.connect(
         dbname=dbname,
         user=USER_NAME,
@@ -27,7 +27,7 @@ def get_company_db_connection(company_name):
 
 # ==================== MANUAL REGISTRATION ====================
 
-def handle_manual_registration(user_details, company):
+def handle_manual_registration(user_details, company,admin_email):
     conn_datasource = get_db_connection()
     if not conn_datasource:
         return jsonify({'message': 'Failed to connect to datasource database'}), 500
@@ -59,6 +59,7 @@ def handle_manual_registration(user_details, company):
         create_user_table(conn)
         create_category_table_if_not_exists(conn)
         create_user_table_if_not_exists(conn)
+        create_user_management_log_table(company)
 
         with conn.cursor() as cursor:
             if check_username_exists(cursor, username):
@@ -72,6 +73,21 @@ def handle_manual_registration(user_details, company):
             handle_categories(conn, conn_datasource, employee_id, role_id, company, categories)
 
         conn.commit()
+        # after conn.commit()
+
+        description = (
+            f"Admin ({admin_email}) created new user '{username}' ({email}) with role '{role_name}' "
+            f"in company '{company}'."
+        )
+        log_user_management_action(
+            admin_email=admin_email,
+            user_email=email,
+            action_type="USER_CREATED",
+            description=description,
+            company_name=company
+        )
+
+        
         conn_datasource.close()
         return jsonify({'message': 'User and categories created successfully'}), 200
 
@@ -84,7 +100,7 @@ def handle_manual_registration(user_details, company):
 
 # ==================== FILE UPLOAD REGISTRATION ====================
 
-def handle_file_upload_registration(user_details, company):
+def handle_file_upload_registration(user_details, company,admin_email):
     conn_datasource = get_db_connection()
     if not conn_datasource:
         return jsonify({'message': 'Failed to connect to datasource database'}), 500
@@ -126,6 +142,7 @@ def handle_file_upload_registration(user_details, company):
                 create_user_table(conn)
                 create_category_table_if_not_exists(conn)
                 create_user_table_if_not_exists(conn)
+                create_user_management_log_table(company)
 
                 with conn.cursor() as cursor:
                     if check_username_exists(cursor, username):
@@ -143,6 +160,17 @@ def handle_file_upload_registration(user_details, company):
             except Exception as user_error:
                 print(f"Skipping user due to error: {user} | Error: {user_error}")
                 continue
+        description = (
+            f"Admin ({admin_email}) added user '{username}' ({email}) via file upload "
+            f"in company '{company}'."
+        )
+        log_user_management_action(
+            admin_email=admin_email,
+            user_email=email or "Unknown",
+            action_type="USER_CREATED_FILEUPLOAD",
+            description=description,
+            company_name=company
+        )
 
         return jsonify({'message': 'File upload processed successfully'}), 200
 
@@ -268,3 +296,45 @@ def create_user_table_if_not_exists(conn):
 
 def encrypt_password(plain_password):
     return bcrypt.hashpw(plain_password.encode('utf-8'), bcrypt.gensalt())
+
+def create_user_management_log_table(company):
+    conn = get_company_db_connection(company)
+    if not conn:
+        print("❌ Failed to connect to datasource database while creating log table.")
+        return
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS user_management_logs (
+                    id SERIAL PRIMARY KEY,
+                    admin_email VARCHAR(255),
+                    user_email VARCHAR(255),
+                    action_type VARCHAR(100),
+                    description TEXT,
+                    company_name VARCHAR(255),
+                    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+            """)
+        conn.commit()
+        print("✅ user_management_logs table ensured.")
+    except Exception as e:
+        print(f"❌ Error creating user_management_logs table: {e}")
+    finally:
+        conn.close()
+def log_user_management_action(admin_email, user_email, action_type, description, company_name):
+    conn = get_company_db_connection(company_name)
+    if not conn:
+        print("❌ Failed to connect to datasource database while logging action.")
+        return
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute("""
+                INSERT INTO user_management_logs (admin_email, user_email, action_type, description, company_name)
+                VALUES (%s, %s, %s, %s, %s);
+            """, (admin_email, user_email, action_type, description, company_name))
+        conn.commit()
+        print(f"🟢 Logged user management action: {action_type} for {user_email}")
+    except Exception as e:
+        print(f"❌ Error logging user management action: {e}")
+    finally:
+        conn.close()

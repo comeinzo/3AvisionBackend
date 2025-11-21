@@ -436,9 +436,9 @@ from flask import Flask, request, jsonify
 import io
 from datetime import datetime, date
 import dateutil.parser as date_parser
-
+from config import DB_NAME
 def is_table_used_in_charts(table_name):
-    conn = get_db_connection(dbname="datasource")
+    conn = get_db_connection(dbname=DB_NAME)
     cur = conn.cursor()
     cur.execute(
         """
@@ -765,6 +765,11 @@ def upload_excel_to_postgresql(database_name, username, password, excel_file_nam
         directory_name = os.path.splitext(os.path.basename(excel_file_name))[0]
         directory_path = os.path.join(UPLOAD_FOLDER, directory_name)
         os.makedirs(directory_path, exist_ok=True)
+        rows_inserted = 0
+        rows_deleted = 0
+        rows_updated = 0
+        rows_skipped = 0
+        
 
         for sheet_name in selected_sheets:
             sheet_name_cleaned = sheet_name.strip('"').strip()
@@ -870,6 +875,8 @@ def upload_excel_to_postgresql(database_name, username, password, excel_file_nam
                         continue
 
             # Check for duplicate primary keys
+            df.columns = df.columns.str.strip().str.lower().str.replace('.', '_')
+            primary_key_column = primary_key_column.strip().lower().replace('.', '_')
             duplicate_primary_keys = df[df.duplicated(subset=[primary_key_column], keep=False)][primary_key_column].tolist()
             if duplicate_primary_keys:
                 return f"Error: Duplicate primary key values found: {', '.join(map(str, duplicate_primary_keys))}"
@@ -891,7 +898,7 @@ def upload_excel_to_postgresql(database_name, username, password, excel_file_nam
                 
                 cur.execute(delete_query, (batch_values,))
                 total_deleted += cur.rowcount
-
+            rows_deleted += total_deleted
             if total_deleted > 0:
                 print(f"Deleted {total_deleted} rows with matching primary key values in table '{table_name}'.")
             else:
@@ -904,14 +911,18 @@ def upload_excel_to_postgresql(database_name, username, password, excel_file_nam
                 # For very large datasets, try COPY FROM first
                 print("Using COPY FROM for large dataset...")
                 copy_success = bulk_insert_with_copy(cur, conn, table_name, df)
+                rows_inserted += len(df)
+                
                 
                 if not copy_success:
                     print("COPY FROM failed, using optimized batch insert...")
                     optimized_batch_insert(cur, conn, table_name, df, batch_size=5000)
+                    rows_inserted += len(df)
             else:
                 # For smaller datasets, use optimized batch insert
                 print("Using optimized batch insert...")
                 optimized_batch_insert(cur, conn, table_name, df, batch_size=2000)
+                rows_inserted += len(df)
 
             # Save Excel file
             file_name = f"{table_name}.xlsx"
@@ -933,7 +944,10 @@ def upload_excel_to_postgresql(database_name, username, password, excel_file_nam
                 CREATE TABLE datasource (
                     id SERIAL PRIMARY KEY,
                     data_source_name VARCHAR(255),
-                    data_source_path VARCHAR(255)
+                    data_source_path VARCHAR(255),
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        
                 );
             """)
             print("Created 'datasource' table.")
@@ -954,8 +968,31 @@ def upload_excel_to_postgresql(database_name, username, password, excel_file_nam
 
         cur.close()
         conn.close()
+        operation_summary = []
 
-        return "Upload successful"
+        if rows_inserted > 0:
+            operation_summary.append("insert")
+        if rows_updated > 0:
+            operation_summary.append("update")
+        if rows_deleted > 0:
+            operation_summary.append("delete")
+        if rows_skipped > 0:
+            operation_summary.append("skip")
+
+        # Default action type if none performed
+        if not operation_summary:
+            operation_summary.append("no_change")
+        rows_added = rows_inserted
+        # return "Upload successful"
+        return {
+            "message": "Upload successful",
+            "table_name": table_name,
+            "actions_performed": operation_summary,
+            "rows_added": rows_added,
+            "rows_deleted": rows_deleted,
+            "rows_updated": rows_updated,
+            "rows_skipped": rows_skipped
+        }
         
     except Exception as e:
         print("An error occurred:", e)

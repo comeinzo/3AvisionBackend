@@ -4,9 +4,9 @@ import bcrypt
 import logging
 
 import binascii
-from config import PASSWORD, USER_NAME, HOST, PORT
+from config import PASSWORD, USER_NAME, HOST, PORT,DB_NAME
 
-def get_db_connection(dbname="datasource"):
+def get_db_connection(dbname=DB_NAME):
     conn = psycopg2.connect(
         dbname=dbname,
         # user="postgres",
@@ -58,31 +58,68 @@ def create_database(organizationName):
 
 
 
-def create_table_if_not_exists(cursor):
-    # Create table if it doesn't exist
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS organizationdatatest (
-        id SERIAL PRIMARY KEY,
-        organizationName VARCHAR(255) NOT NULL,
-        email VARCHAR(255) NOT NULL,
-        userName VARCHAR(255) NOT NULL,
-        password VARCHAR(255) NOT NULL
-    );
-    """)
+# def create_table_if_not_exists(cursor):
+#     # Create table if it doesn't exist
+#     cursor.execute("""
+#     CREATE TABLE IF NOT EXISTS organizationdatatest (
+#         id SERIAL PRIMARY KEY,
+#         organizationName VARCHAR(255) NOT NULL,
+#         email VARCHAR(255) NOT NULL,
+#         userName VARCHAR(255) NOT NULL,
+#         password VARCHAR(255) NOT NULL
+#     );
+#     """)
 
-    # Check if 'logo' column exists
-    cursor.execute("""
-    SELECT column_name 
-    FROM information_schema.columns 
-    WHERE table_name = 'organizationdatatest' AND column_name = 'logo';
-    """)
-    column_exists = cursor.fetchone()
+#     # Check if 'logo' column exists
+#     cursor.execute("""
+#     SELECT column_name 
+#     FROM information_schema.columns 
+#     WHERE table_name = 'organizationdatatest' AND column_name = 'logo';
+#     """)
+#     column_exists = cursor.fetchone()
 
-    # If not, add the column
-    if not column_exists:
-        cursor.execute("""
-        ALTER TABLE organizationdatatest ADD COLUMN logo VARCHAR(255);
-        """)
+#     # If not, add the column
+#     if not column_exists:
+#         cursor.execute("""
+#         ALTER TABLE organizationdatatest ADD COLUMN logo VARCHAR(255);
+# #         """)
+
+# def create_table_if_not_exists():
+#     # Create table if it doesn't exist
+#     conn = get_db_connection()
+#     cursor = conn.cursor()
+#     cursor.execute("""
+#     CREATE TABLE IF NOT EXISTS organizationdatatest (
+#         id SERIAL PRIMARY KEY,
+#         organizationName VARCHAR(255) NOT NULL,
+#         email VARCHAR(255) NOT NULL,
+#         userName VARCHAR(255) NOT NULL,
+#         password VARCHAR(255) NOT NULL
+#     );
+#     """)
+
+#     # Ensure all required columns exist
+#     columns_to_add = {
+#         "logo": "VARCHAR(255)",
+#         "status": "VARCHAR(50) DEFAULT 'active'",
+#         "created_at": "TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
+#         "updated_at": "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
+#     }
+
+#     for column_name, column_type in columns_to_add.items():
+#         cursor.execute("""
+#         SELECT column_name 
+#         FROM information_schema.columns 
+#         WHERE table_name = 'organizationdatatest' AND column_name = %s;
+#         """, (column_name,))
+#         column_exists = cursor.fetchone()
+
+#         if not column_exists:
+#             cursor.execute(f"""
+#             ALTER TABLE organizationdatatest ADD COLUMN {column_name} {column_type};
+#             """)
+#             print(f"✅ Added missing column: {column_name}")
+
 
 def insert_user_data(organizationName, email, userName, password,logo_filename):
     try:
@@ -90,17 +127,17 @@ def insert_user_data(organizationName, email, userName, password,logo_filename):
         conn = get_db_connection()
         cursor = conn.cursor()
 
-        # Create table if it does not exist
-        create_table_if_not_exists(cursor)
+
         print("organizationName",organizationName)
         organizationName = organizationName.lower() 
+        hash_password=encrypt_password(password)
         # Insert data into table
         cursor.execute(
             """
-            INSERT INTO organizationdatatest (organizationName, email, userName, password,logo)
-            VALUES (%s, %s, %s, %s,%s)
+            INSERT INTO organizationdatatest (organizationName, email, userName, password,logo, status, created_at, updated_at)
+            VALUES (%s, %s, %s, %s,%s,%s, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
             """,
-            (organizationName, email, userName, password,logo_filename)
+            (organizationName, email, userName, hash_password,logo_filename,'active')
         )
         conn.commit()
         logging.info(f"User data inserted for {organizationName}")
@@ -137,26 +174,164 @@ def fetch_usersdata():
 
 
 
+# def fetch_login_data(email, password):
+#     conn = get_db_connection()
+#     cursor = conn.cursor()
+#     create_table_if_not_exists(cursor)
+
+#     # SQL query to check if email and password match
+#     cursor.execute("SELECT * FROM organizationdatatest WHERE email = %s AND password = %s", (email, password))
+#     user = cursor.fetchone()
+
+#     logo_path = None
+#     company_name = None
+#     company_id=None
+#     if user and user[5]:  # Assuming user[5] is the column containing logo path
+#         logo_path = user[5].replace("\\", "/")  # Normalize path for URL
+#     if user and user[1]:  # Assuming user[5] is the column containing logo path
+#         company_name = user[1]
+#         company_id=user[0]
+       
+
+#     cursor.close()
+#     conn.close()
+
+#     return {
+#         "user": user,
+#         "logo_url": f"http://localhost:5000/static/{logo_path}" if logo_path else None,
+#         "company_name": company_name,
+#         "company_id":company_id
+#     }
+
+
+# def fetch_login_data(email, password):
+#     conn = get_db_connection()
+#     cursor = conn.cursor()
+#     create_table_if_not_exists()
+
+#     try:
+#         # ✅ Step 1: Fetch user by email only
+#         cursor.execute("SELECT * FROM organizationdatatest WHERE email = %s", (email,))
+#         user = cursor.fetchone()
+
+#         if not user:
+#             logging.warning(f"❌ No user found with email: {email}")
+#             return {"status": "error", "message": "User not found"}
+
+#         stored_hashed_password = user[4]  # 4th column is password (hashed)
+
+#         stored_hash_bytes = binascii.unhexlify(stored_hashed_password.replace('\\x', ''))
+#         print("------------------------------------",stored_hash_bytes)    
+#         # Check if the password matches the hashed password
+#         if bcrypt.checkpw(password.encode('utf-8'), stored_hash_bytes):
+
+#         # ✅ Step 2: Check password using bcrypt
+#         # if bcrypt.checkpw(plain_password.encode('utf-8'), stored_hashed_password.encode('utf-8')):
+#             logging.info(f"✅ Password match for {email}")
+
+#             logo_path = None
+#             company_name = None
+#             company_id = None
+
+#             # Assuming user[5] = logo, user[1] = organization name, user[0] = company id
+#             if user[5]:
+#                 logo_path = user[5].replace("\\", "/")
+#             if user[1]:
+#                 company_name = user[1]
+#                 company_id = user[0]
+
+#             return {
+#                 "status": "success",
+#                 "message": "Login successful",
+#                 "user": user,
+#                 "logo_url": f"http://localhost:5000/static/{logo_path}" if logo_path else None,
+#                 "company_name": company_name,
+#                 "company_id": company_id,
+#             }
+
+#         else:
+#             logging.warning(f"❌ Invalid password for {email}")
+#             return {"status": "error", "message": "Invalid password"}
+
+#     except Exception as e:
+#         logging.error(f"Error in fetch_login_data: {str(e)}")
+#         raise e
+
+#     finally:
+#         cursor.close()
+#         conn.close()
 def fetch_login_data(email, password):
     conn = get_db_connection()
     cursor = conn.cursor()
-    create_table_if_not_exists(cursor)
 
-    # SQL query to check if email and password match
-    cursor.execute("SELECT * FROM organizationdatatest WHERE email = %s AND password = %s", (email, password))
-    user = cursor.fetchone()
+    try:
+        # Step 1: Fetch user by email
+        cursor.execute("SELECT * FROM organizationdatatest WHERE email = %s", (email,))
+        user = cursor.fetchone()
 
-    logo_path = None
-    if user and user[5]:  # Assuming user[5] is the column containing logo path
-        logo_path = user[5].replace("\\", "/")  # Normalize path for URL
+        if not user:
+            logging.warning(f"❌ No user found with email: {email}")
+            return {"status": "error", "message": "User not found"}
 
-    cursor.close()
-    conn.close()
+        stored_password = user[4]  # Password column
 
-    return {
-        "user": user,
-        "logo_url": f"http://localhost:5000/static/{logo_path}" if logo_path else None
-    }
+        password_matches = False
+
+        # ----------------------------------------------
+        # CHECK IF PASSWORD IN DB IS BCRYPT OR PLAIN TEXT
+        # ----------------------------------------------
+
+        try:
+            # Case 1 : try to decode as bcrypt hash
+            stored_hash_bytes = binascii.unhexlify(stored_password.replace('\\x', ''))
+            
+            # If decoding works, check bcrypt
+            if bcrypt.checkpw(password.encode('utf-8'), stored_hash_bytes):
+                password_matches = True
+
+        except Exception:
+            # Case 2 : stored password is probably plain text
+            if stored_password == password:
+                password_matches = True
+
+        # ----------------------------------------------
+        # FINAL PASSWORD CHECK
+        # ----------------------------------------------
+        if password_matches:
+            logging.info(f"✅ Password match for {email}")
+
+            logo_path = None
+            company_name = None
+            company_id = None
+
+            if user[5]:
+                logo_path = user[5].replace("\\", "/")
+            if user[1]:
+                company_name = user[1]
+                company_id = user[0]
+
+            return {
+                "status": "success",
+                "message": "Login successful",
+                "user": user,
+                "logo_url": f"http://localhost:5000/static/{logo_path}" if logo_path else None,
+                "company_name": company_name,
+                "company_id": company_id,
+            }
+
+        else:
+            logging.warning(f"❌ Invalid password for {email}")
+            return {"status": "error", "message": "Invalid password"}
+
+    except Exception as e:
+        logging.error(f"Error in fetch_login_data: {str(e)}")
+        raise e
+
+    finally:
+        cursor.close()
+        conn.close()
+
+
 
 
 
@@ -168,7 +343,7 @@ def fetch_company_login_data(email, password, company):
     cursor1 = conne.cursor()
     role_conn = None  # Initialize role_conn outside the try block
     role_cursor = None # Initialize role_cursor outside the try block
-
+    company_id = None 
     # First query to fetch the user details (except password)
     cursor.execute("SELECT employee_id, employee_name, role_id, email FROM employee_list WHERE email = %s", (email,))
     user = cursor.fetchone()
@@ -208,9 +383,12 @@ def fetch_company_login_data(email, password, company):
                         """)
                         conne.commit()
 
-                    cursor1.execute("SELECT logo FROM organizationdatatest WHERE organizationname = %s", (company,))
+                    cursor1.execute("SELECT logo,id FROM organizationdatatest WHERE organizationname = %s", (company,))
                     logo_row = cursor1.fetchone()
-                    logo_path = logo_row[0] if logo_row else None
+                    # logo_path = logo_row[0] if logo_row else None
+                    # company_id=logo_row[1]
+                    if logo_row:
+                        logo_path, company_id = logo_row[0], logo_row[1]
 
                     # Get all table names except system tables
                     cursor.execute("""
@@ -231,7 +409,8 @@ def fetch_company_login_data(email, password, company):
                         "user": user,
                         "permissions": permissions,
                         "tables": tables,
-                        "logo_url": f"http://localhost:5000/static/{logo_path}" if logo_path else None
+                        "logo_url": f"http://localhost:5000/static/{logo_path}" if logo_path else None,
+                        "company_id":company_id
                     }
 
                 except Exception as e:

@@ -4,7 +4,10 @@ from psycopg2.extras import RealDictCursor
 import hashlib
 import psycopg2
 from config import ALLOWED_EXTENSIONS, DB_NAME, USER_NAME, PASSWORD, HOST, PORT
-
+import paramiko
+import socket
+import threading
+from dashboard_design import get_db_connection_or_path
 # Global cache storage
 GLOBAL_CACHE = {}
 
@@ -62,31 +65,33 @@ def get_db_connection(db_name, selected_user=None):
     if not db_name:
         raise ValueError("Database name is missing")
 
-    if not selected_user or selected_user.lower() == 'null':
-        print("Using default local database connection...")
-        connection_string = f"dbname={db_name} user={USER_NAME} password={PASSWORD} host={HOST}"
-        connection = psycopg2.connect(connection_string)
-    else:  # External connection
-        connection_details = fetch_external_db_connection(db_name, selected_user)
-        if not connection_details:
-            raise Exception(f"Unable to fetch external database connection details for user '{selected_user}'")
+    # if not selected_user or selected_user.lower() == 'null':
+    #     print("Using default local database connection...")
+    #     connection_string = f"dbname={db_name} user={USER_NAME} password={PASSWORD} host={HOST}"
+    #     connection = psycopg2.connect(connection_string)
+    # else:  # External connection
+    #     connection_details = fetch_external_db_connection(db_name, selected_user)
+    #     if not connection_details:
+    #         raise Exception(f"Unable to fetch external database connection details for user '{selected_user}'")
 
-        db_details = {
-            "host": connection_details[3],
-            "database": connection_details[7],
-            "user": connection_details[4],
-            "password": connection_details[5],
-            "port": int(connection_details[6])
-        }
+    #     db_details = {
+    #         "host": connection_details[3],
+    #         "database": connection_details[7],
+    #         "user": connection_details[4],
+    #         "password": connection_details[5],
+    #         "port": int(connection_details[6])
+    #     }
         
-        print(f"Connecting to external database: {db_details['database']}@{db_details['host']}:{db_details['port']} as {db_details['user']}")
-        connection = psycopg2.connect(
-            dbname=db_details['database'],
-            user=db_details['user'],
-            password=db_details['password'],
-            host=db_details['host'],
-            port=db_details['port'],
-        )
+    #     print(f"Connecting to external database: {db_details['database']}@{db_details['host']}:{db_details['port']} as {db_details['user']}")
+    #     connection = psycopg2.connect(
+    #         dbname=db_details['database'],
+    #         user=db_details['user'],
+    #         password=db_details['password'],
+    #         host=db_details['host'],
+    #         port=db_details['port'],
+    #     )
+    connection = get_db_connection_or_path(selected_user, db_name)
+        
     return connection
 
 def get_company_db_connection(company_name):
@@ -154,33 +159,37 @@ def get_table_columns_with_typesdb(company_name, table_name,selected_user=None):
         if not company_name:
             raise ValueError("Database name is missing")
 
-        if not selected_user or selected_user.lower() == 'null':
-            print("Using default local database connection...")
-            connection_string = f"dbname={company_name} user={USER_NAME} password={PASSWORD} host={HOST}"
-            connection = psycopg2.connect(connection_string)
-        else:  # External connection
-            connection_details = fetch_external_db_connection(company_name, selected_user)
-            if not connection_details:
-                raise Exception(f"Unable to fetch external database connection details for user '{selected_user}'")
+        # if not selected_user or selected_user.lower() == 'null':
+        #     print("Using default local database connection...")
+        #     connection_string = f"dbname={company_name} user={USER_NAME} password={PASSWORD} host={HOST}"
+        #     connection = psycopg2.connect(connection_string)
+        # else:  # External connection
+        #     connection_details = fetch_external_db_connection(company_name, selected_user)
+        #     if not connection_details:
+        #         raise Exception(f"Unable to fetch external database connection details for user '{selected_user}'")
 
-            db_details = {
-                "host": connection_details[3],
-                "database": connection_details[7],
-                "user": connection_details[4],
-                "password": connection_details[5],
-                "port": int(connection_details[6])
-            }
+        #     db_details = {
+        #         "host": connection_details[3],
+        #         "database": connection_details[7],
+        #         "user": connection_details[4],
+        #         "password": connection_details[5],
+        #         "port": int(connection_details[6])
+        #     }
             
-            print(f"Connecting to external database: {db_details['database']}@{db_details['host']}:{db_details['port']} as {db_details['user']}")
-            connection = psycopg2.connect(
-                dbname=db_details['database'],
-                user=db_details['user'],
-                password=db_details['password'],
-                host=db_details['host'],
-                port=db_details['port'],
-            )
-            # connection = get_company_db_connection(company_name)
-            cursor = connection.cursor()
+        #     print(f"Connecting to external database: {db_details['database']}@{db_details['host']}:{db_details['port']} as {db_details['user']}")
+        #     connection = psycopg2.connect(
+        #         dbname=db_details['database'],
+        #         user=db_details['user'],
+        #         password=db_details['password'],
+        #         host=db_details['host'],
+        #         port=db_details['port'],
+        #     )
+        connection = get_db_connection_or_path(selected_user, company_name)
+
+        print("✅ External PostgreSQL connection established successfully!")
+
+        # connection = get_company_db_connection(company_name)
+        cursor = connection.cursor()
 
         # Query to get all column names and types from the table
         cursor.execute("""
@@ -560,32 +569,33 @@ def check_view_existsdb(company_name, view_name,selectedUser):
         if not company_name:
             raise ValueError("Database name is missing")
 
-        if not selectedUser or selectedUser.lower() == 'null':
-            print("Using default local database connection...")
-            connection_string = f"dbname={company_name} user={USER_NAME} password={PASSWORD} host={HOST}"
-            connection = psycopg2.connect(connection_string)
-        else:  # External connection
-            connection_details = fetch_external_db_connection(company_name, selectedUser)
-            if not connection_details:
-                raise Exception(f"Unable to fetch external database connection details for user '{selectedUser}'")
+        # if not selectedUser or selectedUser.lower() == 'null':
+        #     print("Using default local database connection...")
+        #     connection_string = f"dbname={company_name} user={USER_NAME} password={PASSWORD} host={HOST}"
+        #     connection = psycopg2.connect(connection_string)
+        # else:  # External connection
+        #     connection_details = fetch_external_db_connection(company_name, selectedUser)
+        #     if not connection_details:
+        #         raise Exception(f"Unable to fetch external database connection details for user '{selectedUser}'")
 
-            db_details = {
-                "host": connection_details[3],
-                "database": connection_details[7],
-                "user": connection_details[4],
-                "password": connection_details[5],
-                "port": int(connection_details[6])
-            }
+        #     db_details = {
+        #         "host": connection_details[3],
+        #         "database": connection_details[7],
+        #         "user": connection_details[4],
+        #         "password": connection_details[5],
+        #         "port": int(connection_details[6])
+        #     }
             
-            print(f"Connecting to external database: {db_details['database']}@{db_details['host']}:{db_details['port']} as {db_details['user']}")
-            connection = psycopg2.connect(
-                dbname=db_details['database'],
-                user=db_details['user'],
-                password=db_details['password'],
-                host=db_details['host'],
-                port=db_details['port'],
-            )
-            cursor = connection.cursor()
+        #     print(f"Connecting to external database: {db_details['database']}@{db_details['host']}:{db_details['port']} as {db_details['user']}")
+        #     connection = psycopg2.connect(
+        #         dbname=db_details['database'],
+        #         user=db_details['user'],
+        #         password=db_details['password'],
+        #         host=db_details['host'],
+        #         port=db_details['port'],
+        #     )
+        connection = get_db_connection_or_path(selectedUser, company_name)
+        cursor = connection.cursor()
 
         # Check if view exists in information_schema
         cursor.execute("""
@@ -946,31 +956,31 @@ def create_database_viewdb(company_name, view_config, selectedUser):
             raise ValueError("Database name is missing")
 
         # Establish database connection
-        if not selectedUser or selectedUser.lower() == 'null' or selectedUser.lower() == 'local':
-            print("Using default local database connection...")
-            connection = get_company_db_connection(company_name)
-        else:  # External connection
-            connection_details = fetch_external_db_connection(company_name, selectedUser)
-            if not connection_details:
-                raise Exception(f"Unable to fetch external database connection details for user '{selectedUser}'")
+        # if not selectedUser or selectedUser.lower() == 'null' or selectedUser.lower() == 'local':
+        #     print("Using default local database connection...")
+        #     connection = get_company_db_connection(company_name)
+        # else:  # External connection
+        #     connection_details = fetch_external_db_connection(company_name, selectedUser)
+        #     if not connection_details:
+        #         raise Exception(f"Unable to fetch external database connection details for user '{selectedUser}'")
 
-            db_details = {
-                "host": connection_details[3],
-                "database": connection_details[7],
-                "user": connection_details[4],
-                "password": connection_details[5],
-                "port": int(connection_details[6])
-            }
+        #     db_details = {
+        #         "host": connection_details[3],
+        #         "database": connection_details[7],
+        #         "user": connection_details[4],
+        #         "password": connection_details[5],
+        #         "port": int(connection_details[6])
+        #     }
             
-            print(f"Connecting to external database: {db_details['database']}@{db_details['host']}:{db_details['port']} as {db_details['user']}")
-            connection = psycopg2.connect(
-                dbname=db_details['database'],
-                user=db_details['user'],
-                password=db_details['password'],
-                host=db_details['host'],
-                port=db_details['port'],
-            )
-        
+        #     print(f"Connecting to external database: {db_details['database']}@{db_details['host']}:{db_details['port']} as {db_details['user']}")
+        #     connection = psycopg2.connect(
+        #         dbname=db_details['database'],
+        #         user=db_details['user'],
+        #         password=db_details['password'],
+        #         host=db_details['host'],
+        #         port=db_details['port'],
+        #     )
+        connection = get_db_connection_or_path(selectedUser, company_name)
         cursor = connection.cursor()
 
         # Extract view configuration

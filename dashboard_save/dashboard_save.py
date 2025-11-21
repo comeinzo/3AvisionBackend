@@ -11,7 +11,9 @@ import re
 import ast
 import json
 import numpy as np
-
+import paramiko
+import socket
+import threading
 
 from statsmodels.tsa.seasonal import seasonal_decompose
 
@@ -28,62 +30,16 @@ def create_connection():
     except Exception as e:
         print(f"Error creating connection to the database: {e}")
         return None
+# def add_wallpaper_column(conn):
+#     alter_table_query = """
+#     ALTER TABLE table_dashboard
+#     ADD COLUMN IF NOT EXISTS wallpaper_id TEXT;
+#     """
+#     with conn.cursor() as cur:
+#         cur.execute(alter_table_query)
+#         conn.commit()
 
 # Function to create the table if it doesn't exist
-def create_dashboard_table(conn):
-    
-    create_table_query = """
-    CREATE TABLE IF NOT EXISTS table_dashboard (
-        id SERIAL PRIMARY KEY,
-        user_id INTEGER, 
-        company_name VARCHAR(255),  
-        file_name VARCHAR(255), 
-        chart_ids TEXT,
-        position TEXT,
-        chart_size TEXT,
-        chart_type TEXT,
-        chart_Xaxis TEXT,
-        chart_Yaxis TEXT,
-        chart_aggregate TEXT,
-        filterdata TEXT,
-        clicked_category VARCHAR(255),
-        heading TEXT,
-        dashboard_name VARCHAR(255),
-        chartcolor TEXT,
-        droppableBgColor TEXT,
-        opacity TEXT,
-        image_ids TEXT,
-        project_name VARCHAR(255),
-        font_style_state VARCHAR(255),
-        font_size VARCHAR(255),
-        font_color VARCHAR(255),
-        wallpaper_id TEXT
-
-    );
-    """
-
-    image_positions_query = """
-    CREATE TABLE IF NOT EXISTS image_positions (
-        id SERIAL PRIMARY KEY,
-        image_id TEXT UNIQUE,
-        src TEXT,
-        x INTEGER,
-        y INTEGER,
-        width INTEGER,
-        height INTEGER,
-        zIndex INTEGER,
-        disableDragging BOOLEAN
-    );
-    """
-    try:
-        cursor = conn.cursor()
-        cursor.execute(create_table_query)
-        cursor.execute(image_positions_query)
-        conn.commit()
-        cursor.close()
-    except Exception as e:
-        print(f"Error creating table: {e}")
-
 
 
 def insert_combined_chart_details(conn, combined_chart_details):
@@ -159,7 +115,7 @@ def alter_columns_if_needed(conn):
 import json
 
 
-def get_db_connection(dbname="datasource"):
+def get_db_connection(dbname=DB_NAME):
     conn = psycopg2.connect(
         dbname=dbname,
         # user="postgres",
@@ -232,7 +188,7 @@ def get_dashboard_names(user_id, database_name):
     all_employee_ids = list(map(int, reporting_employees)) + [int(user_id)]
 
     # Step 2: Fetch dashboard names for these employees from the datasource database.
-    conn_datasource = get_db_connection("datasource")
+    conn_datasource = get_db_connection(DB_NAME)
     dashboard_names = {}
 
     if conn_datasource:
@@ -298,7 +254,7 @@ def fetch_project_names(user_id, database_name):
         finally:
             conn_company.close()
 
-    conn_datasource = get_db_connection("datasource")
+    conn_datasource = get_db_connection(DB_NAME)
     project_names = []
 
     if conn_datasource and all_employee_ids:
@@ -363,7 +319,7 @@ def get_dashboard_names(user_id, database_name, project_name=None):
     all_employee_ids = list(map(int, reporting_employees)) + [int(user_id)]
 
     # Step 2: Fetch dashboard names for these employees from the datasource database.
-    conn_datasource = get_db_connection("datasource")
+    conn_datasource = get_db_connection(DB_NAME)
     dashboard_names = {}
 
     if conn_datasource:
@@ -402,7 +358,7 @@ def get_Edit_dashboard_names(user_id, database_name):
     dashboard_names = {}
 
     # Step: Fetch dashboard names only for the current user from the datasource database.
-    conn_datasource = get_db_connection("datasource")
+    conn_datasource = get_db_connection(DB_NAME)
 
     if conn_datasource:
         try:
@@ -792,7 +748,7 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
             print("chart_data_list",chart_data_list)
             for chart_id in sorted_chart_ids:
                 cursor = conn.cursor()
-                cursor.execute("SELECT id, database_name, selected_table, x_axis, y_axis, aggregate, chart_type, filter_options, chart_heading, chart_color, selectedUser,xfontsize,fontstyle,categorycolor,valuecolor,yfontsize,headingColor,ClickedTool,Bgcolour,OptimizationData,calculationdata,selectedFrequency,chart_name,user_id FROM table_chart_save WHERE id = %s", (chart_id,))
+                cursor.execute("SELECT id, database_name, selected_table, x_axis, y_axis, aggregate, chart_type, filter_options, chart_heading, chart_color, selectedUser,xfontsize,fontstyle,categorycolor,valuecolor,yfontsize,headingColor,ClickedTool,Bgcolour,OptimizationData,calculationdata,selectedFrequency,chart_name,user_id,xAxisTitle, yAxisTitle  FROM table_chart_save WHERE id = %s", (chart_id,))
 #                 cursor.execute("""
 #     SELECT id, database_name, selected_table, x_axis, y_axis, aggregate, chart_type,
 #            filter_options, chart_heading, chart_color, selectedUser, xfontsize,
@@ -833,6 +789,8 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                     selectedFrequency=chart_data[21]
                     chart_name=chart_data[22]
                     user_id=chart_data[23]
+                    xAxisTitle=chart_data[24]
+                    yAxisTitle =chart_data[25]
                     
                     print("Chart OptimizationData:", OptimizationData)
                     print("final_opacity",final_opacity)
@@ -847,27 +805,138 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                     }.get(aggregate, 'sum')  # Default to 'sum' if no match
 
                     # Check if selectedUser is NULL
-                    if selected_user is None:
-                        # Use the default local connection if selectedUser is NULL
+                    # if selected_user is None:
+                    #     # Use the default local connection if selectedUser is NULL
+                    #     connection = get_db_connection_view(database_name)
+                    #     masterdatabasecon=create_connection()
+                    #     print('Using local database connection')
+
+                    # else:
+                    #     # Use external connection if selectedUser is provided
+                    #     connection = fetch_external_db_connection(database_name, selected_user)
+                    #     host = connection[3]
+                    #     dbname = connection[7]
+                    #     user = connection[4]
+                    #     password = connection[5]
+
+                    #     # Create a new psycopg2 connection using the details from the tuple
+                    #     connection = psycopg2.connect(
+                    #         dbname=dbname,
+                    #         user=user,
+                    #         password=password,
+                    #         host=host
+                    #     )
+                    if not selected_user or selected_user.lower() == 'null':
+                        print("🟢 Using default local database connection...")
                         connection = get_db_connection_view(database_name)
-                        masterdatabasecon=create_connection()
-                        print('Using local database connection')
+                        masterdatabasecon = create_connection()
+                        print("✅ Local database connection established successfully!")
 
                     else:
-                        # Use external connection if selectedUser is provided
-                        connection = fetch_external_db_connection(database_name, selected_user)
-                        host = connection[3]
-                        dbname = connection[7]
-                        user = connection[4]
-                        password = connection[5]
+                        print(f"🟡 Using external database connection for user: {selected_user}")
+                        connection_details = fetch_external_db_connection(database_name, selected_user)
 
-                        # Create a new psycopg2 connection using the details from the tuple
+                        if not connection_details:
+                            raise Exception(f"❌ Unable to fetch external database connection details for user '{selected_user}'")
+
+                        db_details = {
+                            "name": connection_details[1],
+                            "dbType": connection_details[2],
+                            "host": connection_details[3],
+                            "user": connection_details[4],
+                            "password": connection_details[5],
+                            "port": int(connection_details[6]),
+                            "database": connection_details[7],
+                            "use_ssh": connection_details[8],
+                            "ssh_host": connection_details[9],
+                            "ssh_port": int(connection_details[10]),
+                            "ssh_username": connection_details[11],
+                            "ssh_key_path": connection_details[12],
+                        }
+
+                        print(f"🔹 External DB Connection Details: {db_details}")
+
+                        # Initialize SSH variables
+                        ssh_client = None
+                        local_sock = None
+                        stop_event = threading.Event()
+                        tunnel_thread = None
+
+                        # ✅ Establish SSH Tunnel if required
+                        if db_details["use_ssh"]:
+                            print("🔐 Establishing SSH tunnel manually (Paramiko)...")
+                            private_key = paramiko.RSAKey.from_private_key_file(db_details["ssh_key_path"])
+
+                            ssh_client = paramiko.SSHClient()
+                            ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+                            ssh_client.connect(
+                                db_details["ssh_host"],
+                                username=db_details["ssh_username"],
+                                pkey=private_key,
+                                port=db_details["ssh_port"],
+                                timeout=10
+                            )
+
+                            # Find free local port
+                            local_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                            local_sock.bind(('127.0.0.1', 0))
+                            local_port = local_sock.getsockname()[1]
+                            local_sock.listen(1)
+                            print(f"✅ Local forwarder listening on 127.0.0.1:{local_port}")
+
+                            transport = ssh_client.get_transport()
+
+                            def pipe(src, dst):
+                                try:
+                                    while True:
+                                        data = src.recv(1024)
+                                        if not data:
+                                            break
+                                        dst.sendall(data)
+                                except Exception:
+                                    pass
+                                finally:
+                                    src.close()
+                                    dst.close()
+
+                            def forward_tunnel():
+                                while not stop_event.is_set():
+                                    try:
+                                        client_sock, _ = local_sock.accept()
+                                        chan = transport.open_channel(
+                                            "direct-tcpip",
+                                            ("127.0.0.1", 5432),
+                                            client_sock.getsockname()
+                                        )
+                                        if chan is None:
+                                            client_sock.close()
+                                            continue
+                                        threading.Thread(target=pipe, args=(client_sock, chan), daemon=True).start()
+                                        threading.Thread(target=pipe, args=(chan, client_sock), daemon=True).start()
+                                    except Exception as e:
+                                        print(f"❌ Channel open failed: {e}")
+
+                            tunnel_thread = threading.Thread(target=forward_tunnel, daemon=True)
+                            tunnel_thread.start()
+
+                            host = "127.0.0.1"
+                            port = local_port
+                        else:
+                            host = db_details["host"]
+                            port = db_details["port"]
+
+                        print(f"🧩 Connecting to external PostgreSQL at {host}:{port} ...")
+
                         connection = psycopg2.connect(
-                            dbname=dbname,
-                            user=user,
-                            password=password,
-                            host=host
+                            dbname=db_details["database"],
+                            user=db_details["user"],
+                            password=db_details["password"],
+                            host=host,
+                            port=port
                         )
+
+                        print("✅ External PostgreSQL connection established successfully!")
+
                         print('External Connection established:', connection)
                     if chart_type == "wordCloud":
                         if len(y_axis) == 0:
@@ -914,6 +983,8 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                                         "opacity":final_opacity,
                                         "chart_name":chart_name,
                                         "user_id": user_id,
+                                        
+                                        
 
                                     
                                     })
@@ -1426,6 +1497,57 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                             print(df.head(3))
                             
                             # Group the filtered dataframe
+                            # =========================================================
+                            #                 DATE GRANULARITY FOR COUNT
+                            # =========================================================
+                            dateGranularity = selectedFrequency
+
+                            # Parse granularity JSON if string
+                            if isinstance(dateGranularity, str):
+                                try:
+                                    import json
+                                    dateGranularity = json.loads(dateGranularity)
+                                except:
+                                    dateGranularity = {}
+
+                            if dateGranularity and isinstance(dateGranularity, dict):
+                                for date_col, granularity in dateGranularity.items():
+                                    if date_col in df.columns and date_col in x_axis:
+                                        print(f"[COUNT] Applying granularity: {date_col} -> {granularity}")
+
+                                        df[date_col] = pd.to_datetime(df[date_col], errors='coerce')
+                                        g = granularity.lower()
+
+                                        granularity_col = f"{date_col}_{g}"
+
+                                        if g == "year":
+                                            df[granularity_col] = df[date_col].dt.year.astype(str)
+
+                                        elif g == "quarter":
+                                            df[granularity_col] = "Q" + df[date_col].dt.quarter.astype(str)
+
+                                        elif g == "month":
+                                            df[granularity_col] = df[date_col].dt.month_name()
+
+                                        elif g == "week":
+                                            df[granularity_col] = "Week " + df[date_col].dt.isocalendar().week.astype(str)
+
+                                        elif g == "day":
+                                            df[granularity_col] = df[date_col].dt.strftime("%Y-%m-%d")
+
+                                        else:
+                                            print(f"Unsupported granularity: {granularity}")
+                                            continue
+
+                                        # Replace x_axis column with granularity column
+                                        x_axis = [granularity_col if c == date_col else c for c in x_axis]
+
+                                        print(f"[COUNT] Created granularity column → {granularity_col}")
+                                        print(df[[date_col, granularity_col]].head())
+
+                            # =========================================================
+                            #                 GROUPING AFTER GRANULARITY
+                            # =========================================================
                             print(f"\nGrouping by: {x_axis[0]}")
                             grouped_df = df.groupby(x_axis[0]).size().reset_index(name="count")
                             
@@ -1494,7 +1616,9 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                             "opacity": final_opacity,
                             "calculationData": calculationData,
                             "chart_name": (user_id, chart_name),
-                            "user_id": user_id      
+                            "user_id": user_id,
+                            "xAxisTitle": xAxisTitle,
+                            "yAxisTitle" :yAxisTitle   
                         })
                         continue 
 
@@ -1637,7 +1761,7 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
 
                             print("Fetching data...")
                             # data = fetch_data_for_duel(table_name, x_axis, filter_options, y_axis, aggregate, database_name, selected_user,calculationData)
-                            data = fetch_data_for_duel(table_name, x_axis, filter_options, y_axis, aggregate, database_name, selected_user,calculationData)
+                            data = fetch_data_for_duel(table_name, x_axis, filter_options, y_axis, aggregate, database_name, selected_user,calculationData,dateGranularity=selectedFrequency)
                             print(f"Data fetched for dual chart: {data}")
                             # --- Optimization Filtering ---
                             if 'OptimizationData' in locals() or 'OptimizationData' in globals():
@@ -1680,7 +1804,9 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                                     "opacity":final_opacity,
                                     "calculationData":calculationData,
                                     "chart_name": (user_id, chart_name),
-                                    "user_id": user_id     
+                                    "user_id": user_id,
+                                    "xAxisTitle": xAxisTitle,
+                                    "yAxisTitle" :yAxisTitle        
                             })
                     elif chart_type == "Butterfly":
                             print("Butterfly Chart")
@@ -1689,7 +1815,7 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                                     filter_options = json.loads(filter_options)  # Convert JSON string to dict
                                 except json.JSONDecodeError:
                                     raise ValueError("Invalid JSON format for filter_options")
-                            data = fetch_data_for_duel(table_name, x_axis, filter_options, y_axis, aggregate, database_name, selected_user,calculationData)
+                            data = fetch_data_for_duel(table_name, x_axis, filter_options, y_axis, aggregate, database_name, selected_user,calculationData,dateGranularity=selectedFrequency)
                            # --- Optimization Filtering ---
                             if 'OptimizationData' in locals() or 'OptimizationData' in globals():
                                 df = pd.DataFrame(data, columns=[x_axis[0], 'series1', 'series2'])
@@ -1730,7 +1856,9 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                                     "opacity":final_opacity,
                                     "calculationData":calculationData,
                                     "chart_name": (user_id, chart_name),
-                                    "user_id": user_id     
+                                    "user_id": user_id,
+                                    "xAxisTitle": xAxisTitle,
+                                    "yAxisTitle" :yAxisTitle        
                             })
                     elif chart_type in ["duealbarChart", "stackedbar"]:
                         print("duealbarChart")
@@ -1742,7 +1870,7 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                                 except json.JSONDecodeError:
                                     raise ValueError("Invalid JSON format for filter_options")
                         
-                        datass = fetch_data_for_duel_bar(table_name, x_axis, filter_options, y_axis, aggregate, database_name,selected_user,calculationData)
+                        datass = fetch_data_for_duel_bar(table_name, x_axis, filter_options, y_axis, aggregate, database_name,selected_user,calculationData,dateGranularity=selectedFrequency)
                         print("datass",datass)
                     # --- Optimization Filtering ---
                         if 'OptimizationData' in locals() or 'OptimizationData' in globals():
@@ -1785,7 +1913,9 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                                 "opacity":final_opacity,
                                 "calculationData":calculationData ,
                                 "chart_name": (user_id, chart_name),
-                                "user_id": user_id    
+                                "user_id": user_id,
+                                "xAxisTitle": xAxisTitle,
+                                "yAxisTitle" :yAxisTitle       
                         })
 
                     elif chart_type == "sampleAitestChart":
@@ -1827,6 +1957,55 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                     else:
                         # x axis 1 and y axis 1
                         # x axis 1 and y axis 1
+                       # =========================================================
+                        #     DATE GRANULARITY (NORMAL AGG) — SAME AS COUNT VERSION
+                        # =========================================================
+                        dateGranularity = selectedFrequency
+
+                        # Parse granularity JSON if string
+                        if isinstance(dateGranularity, str):
+                            try:
+                                import json
+                                dateGranularity = json.loads(dateGranularity)
+                            except:
+                                dateGranularity = {}
+
+                        if dateGranularity and isinstance(dateGranularity, dict):
+                            for date_col, granularity in dateGranularity.items():
+                                if date_col in dataframe.columns and date_col in x_axis:
+                                    print(f"[AGG] Applying granularity: {date_col} -> {granularity}")
+
+                                    dataframe[date_col] = pd.to_datetime(dataframe[date_col], errors='coerce')
+                                    g = granularity.lower()
+
+                                    granularity_col = f"{date_col}_{g}"
+
+                                    # Apply correct granularity
+                                    if g == "year":
+                                        dataframe[granularity_col] = dataframe[date_col].dt.year.astype(str)
+
+                                    elif g == "quarter":
+                                        dataframe[granularity_col] = "Q" + dataframe[date_col].dt.quarter.astype(str)
+
+                                    elif g == "month":
+                                        dataframe[granularity_col] = dataframe[date_col].dt.month_name()
+
+                                    elif g == "week":
+                                        dataframe[granularity_col] = "Week " + dataframe[date_col].dt.isocalendar().week.astype(str)
+
+                                    elif g == "day":
+                                        dataframe[granularity_col] = dataframe[date_col].dt.strftime("%Y-%m-%d")
+
+                                    else:
+                                        print(f"Unsupported granularity: {granularity}")
+                                        continue
+
+                                    # Replace the x-axis column with the new granularity column
+                                    x_axis = [granularity_col if c == date_col else c for c in x_axis]
+
+                                    print(f"[AGG] Created granularity column → {granularity_col}")
+                                    print(dataframe[[date_col, granularity_col]].head())
+                            
                         grouped_df = dataframe.groupby(x_axis[0])[y_axis].agg(aggregate_py).reset_index()
                         print("Grouped DataFrame:", grouped_df.head())
 
@@ -1851,18 +2030,32 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                             categories = [str(category) for category in categories]  
                         values = [float(value) for value in grouped_df[y_axis[0]]]
 
-                        print("categories--222", categories)
-                        print("values--222", values)
+                        # print("categories--222", categories)
+                        # print("values--222", values)
 
                         # Filter categories and values based on filter_options
                         filtered_categories = []
                         filtered_values = []
-                        for category, value in zip(categories, values):
-                            if category in filter_options:
-                                filtered_categories.append(category)
-                                filtered_values.append(value)
+                        # for category, value in zip(categories, values):
+                        #     if category in filter_options:
+                        #         filtered_categories.append(category)
+                        #         filtered_values.append(value)
+                        if selectedFrequency:
+                            filtered_categories = categories
+                            filtered_values = values
+                        else:
+                            filtered_categories = []
+                            filtered_values = []
+                            for category, value in zip(categories, values):
+                                if category in filter_options:
+                                    filtered_categories.append(category)
+                                    filtered_values.append(value)
                         print("Filtered Categories:", filtered_categories)
                         print("Filtered Values:", filtered_values)
+
+
+                        # print("Filtered Categories:", filtered_categories)
+                        # print("Filtered Values:", filtered_values)
 
                         chart_data_list.append({
                             "categories": filtered_categories,
@@ -1891,7 +2084,9 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                             "calculationData":calculationData,
                             "chart_name": (user_id, chart_name),
 
-                            "user_id": user_id      
+                            "user_id": user_id,  
+                            "xAxisTitle": xAxisTitle,
+                            "yAxisTitle" :yAxisTitle       
                         })
 
 
