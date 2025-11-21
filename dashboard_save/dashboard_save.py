@@ -30,73 +30,16 @@ def create_connection():
     except Exception as e:
         print(f"Error creating connection to the database: {e}")
         return None
-def add_wallpaper_column(conn):
-    alter_table_query = """
-    ALTER TABLE table_dashboard
-    ADD COLUMN IF NOT EXISTS wallpaper_id TEXT;
-    """
-    with conn.cursor() as cur:
-        cur.execute(alter_table_query)
-        conn.commit()
+# def add_wallpaper_column(conn):
+#     alter_table_query = """
+#     ALTER TABLE table_dashboard
+#     ADD COLUMN IF NOT EXISTS wallpaper_id TEXT;
+#     """
+#     with conn.cursor() as cur:
+#         cur.execute(alter_table_query)
+#         conn.commit()
 
 # Function to create the table if it doesn't exist
-def create_dashboard_table(conn):
-    
-    create_table_query = """
-    CREATE TABLE IF NOT EXISTS table_dashboard (
-        id SERIAL PRIMARY KEY,
-        user_id INTEGER, 
-        company_name VARCHAR(255),  
-        file_name VARCHAR(255), 
-        chart_ids TEXT,
-        position TEXT,
-        chart_size TEXT,
-        chart_type TEXT,
-        chart_Xaxis TEXT,
-        chart_Yaxis TEXT,
-        chart_aggregate TEXT,
-        filterdata TEXT,
-        clicked_category VARCHAR(255),
-        heading TEXT,
-        dashboard_name VARCHAR(255),
-        chartcolor TEXT,
-        droppableBgColor TEXT,
-        opacity TEXT,
-        image_ids TEXT,
-        project_name VARCHAR(255),
-        font_style_state VARCHAR(255),
-        font_size VARCHAR(255),
-        font_color VARCHAR(255),
-        wallpaper_id TEXT,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        
-
-    );
-    """
-
-    image_positions_query = """
-    CREATE TABLE IF NOT EXISTS image_positions (
-        id SERIAL PRIMARY KEY,
-        image_id TEXT UNIQUE,
-        src TEXT,
-        x INTEGER,
-        y INTEGER,
-        width INTEGER,
-        height INTEGER,
-        zIndex INTEGER,
-        disableDragging BOOLEAN
-    );
-    """
-    try:
-        cursor = conn.cursor()
-        cursor.execute(create_table_query)
-        cursor.execute(image_positions_query)
-        conn.commit()
-        cursor.close()
-    except Exception as e:
-        print(f"Error creating table: {e}")
-
 
 
 def insert_combined_chart_details(conn, combined_chart_details):

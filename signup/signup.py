@@ -120,42 +120,6 @@ def create_database(organizationName):
 #             """)
 #             print(f"✅ Added missing column: {column_name}")
 
-def create_table_if_not_exists():
-    conn = None
-    cursor = None
-    try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-
-        # Create base table with all columns
-        cursor.execute("""
-        CREATE TABLE IF NOT EXISTS organizationdatatest (
-            id SERIAL PRIMARY KEY,
-            organizationName VARCHAR(255) NOT NULL,
-            email VARCHAR(255) NOT NULL,
-            userName VARCHAR(255) NOT NULL,
-            password VARCHAR(255) NOT NULL,
-            logo VARCHAR(255),
-            status VARCHAR(50) DEFAULT 'active',
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        );
-        """)
-        print("✅ Table 'organizationdatatest' created or already exists with all required columns.")
-
-        conn.commit()
-
-    except Exception as e:
-        if conn:
-            conn.rollback()
-        print(f"❌ Error in create_table_if_not_exists: {e}")
-        raise
-    finally:
-        if cursor:
-            cursor.close()
-        if conn:
-            conn.close()
-        print("🔒 Database connection closed.")
 
 def insert_user_data(organizationName, email, userName, password,logo_filename):
     try:
@@ -163,8 +127,7 @@ def insert_user_data(organizationName, email, userName, password,logo_filename):
         conn = get_db_connection()
         cursor = conn.cursor()
 
-        # Create table if it does not exist
-        create_table_if_not_exists()
+
         print("organizationName",organizationName)
         organizationName = organizationName.lower() 
         hash_password=encrypt_password(password)
@@ -300,7 +263,6 @@ def fetch_usersdata():
 def fetch_login_data(email, password):
     conn = get_db_connection()
     cursor = conn.cursor()
-    create_table_if_not_exists()
 
     try:
         # Step 1: Fetch user by email

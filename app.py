@@ -64,12 +64,11 @@ from csv_upload import upload_csv_to_postgresql
 from dashboard_design import get_database_table_names,get_db_connection_or_path
 from dashboard_save.dashboard_save import (
     create_connection,
-    create_dashboard_table,
     fetch_project_names,
     get_dashboard_names,
     get_dashboard_view_chart_data,
     get_Edit_dashboard_names,
-    insert_combined_chart_details,add_wallpaper_column
+    insert_combined_chart_details
 )
 from excel_upload import upload_excel_to_postgresql
 from histogram_utils import generate_histogram_details, handle_column_data_types
@@ -81,7 +80,7 @@ from signup.signup import (
     fetch_company_login_data,
     fetch_login_data,
     fetch_usersdata,
-    insert_user_data,create_table_if_not_exists
+    insert_user_data,
 )
 from TransferData import fetch_data_with_columns, fetch_table_details, insert_dataframe_with_upsert
 from upload import is_table_used_in_charts
@@ -324,78 +323,8 @@ def connect_to_db():
         print("Error connecting to the database:", e)
         return None
     
-def create_table():
-    try:
-
-        conn=connect_to_db()
-        cur = conn.cursor()
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS table_chart_save (
-                id SERIAL PRIMARY KEY,
-                User_id integer,
-                company_name VARCHAR,
-                chart_name VARCHAR,
-                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                database_name VARCHAR,
-                selected_table VARCHAR,
-                x_axis VARCHAR[],
-                y_axis VARCHAR[],
-                aggregate VARCHAR,
-                chart_type VARCHAR,
-                chart_color VARCHAR,
-                chart_heading VARCHAR,
-                drilldown_chart_color VARCHAR,
-                filter_options VARCHAR,
-                ai_chart_data JSONB,
-                selectedUser VARCHAR,
-                xFontSize INTEGER,
-                fontStyle VARCHAR,         
-                categoryColor VARCHAR,      
-                yFontSize INTEGER,          
-                valueColor VARCHAR ,
-                headingColor VARCHAR ,
-                ClickedTool VARCHAR,
-                Bgcolour VARCHAR,
-                OptimizationData VARCHAR,
-                calculationData JSONB,
-                selectedFrequency VARCHAR,
-                xAxisTitle VARCHAR(220),
-                yAxisTitle VARCHAR(220),
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-        # cur.execute("SELECT MAX(id) FROM table_chart_save")
-        # if max_id is None:
-        #     max_id = 1
-        # else:
-        #     max_id = max_id + 1
-        # cur.execute("SELECT setval(pg_get_serial_sequence('table_chart_save', 'id'), %s, false)", (max_id,))
 
 
-       
-        # cur.execute("""
-        #     DO $$
-        #     BEGIN
-        #         IF NOT EXISTS (
-        #             SELECT 1
-        #             FROM information_schema.columns 
-        #             WHERE table_name='table_chart_save' 
-        #             AND column_name='selectedFrequency'
-        #         ) THEN
-        #             ALTER TABLE table_chart_save ADD COLUMN selectedFrequency VARCHAR;
-        #         END IF;
-        #     END$$;
-        # """)
-        conn.commit()
-        cur.close()
-        conn.close()
-        print("Table created successfully")
-    except Exception as e:
-        print("Error in create-------------:", e)
-
-create_table()
-create_table_if_not_exists()
 
 @app.route('/', methods=['GET'])
 def index():
@@ -4258,8 +4187,7 @@ def save_all_chart_details():
     conn = create_connection()
     if conn is None:
         return jsonify({'message': 'Database connection failed'}), 500
-    create_dashboard_table(conn)
-    add_wallpaper_column(conn)
+    # add_wallpaper_column(conn)
 
     image_ids = []
     for img in image_positions:
@@ -5019,25 +4947,6 @@ def refresh_token():
         'expires_in': new_tokens['expires_in']
     }), 200
 
-# Logout Route (Token Revocation)
-# @app.route('/api/logout', methods=['POST'])
-# @jwt_required
-# def logout():
-#     data = request.get_json()
-#     user_id = data.get('user_id')
-#     company_id = data.get('company_id')  # optional for superadmin
-    
-
-#     if not user_id:
-#         return jsonify({'message': 'user_id is required'}), 400
-
-#     login_device = request.user_agent.string
-#     login_ip = request.remote_addr
-
-#     # Log the logout
-#     logout_history(user_id, company_id, login_device, login_ip)
-    
-#     return jsonify({'message': 'Logged out successfully'}), 200
 @app.route('/api/logout', methods=['POST'])
 @jwt_required
 def logout():
@@ -6962,7 +6871,6 @@ def dashboard_data(dashboard_name,company_name):
                         })
             cursor.close()
             wallpaper_src = None
-            dashboard_wallpapers_table(conn) 
             if wallpaper_id:
                 cursor = conn.cursor()
                 cursor.execute("""
@@ -10312,16 +10220,7 @@ def update_chart_position():
     finally:
         cur.close()
         conn.close()
-def dashboard_wallpapers_table(conn):
-    cur = conn.cursor()
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS dashboard_wallpapers (
-            wallpaper_id SERIAL PRIMARY KEY,
-            src TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    """)
-    conn.commit()
+
 @app.route('/api/saveDashboard', methods=['POST'])
 @token_required
 def save_dashboard():
@@ -10365,7 +10264,6 @@ def save_dashboard():
 
     try:
         conn = get_db_connection()
-        dashboard_wallpapers_table(conn)
         cur = conn.cursor()
         # Step: Delete old image records not in current imagePositions list
         cur.execute("""
@@ -11989,52 +11887,6 @@ def get_calculation_suggestions():
             host=HOST, port=PORT
         )
         cursor = conn.cursor()
-
-        # Step 1: Create table if not exists
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS calculation_suggestions (
-                id SERIAL PRIMARY KEY,
-                keyword VARCHAR(50) UNIQUE NOT NULL,
-                template TEXT NOT NULL,
-                category VARCHAR(50) DEFAULT 'default'
-            );
-        """)
-
-        # Step 2: Insert default suggestions using ON CONFLICT DO NOTHING
-        cursor.execute("""
-            INSERT INTO calculation_suggestions (keyword, template, category) VALUES
-            ('if', 'if ([column] == "value") then "Result1" else "Result2"', 'default'),
-            ('switch', 'switch([column], "A", "X", "B", "Y", default, "Z")', 'default'),
-            ('iferror', 'iferror([numerator] / [denominator], 0)', 'default'),
-            ('calculate', 'calculate(sum([sales]), [region]="Asia")', 'default'),
-            ('sum', 'sum([column])', 'default'),
-            ('avg', 'avg([column])', 'default'),
-            ('count', 'count([column])', 'default'),
-            ('min', 'min([column])', 'default'),
-            ('max', 'max([column])', 'default'),
-            ('abs', 'abs([column])', 'default'),
-            ('maxx', 'maxx([column])', 'default'),
-            ('minx', 'minx([column])', 'default'),
-            ('len', 'len([column])', 'default'),
-            ('lower', 'lower([column])', 'default'),
-            ('upper', 'upper([column])', 'default'),
-            ('concat', 'concat([first_name], " ", [last_name])', 'default'),
-            ('round', 'round([column], 2)', 'default'),
-            ('isnull', 'isnull([column], "default value")', 'default'),
-            ('year', 'year([date_column])', 'date'),
-            ('month', 'month([date_column])', 'date'),
-            ('day', 'day([date_column])', 'date'),
-            ('in', '[region] in ("Asia", "Europe")', 'default'),
-            ('datediff', 'datediff([end_date], [start_date])', 'date'),
-            ('today', 'today()', 'date'),
-            ('now', 'now()', 'date'),
-            ('dateadd', 'dateadd([date_column], 7, "day")', 'date'),
-            ('formatdate', 'formatdate([date_column], "YYYY-MM-DD")', 'date'),
-            ('replace', 'replace([column], "old", "new")', 'text'),
-            ('trim', 'trim([column])', 'text')
-            ON CONFLICT (keyword) DO NOTHING;
-        """)
-
         # Step 3: Fetch all suggestions
         cursor.execute("SELECT keyword, template FROM calculation_suggestions ORDER BY keyword;")
         suggestions = [{'keyword': row[0], 'template': row[1]} for row in cursor.fetchall()]
@@ -13299,18 +13151,8 @@ def send_reset_email(recipient, subject, body):
         print("SMTP error:", e)
 
 # ---------------- CREATE RESET TABLE ----------------
-def ensure_password_reset_table(conn):
-    cur = conn.cursor()
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS password_resets (
-            email VARCHAR(255),
-            company VARCHAR(255),
-            token TEXT,
-            used BOOLEAN DEFAULT FALSE,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    """)
-    conn.commit()
+
+
 from datetime import datetime, timedelta
 
 # ---------------- REQUEST RESET ----------------
@@ -13326,8 +13168,7 @@ def request_password_reset():
         if not company_name:
             return jsonify({"message": "Company name required"}), 400
 
-        conn = get_db_connection()
-        ensure_password_reset_table(conn)  # ✅ ensure table exists
+        conn = get_db_connection()  # ✅ ensure table exists
         cur = conn.cursor()
 
         if reset_type == "employee":
@@ -13394,7 +13235,6 @@ def reset_password():
         reset_type = decoded.get("type")
 
         conn = get_db_connection()
-        ensure_password_reset_table(conn)  # ✅ ensure table exists
         cur = conn.cursor()
 
         # ✅ Check token validity
@@ -13704,7 +13544,7 @@ def save_api_data():
 #         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/system_summary', methods=['GET'])
-
+# @token_required
 def system_summary():
     try:
         company_name = request.args.get('company_name')
@@ -13983,82 +13823,7 @@ def get_user_management_logs():
         print("Error fetching admin logs:", e)
         return jsonify({"error": str(e)}), 500
 
-# @app.route('/static/<path:filename>')
-# def serve_static(filename):
-#     return send_file(os.path.join('static', filename))
 
-# def create_license_tables():
-#     try:
-#         conn = get_db_connection()
-#         cur = conn.cursor()
-
-#         cur.execute("""
-#         CREATE TABLE IF NOT EXISTS license_plan (
-#             id SERIAL PRIMARY KEY,
-#             plan_name VARCHAR(100) UNIQUE NOT NULL,
-#             description TEXT,
-#             storage_limit INTEGER,
-#             price DECIMAL(10,2),
-#             duration_days INTEGER DEFAULT 30,
-#             employee_limit INTEGER,
-#             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-#         );
-#         """)
-
-#         cur.execute("""
-#         CREATE TABLE IF NOT EXISTS license_features (
-#             id SERIAL PRIMARY KEY,
-#             plan_id INTEGER REFERENCES license_plan(id) ON DELETE CASCADE,
-#             feature_name VARCHAR(100) NOT NULL,
-#             is_enabled BOOLEAN DEFAULT TRUE
-#         );
-#         """)
-
-#         cur.execute("""
-#         CREATE TABLE IF NOT EXISTS organization_license (
-#             id SERIAL PRIMARY KEY,
-#             company_id INTEGER REFERENCES organizationdatatest(id) ON DELETE CASCADE,
-#             plan_id INTEGER REFERENCES license_plan(id) ON DELETE CASCADE,
-#             start_date DATE NOT NULL,
-#             end_date DATE NOT NULL,
-#             is_active BOOLEAN DEFAULT TRUE
-#         );
-#         """)
-#         cur.execute("""
-#             CREATE TABLE IF NOT EXISTS project_features (
-#                 id SERIAL PRIMARY KEY,
-#                 feature_name VARCHAR(100) UNIQUE NOT NULL,
-#                 description TEXT,
-#                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-#             );
-#         """)
-
-#         # ✅ Insert Default Features
-#         default_features = [
-#             ('share_dashboard', 'Allows users to share dashboards with others'),
-#             ('AI_Analytics', 'Provides AI-powered analytics insights'),
-#             ('custom_theme', 'Enables users to customize chart and UI themes'),
-#             ('live_update', 'Allows real-time data updates in dashboards'),
-#             ('Agentic_AI', 'Enables advanced Agentic AI functionalities'),
-#             ()
-#         ]
-
-#         for feature_name, description in default_features:
-#             cur.execute("""
-#                 INSERT INTO project_features (feature_name, description)
-#                 VALUES (%s, %s)
-#                 ON CONFLICT (feature_name) DO NOTHING;
-#             """, (feature_name, description))
-
-
-#         conn.commit()
-#         cur.close()
-#         conn.close()
-
-#         return jsonify({'message': 'License-related tables created successfully ✅'}), 200
-
-#     except Exception as e:
-#         return jsonify({'error': str(e)}), 500
 # ==========================================================
 # ➕ Add License Plan
 # ==========================================================
