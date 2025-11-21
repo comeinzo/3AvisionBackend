@@ -541,17 +541,6 @@ def upload_file_csv():
         try:
             # Upload to PostgreSQL
             result = upload_csv_to_postgresql(database_name, username, password, temp_file_path, host, port)
-            
-            # if result == "Upload successful":
-            #     return jsonify({
-            #         'message': 'CSV file uploaded successfully',
-            #         'status': True,
-            #         'uploaded_by': request.current_user.get('user_id'),
-            #         'file_name': csv_file_name,
-            #         'update_permission': update_permission
-            #     }), 200
-            # else:
-            #     return jsonify({'message': result, 'status': False}), 500
             if isinstance(result, dict) and result.get("message") == "Upload successful":
                 log_activity(
                     user_email=request.current_user.get("email", "Unknown"),
@@ -993,14 +982,6 @@ def update_filters():
         # Only print the update message if an update actually occurred
         if updated_charts:
             print(f"Chart '{chart_name}' is being updated with new filters: {selected_filters}")
-
-        # cur.execute(
-        #     "UPDATE dashboard_details_wu_id SET dashboard_name = %s WHERE file_name = %s AND company_name = %s",
-        #     (chart_name, filename, company_name),
-            
-        # )
-        # print("Rows affected:", cur.rowcount)
-        # Only update dashboard_name if the chart was updated
         if updated_charts:
             if not column_exists(cur, "table_dashboard", "dashboard_name"):
                 cur.execute("ALTER TABLE table_dashboard ADD COLUMN dashboard_name VARCHAR")
@@ -1312,139 +1293,7 @@ def listen_to_single_value_db(table_Name, x_axis, aggregate_py, databaseName):
         connection.close()
 
 def fetch_data_for_ts_decomposition(table_name, x_axis_columns, filter_options, y_axis_column, aggregation, db_name, selectedUser, calculationData):
-    # if not selectedUser or selectedUser.lower() == 'null':
-    #     connection_string = f"dbname={db_name} user={USER_NAME} password={PASSWORD} host={HOST}"
-    #     connection = psycopg2.connect(connection_string)
-    # else:
-    #     connection_details = fetch_external_db_connection(db_name, selectedUser)
-    #     if not connection_details:
-    #         raise Exception("Unable to fetch external database connection details.")
-    #     db_details = {
-    #                 "host": connection_details[3],
-    #                 "database": connection_details[7],
-    #                 "user": connection_details[4],
-    #                 "password": connection_details[5],
-    #                 "port": int(connection_details[6])
-    #             }
-    #     connection = psycopg2.connect(
-    #                 dbname=db_details['database'],
-    #                 user=db_details['user'],
-    #                 password=db_details['password'],
-    #                 host=db_details['host'],
-    #                 port=db_details['port'],
-    #             )
-    # if not selectedUser or selectedUser.lower() == 'null':
-    #     print("🟢 Using default local database connection...")
-    #     connection_string = f"dbname={company_name} user={USER_NAME} password={PASSWORD} host={HOST} port={PORT}"
-    #     connection = psycopg2.connect(connection_string)
-
-    # else:
-    #     print(f"🟡 Using external database connection for user: {selectedUser}")
-    #     connection_details = fetch_external_db_connection(company_name, selectedUser)
-
-    #     if not connection_details:
-    #         raise Exception(f"❌ Unable to fetch external database connection details for user '{selectedUser}'")
-
-    #     db_details = {
-    #         "name": connection_details[1],
-    #         "dbType": connection_details[2],
-    #         "host": connection_details[3],
-    #         "user": connection_details[4],
-    #         "password": connection_details[5],
-    #         "port": int(connection_details[6]),
-    #         "database": connection_details[7],
-    #         "use_ssh": connection_details[8],
-    #         "ssh_host": connection_details[9],
-    #         "ssh_port": int(connection_details[10]),
-    #         "ssh_username": connection_details[11],
-    #         "ssh_key_path": connection_details[12],
-    #     }
-
-    #     print(f"🔹 External DB Connection Details: {db_details}")
-
-    #     # Initialize SSH tunnel-related variables
-    #     ssh_client = None
-    #     local_sock = None
-    #     stop_event = threading.Event()
-    #     tunnel_thread = None
-
-    #     # ✅ SSH Tunnel Setup if required
-    #     if db_details["use_ssh"]:
-    #         print("🔐 Establishing SSH tunnel manually (Paramiko)...")
-    #         private_key = paramiko.RSAKey.from_private_key_file(db_details["ssh_key_path"])
-
-    #         ssh_client = paramiko.SSHClient()
-    #         ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-    #         ssh_client.connect(
-    #             db_details["ssh_host"],
-    #             username=db_details["ssh_username"],
-    #             pkey=private_key,
-    #             port=db_details["ssh_port"],
-    #             timeout=10
-    #         )
-
-    #         # Find a free local port for tunnel forwarding
-    #         local_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    #         local_sock.bind(('127.0.0.1', 0))
-    #         local_port = local_sock.getsockname()[1]
-    #         local_sock.listen(1)
-    #         print(f"✅ Local forwarder listening on 127.0.0.1:{local_port}")
-
-    #         transport = ssh_client.get_transport()
-
-    #         def pipe(src, dst):
-    #             try:
-    #                 while True:
-    #                     data = src.recv(1024)
-    #                     if not data:
-    #                         break
-    #                     dst.sendall(data)
-    #             except Exception:
-    #                 pass
-    #             finally:
-    #                 src.close()
-    #                 dst.close()
-
-    #         def forward_tunnel():
-    #             while not stop_event.is_set():
-    #                 try:
-    #                     client_sock, _ = local_sock.accept()
-    #                     chan = transport.open_channel(
-    #                         "direct-tcpip",
-    #                         ("127.0.0.1", 5432),
-    #                         client_sock.getsockname()
-    #                     )
-    #                     if chan is None:
-    #                         client_sock.close()
-    #                         continue
-    #                     threading.Thread(target=pipe, args=(client_sock, chan), daemon=True).start()
-    #                     threading.Thread(target=pipe, args=(chan, client_sock), daemon=True).start()
-    #                 except Exception as e:
-    #                     print(f"❌ Channel open failed: {e}")
-
-    #         tunnel_thread = threading.Thread(target=forward_tunnel, daemon=True)
-    #         tunnel_thread.start()
-
-    #         # Override host and port to tunnel
-    #         host = "127.0.0.1"
-    #         port = local_port
-    #     else:
-    #         host = db_details["host"]
-    #         port = db_details["port"]
-
-    #     print(f"🧩 Connecting to external PostgreSQL at {host}:{port} ...")
-
-    #     connection = psycopg2.connect(
-    #         dbname=db_details["database"],
-    #         user=db_details["user"],
-    #         password=db_details["password"],
-    #         host=host,
-    #         port=port
-    #     )
-
-    #     print("✅ External PostgreSQL connection established successfully!")
     connection = get_db_connection_or_path(selectedUser, db_name)
-
     cur = connection.cursor()
     print("connection established",connection)
     query = f"SELECT * FROM {table_name}"
@@ -1942,26 +1791,6 @@ def get_bar_chart_route():
             GROUP BY word
             ORDER BY word_count DESC;
         """
-        
-        # try:
-        #     if not selectedUser or selectedUser.lower() == 'null':
-        #         connection_string = f"dbname={db_nameeee} user={USER_NAME} password={PASSWORD} host={HOST}"
-        #         connection = psycopg2.connect(connection_string)
-            # else:  # External connection
-            #     savename = data['selectedUser']
-            #     connection_details = fetch_external_db_connection(db_nameeee, savename)
-            #     if connection_details:
-            #         db_details = {
-            #             "host": connection_details[3],
-            #             "database": connection_details[7],
-            #             "user": connection_details[4],
-            #             "password": connection_details[5],
-            #             "port": int(connection_details[6])
-            #         }
-            #     if not connection_details:
-            #         raise Exception("Unable to fetch external database connection details.")
-      
-
         try:
             connection = get_db_connection_or_path(selectedUser, db_nameeee)
 
@@ -2101,22 +1930,6 @@ def get_bar_chart_route():
                             temp_df[granularity_col] = 'Week ' + temp_df[date_col].dt.isocalendar().week.astype(str)
                         elif granularity_lower == 'day':
                             temp_df[granularity_col] = temp_df[date_col].dt.date.astype(str)
-                        # FORMAT X-AXIS DATE PROPERLY AND MAKE SURE GROUPING WORKS
-                        # if granularity_lower == 'year':
-                        #     temp_df[granularity_col] = temp_df[date_col].dt.to_period("Y").dt.to_timestamp()
-
-                        # elif granularity_lower == 'quarter':
-                        #     temp_df[granularity_col] = temp_df[date_col].dt.to_period("Q").dt.to_timestamp()
-
-                        # elif granularity_lower == 'month':
-                        #     temp_df[granularity_col] = temp_df[date_col].dt.to_period("M").dt.to_timestamp()
-
-                        # elif granularity_lower == 'week':
-                        #     temp_df[granularity_col] = temp_df[date_col].dt.to_period("W").dt.to_timestamp()
-
-                        # elif granularity_lower == 'day':
-                        #     temp_df[granularity_col] = temp_df[date_col].dt.normalize()
-
                         else:
                             raise ValueError(f"Unsupported date granularity: {granularity}")
                         
@@ -2285,114 +2098,6 @@ def get_bar_chart_route():
             return jsonify(limit_check), 400
         
         return jsonify({"categories": labels, "values": values, "aggregation": aggregation, "dataframe": df_json})
-
-    # # # Dual Y-axis chart
-    # elif len(y_axis_columns) == 2 and chart_data != "duealbarChart":
-    #     data = fetch_data_for_duel(table_name, x_axis_columns, filter_options, y_axis_columns, aggregation, db_nameeee, selectedUser)
-        
-    #     # Apply data limiting if specified
-    #     if data_limit_type:
-    #         temp_df = pd.DataFrame(data, columns=['category', 'series1', 'series2'])
-    #         limited_df = apply_data_limiting(temp_df, data_limit_type, data_limit_column or 'series1', ['category'], ['series1'], aggregation)
-    #         data = limited_df.values.tolist()
-        
-    #     # Check data points limit with consent logic
-    #     limit_check = check_data_points_limit(len(data), user_consent_given, data_limit_type)
-    #     if limit_check:
-    #         return jsonify(limit_check), 400
-        
-    #     return jsonify({
-    #         "categories": [row[0] for row in data],
-    #         "series1": [row[1] for row in data],
-    #         "series2": [row[2] for row in data],
-    #         "dataframe": df_json
-    #     })
-    #  # Dual Y-axis chart - FIXED
-    
-    # elif chart_data == "timeSeriesDecomposition":
-    #         print("Time Series Decomposition Chart")
-    #         # For time series decomposition, we need one time column (x_axis_columns[0]) and one value column (y_axis_columns[0])
-    #         if not x_axis_columns or not y_axis_columns:
-    #             return jsonify({"error": "Time series decomposition requires a time column and a value column."}), 400
-
-    #         time_column = x_axis_columns[0]
-    #         value_column = y_axis_columns[0]
-    #         print("time_column", time_column)
-    #         print("value_column", value_column)
-        
-    #         temp_df_for_ts = fetch_data_for_ts_decomposition(table_name, [time_column], filter_options, [value_column], None, db_nameeee, selectedUser, calculationData)
-    #         print("temp_df_for_ts", temp_df_for_ts)
-    #         if temp_df_for_ts.empty:
-    #             return jsonify({"error": "No data available for time series decomposition after filtering."}), 400
-    #         temp_df_for_ts.dropna(subset=[time_column], inplace=True)
-    #         # Ensure time column is datetime and set as index
-    #         temp_df_for_ts[time_column] = pd.to_datetime(temp_df_for_ts[time_column], errors='coerce')
-    #         temp_df_for_ts.set_index(time_column, inplace=True)
-
-    #         # Ensure value column is numeric
-    #         temp_df_for_ts[value_column] = pd.to_numeric(temp_df_for_ts[value_column], errors='coerce')
-    #         temp_df_for_ts.dropna(subset=[value_column], inplace=True) # Drop rows with missing values for decomposition
-            
-    #         if temp_df_for_ts.empty:
-    #             return jsonify({"error": "No valid numeric data for time series decomposition after conversion."}), 400
-
-    #         time_series_frequency = data.get('timeSeriesFrequency', 'MS') # Default to Month Start if not provided
-    #         print("time_series_frequency", time_series_frequency)
-    #         try:
-    #             # If there are multiple entries for the same timestamp after filtering, aggregate them
-    #             # For example, sum sales for a given day
-    #             ts_data = temp_df_for_ts[value_column].resample(time_series_frequency).sum().ffill().bfill() # Sum and fill NaNs
-    #             print("ts_data", ts_data)
-    #             # period = 12 # Default to monthly
-    #             # if 'D' in time_series_frequency: # If daily, maybe a weekly seasonality
-    #             #     period = 7
-    #             # elif 'W' in time_series_frequency: # If weekly, maybe a yearly seasonality (52 weeks)
-    #             #     period = 52
-    #             # elif 'Q' in time_series_frequency: # Quarterly
-    #             #     period = 4
-
-    #             if 'D' in time_series_frequency:
-    #                 period = 7
-    #             elif 'W' in time_series_frequency:
-    #                 period = 52
-    #             elif 'Q' in time_series_frequency:
-    #                 period = 4
-    #             else:  # Default for MS (monthly)
-    #                 period = min(4, len(ts_data) // 2)  # Safe fallback for small datasets
-
-    #             if len(ts_data) < 2 * period:
-    #                 return jsonify({"error": f"Not enough data points for decomposition with period {period}. Need at least {2 * period} data points, but got {len(ts_data)}."}), 400
-
-    #             # IMPORTANT: ts_data must have a DatetimeIndex
-    #             # seasonal_decompose requires non-null data and enough observations for the period.
-    #             decomposition = seasonal_decompose(ts_data, model='additive', period=period) # 'additive' or 'multiplicative'
-
-    #             # Extract components
-    #             # .dropna().tolist() is used to convert Series to list, dropping any NaN values that might occur
-    #             # at the start/end of trend/seasonal components due to decomposition process.
-    #             trend = decomposition.trend.dropna().tolist()
-    #             seasonal = decomposition.seasonal.dropna().tolist()
-    #             residual = decomposition.resid.dropna().tolist()
-    #             observed = decomposition.observed.dropna().tolist()
-                
-    #             # Align indices for plotting if needed (e.g., convert datetime index to string)
-    #             dates = decomposition.observed.dropna().index.strftime('%Y-%m-%d').tolist()
-
-    #             response = {
-    #                 "dates": dates,
-    #                 "observed": observed,
-    #                 "trend": trend,
-    #                 "seasonal": seasonal,
-    #                 "residual": residual,
-    #                 "model": "additive" # Or 'multiplicative' - consider making this configurable
-    #             }
-    #             return jsonify(response)
-
-    #         except ValueError as ve:
-    #             return jsonify({"error": f"Error during time series decomposition: {ve}. This often happens with insufficient data for the chosen period or frequency. Ensure your time column has enough granular data."}), 400
-    #         except Exception as e:
-    #             return jsonify({"error": f"An unexpected error occurred during time series decomposition: {e}"}), 500
-
     elif chart_data == "timeSeriesDecomposition":
         print("Time Series Decomposition Chart")
         if not x_axis_columns or not y_axis_columns:
@@ -2437,21 +2142,7 @@ def get_bar_chart_route():
         print("time_series_frequency", time_series_frequency)
 
         try:
-            # # Decide the resampling aggregation method dynamically
-            # if aggregation == "sum":
-            #     ts_data = temp_df_for_ts[value_column].resample(time_series_frequency).sum()
-            # elif aggregation == "average":
-            #     ts_data = temp_df_for_ts[value_column].resample(time_series_frequency).mean()
-            # elif aggregation == "count":
-            #     ts_data = temp_df_for_ts[value_column].resample(time_series_frequency).count()
-            # elif aggregation == "min":
-            #     ts_data = temp_df_for_ts[value_column].resample(time_series_frequency).min()
-            # elif aggregation == "max":
-            #     ts_data = temp_df_for_ts[value_column].resample(time_series_frequency).max()
-            # elif aggregation == "median":
-            #     ts_data = temp_df_for_ts[value_column].resample(time_series_frequency).median()
-            # else:
-            #     return jsonify({"error": f"Unsupported aggregation type for time series decomposition: {aggregation}"}), 400
+      
             if aggregation == "sum":
                 ts_data = temp_df_for_ts[value_column].resample(time_series_frequency).sum()
             elif aggregation == "average":
@@ -2784,96 +2475,6 @@ def get_edit_chart_route():
         return jsonify(data)
     
     elif chartType  == "tablechart"  and len(x_axis_columns) > 0: 
-    # elif chartType == "treeHierarchy" and len(x_axis_columns) > 0:  # Tree Hierarchy logic
-        # print("treeHierarchy-----------------------------")
-        # try:
-        #     conn = get_company_db_connection(db_nameeee)
-
-        #     new_df = fetch_chart_data(conn, table_name)
-        #     # new_df = fetch_tree_data(db_nameeee, table_name, x_axis_columns, y_axis_columns,checked_option, selectedUser)
-        #     temp_df = new_df.copy()
-        #     # ============== DATE GRANULARITY PROCESSING ==============
-        #     # Handle date granularity - convert date columns to specified granularity
-        #     if dateGranularity and isinstance(dateGranularity, dict):
-        #         for date_col, granularity in dateGranularity.items():
-        #             if date_col in temp_df.columns and date_col in x_axis_columns:
-        #                 print(f"Applying date granularity: {date_col} -> {granularity}")
-                        
-        #                 # Ensure the column is datetime
-        #                 temp_df[date_col] = pd.to_datetime(temp_df[date_col], errors='coerce')
-                        
-        #                 # Create new column name for the granularity
-        #                 granularity_col = f"{date_col}_{granularity}"
-                        
-        #                 # Extract based on granularity
-        #                 granularity_lower = granularity.lower()
-        #                 if granularity_lower == 'year':
-        #                     temp_df[granularity_col] = temp_df[date_col].dt.year.astype(str)
-        #                 elif granularity_lower == 'quarter':
-        #                     temp_df[granularity_col] = 'Q' + temp_df[date_col].dt.quarter.astype(str)
-        #                 elif granularity_lower == 'month':
-        #                     # Extract month as full name (January, February, etc.)
-        #                     temp_df[granularity_col] = temp_df[date_col].dt.strftime('%B')
-        #                 elif granularity_lower == 'week':
-        #                     # Week number with year (e.g., "Week 1", "Week 2")
-        #                     temp_df[granularity_col] = 'Week ' + temp_df[date_col].dt.isocalendar().week.astype(str)
-        #                 elif granularity_lower == 'day':
-        #                     temp_df[granularity_col] = temp_df[date_col].dt.date.astype(str)
-        #                 else:
-        #                     raise ValueError(f"Unsupported date granularity: {granularity}")
-                        
-        #                 # Replace the date column in x_axis_columns with the granularity column
-        #                 x_axis_columns = [granularity_col if col == date_col else col for col in x_axis_columns]
-                        
-        #                 print(f"Created granularity column '{granularity_col}' from '{date_col}'")
-        #                 print(f"Sample values: {temp_df[granularity_col].head()}")
-        #             # ============== END DATE GRANULARITY PROCESSING ==============
-
-        #             x_axis_columns_str = x_axis_columns
-
-        #             # Build filter options for x-axis
-        #             options = []
-        #             for col in x_axis_columns:
-        #                 if col in checked_option:
-        #                     options.extend(checked_option[col])
-        #             options = list(map(str, options))
-        #             # print("options:", options)
-
-        #             # Filter again based on x-axis
-        #             if options:
-        #                 new_df = temp_df[temp_df[x_axis_columns[0]].isin(options)]
-        #             else:
-        #                 new_df = temp_df
-        #     # Check if we need aggregation
-        #     if aggregation and y_axis_columns:
-        #         if aggregation == "sum":
-        #             new_df = new_df.groupby(x_axis_columns, as_index=False)[y_axis_columns[0]].sum()
-        #         elif aggregation == "count":
-        #             new_df = new_df.groupby(x_axis_columns, as_index=False)[y_axis_columns[0]].count()
-        #         elif aggregation == "mean":
-        #             new_df = new_df.groupby(x_axis_columns, as_index=False)[y_axis_columns[0]].mean()
-        #         else:
-        #             return jsonify({"error": f"Unsupported aggregation type: {aggregation}"})
-            
-        #     # Prepare data for tree hierarchy
-        #     categories = []
-        #     values = []
-
-        #     for index, row in new_df.iterrows():
-        #         category = {col: row[col] for col in x_axis_columns}  # Hierarchy levels
-        #         categories.append(category)
-        #         values.append(row[y_axis_columns[0]] if y_axis_columns else 1)  # Use aggregated value
-        #     print("aggregation",aggregation)
-        #     return jsonify({
-        #         "categories": categories,
-        #         "values": values,
-        #         "chartType": "treeHierarchy",
-        #     })
-           
-
-        # except Exception as e:
-        #     print("Error preparing Tree Hierarchy data:", e)
-        #     return jsonify({"error": str(e)})
         print("treeHierarchy -----------------------------")
 
         try:
@@ -3004,8 +2605,6 @@ def get_edit_chart_route():
 
         if temp_df_for_ts.empty:
             return jsonify({"error": "No valid numeric data for time series decomposition after conversion."}), 400
-
-        # time_series_frequency = data.get('timeSeriesFrequency', 'MS')
         # Set frequency dynamically based on selectedFrequency
         if selectedFrequency == "daily":
             time_series_frequency = 'D'
@@ -3019,21 +2618,6 @@ def get_edit_chart_route():
         print("time_series_frequency", time_series_frequency)
 
         try:
-            # # Decide the resampling aggregation method dynamically
-            # if aggregation == "sum":
-            #     ts_data = temp_df_for_ts[value_column].resample(time_series_frequency).sum()
-            # elif aggregation == "average":
-            #     ts_data = temp_df_for_ts[value_column].resample(time_series_frequency).mean()
-            # elif aggregation == "count":
-            #     ts_data = temp_df_for_ts[value_column].resample(time_series_frequency).count()
-            # elif aggregation == "min":
-            #     ts_data = temp_df_for_ts[value_column].resample(time_series_frequency).min()
-            # elif aggregation == "max":
-            #     ts_data = temp_df_for_ts[value_column].resample(time_series_frequency).max()
-            # elif aggregation == "median":
-            #     ts_data = temp_df_for_ts[value_column].resample(time_series_frequency).median()
-            # else:
-            #     return jsonify({"error": f"Unsupported aggregation type for time series decomposition: {aggregation}"}), 400
             if aggregation == "sum":
                 ts_data = temp_df_for_ts[value_column].resample(time_series_frequency).sum()
             elif aggregation == "average":
@@ -3187,104 +2771,6 @@ def get_edit_chart_route():
             print("Error preparing Tree Hierarchy data:", e)
             return jsonify({"error": str(e)})
 
-    # elif len(y_axis_columns) == 1 and chartType != "duealbarChart" and chartType !="stackedbar" and chartType != "timeSeriesDecomposition":
-    #     data = fetch_data(table_name, x_axis_columns, checked_option, y_axis_columns, aggregation, db_nameeee,selectedUser,calculationData,dateGranularity)
-    #     print("data====================", data)     
-    #     # categories = {}  
-    #     # for row in data:
-    #     #     category = tuple(row[:-1])
-    #     #     y_axis_value = row[-1]
-    #     #     if category not in categories:
-    #     #         categories[category] = initial_value(aggregation)
-    #     #     update_category(categories, category, y_axis_value, aggregation)      
-    #     # labels = [', '.join(category) for category in categories.keys()]  
-    #     # values = list(categories.values())
-    #     # print("labels====================", labels)
-    #     # print("values====================", values)
-    #     # return jsonify({"categories": labels, "values": values, "aggregation": aggregation})
-    
-    #     if aggregation == "count":
-    #         array1 = [item[0] for item in data]
-    #         array2 = [item[1] for item in data]
-            
-    #         # Apply data limiting if specified
-    #         if data_limit_type:
-    #             temp_df = pd.DataFrame({'categories': array1, 'values': array2})
-    #             limited_df = apply_data_limiting(temp_df, data_limit_type, data_limit_column or 'values', ['categories'], ['values'], aggregation)
-    #             array1 = limited_df['categories'].tolist()
-    #             array2 = limited_df['values'].tolist()
-            
-    #         # Check data points limit with consent logic
-    #         limit_check = check_data_points_limit(len(array1), user_consent_given, data_limit_type)
-    #         if limit_check:
-    #             return jsonify(limit_check), 400
-            
-    #         # Return the JSON response for count aggregation
-    #         return jsonify({"categories": array1, "values": array2, "aggregation": aggregation})
-            
-    #     elif aggregation == "average":
-    #         array1 = [item[0] for item in data]
-    #         array2 = [item[1] for item in data]
-            
-    #         # Apply data limiting if specified
-    #         if data_limit_type:
-    #             temp_df = pd.DataFrame({'categories': array1, 'values': array2})
-    #             limited_df = apply_data_limiting(temp_df, data_limit_type, data_limit_column or 'values', ['categories'], ['values'], aggregation)
-    #             array1 = limited_df['categories'].tolist()
-    #             array2 = limited_df['values'].tolist()
-            
-    #         # Check data points limit with consent logic
-    #         limit_check = check_data_points_limit(len(array1), user_consent_given, data_limit_type)
-    #         if limit_check:
-    #             return jsonify(limit_check), 400
-            
-    #         return jsonify({"categories": array1, "values": array2, "aggregation": aggregation})
-            
-    #     elif aggregation == "variance":
-    #         array1 = [item[0] for item in data]
-    #         array2 = [item[1] for item in data]
-            
-    #         # Apply data limiting if specified
-    #         if data_limit_type:
-    #             temp_df = pd.DataFrame({'categories': array1, 'values': array2})
-    #             limited_df = apply_data_limiting(temp_df, data_limit_type, data_limit_column or 'values', ['categories'], ['values'], aggregation)
-    #             array1 = limited_df['categories'].tolist()
-    #             array2 = limited_df['values'].tolist()
-            
-    #         # Check data points limit with consent logic
-    #         limit_check = check_data_points_limit(len(array1), user_consent_given, data_limit_type)
-    #         if limit_check:
-    #             return jsonify(limit_check), 400
-            
-    #         return jsonify({"categories": array1, "values": array2, "aggregation": aggregation})
-        
-    #     # For other aggregation types
-    #     categories = {}
-    #     for row in data:
-    #         category = tuple(row[:-1])
-    #         y_axis_value = row[-1]
-    #         if category not in categories:
-    #             categories[category] = initial_value(aggregation)
-    #         update_category(categories, category, y_axis_value, aggregation)
-
-    #     print("categories after aggregation====================", categories    )
-
-    #     labels = [', '.join(category) for category in categories.keys()]
-    #     values = list(categories.values())
-        
-    #     # Apply data limiting if specified
-    #     if data_limit_type:
-    #         temp_df = pd.DataFrame({'categories': labels, 'values': values})
-    #         limited_df = apply_data_limiting(temp_df, data_limit_type, data_limit_column or 'values', ['categories'], ['values'], aggregation)
-    #         labels = limited_df['categories'].tolist()
-    #         values = limited_df['values'].tolist()
-        
-    #     # Check data points limit with consent logic
-    #     limit_check = check_data_points_limit(len(labels), user_consent_given, data_limit_type)
-    #     if limit_check:
-    #         return jsonify(limit_check), 400
-        
-    #     return jsonify({"categories": labels, "values": values, "aggregation": aggregation})
     elif (
         len(y_axis_columns) == 1 
         and chartType != "duealbarChart"
@@ -3611,18 +3097,8 @@ def get_filter_options(selectedTable, columnName):
             calc_column = parsed_query.get(col_key, [None])[0]
             calculation_expr = parsed_query.get(expr_key, [None])[0]
             break
-
-    # print("table_name====================", table_name)
-    # print("db_name====================", db_name)
-    # print("column_name====================", column_name)
-    # print("selectedUser====================", selectedUser)
-    # print("calculationData.calculation====================", calculation_expr)
-    # print("calculationData.columnName====================", calc_column)
-    # print("calculationData.dbTableName====================", db_table)
     # Fetch data from cache or database
     column_data = fetch_column_name_with_cache(table_name, column_name, db_name, selectedUser,calculation_expr,calc_column)
-    
-    # print("column_data====================", column_data)
     return jsonify(column_data)
 
 @lru_cache(maxsize=128)
@@ -3645,19 +3121,10 @@ def save_data():
     user_id=data['user_id']
     save_name= data['saveName']
     company_name=data['company_name']   
-
-    # print("data====================", data) 
-    
-    # print("company_name====================",company_name)  
-    # print("user_id====================",user_id)
-    # print("save_name====================", save_name)
-    # print("connectionType====================", data)
-   
-    
+  
     try:
         conn = connect_to_db()
         cur = conn.cursor()
-        # chart_heading_json = json.dumps(data.get('chart_heading'))
         raw_heading = data.get('chart_heading')
         clean_heading = None if str(raw_heading).strip().lower() in ["", "undefined", "null"] else raw_heading
         chart_heading_json = json.dumps(clean_heading)
@@ -3668,14 +3135,9 @@ def save_data():
         xAxisTitle = json.dumps(data.get('xAxisTitle'))  # '{"x1": "region", "x2": "product"}'
         yAxisTitle = json.dumps(data.get('yAxisTitle'))  # '{"y1": ["unit_cost"]}'
         dateGranularity=json.dumps(data.get('dateGranularity'))
-        # Get the last inserted chart ID
-
-
         cur.execute("SELECT MAX(id) FROM table_chart_save")
         last_chart_id = cur.fetchone()[0] or 0
         new_chart_id = last_chart_id + 1
-
-        # new_chart_ids.append(new_chart_id)
         print("new_chart_ids",new_chart_id)
         print("calculation_data_json",calculation_data_json)
         cur.execute("""
@@ -3926,11 +3388,6 @@ def get_chart_names(user_id, database_name):
                 column_exists = cursor.fetchone()
 
                 if column_exists:
-                    # Fetch employees who report to the given user_id (including NULL reporting_id if not assigned).
-                    # cursor.execute("""
-                    #     SELECT employee_id FROM employee_list WHERE reporting_id = %s 
-                    # """, (user_id,))
-                    # reporting_employees = [row[0] for row in cursor.fetchall()]
                     cursor.execute("""
                         WITH RECURSIVE subordinates AS (
                             SELECT employee_id, reporting_id
@@ -3986,10 +3443,6 @@ def get_chart_names(user_id, database_name):
                 print("charts",charts)
                 
                 # Organize charts by user_id
-                # for uid, chart_name in charts:
-                #     if uid not in dashboard_structure:
-                #         dashboard_structure[uid] = []
-                #     dashboard_structure[uid].append(chart_name)
                 for uid, chart_name in charts:
                     dashboard_structure.append((uid, chart_name))
         except psycopg2.Error as e:
@@ -4355,11 +3808,6 @@ def get_duel_chart_route():
     aggregation = data['aggregate']
     checked_option=data['filterOptions']
     db_nameeee=data['databaseName']
-    print("db_nameeee====================",db_nameeee)
-    print("checked_option====================",checked_option)
-    print("aggregate====================",aggregation) 
-    print("x_axis_columns====================",x_axis_columns)
-    print("y_axis_column====================",y_axis_column) 
     categories = {}
     for row in data:
         category = tuple(row[:-1])
@@ -4601,64 +4049,6 @@ def permission_required(required_permissions):
             return f(*args, **kwargs)
         return decorated_function
     return decorator
-# def insert_login_history(employee_id, company_id, login_device, login_ip, login_status):
-#     conn = get_db_connection()
-#     cur = conn.cursor()
-#     login_id = None 
-#     # Use the LoginHistoryTable class to ensure table exists
-#     # login_history_table = LoginHistoryTable(cur)
-#     # login_history_table.setup()
-#     # cur.execute("""
-#     #     INSERT INTO login_history (employee_id, company_id, login_device, login_ip, login_time, login_status)
-#     #     VALUES (%s, %s, %s, %s, %s, %s)
-#     # """, (employee_id, company_id, login_device, login_ip, datetime.now(), login_status))
-#     if login_status == 'logout':
-#         if employee_id is None:
-#             # ✅ Logout for anonymous or undefined employee
-#             cur.execute("""
-#                 UPDATE login_history
-#                 SET logout_time = %s, login_status = 'logout'
-#                 WHERE login_id = (
-#                     SELECT login_id FROM login_history
-#                     WHERE employee_id IS NULL 
-#                     AND company_id = %s
-#                     AND login_status = 'login'
-#                     ORDER BY login_time DESC
-#                     LIMIT 1
-#                 )
-#             """, (datetime.now(), company_id, login_ip, login_device))
-#         else:
-#             # ✅ Normal employee logout (matching by ID, IP, and device)
-#             cur.execute("""
-#                 UPDATE login_history
-#                 SET logout_time = %s, login_status = 'logout'
-#                 WHERE login_id = (
-#                     SELECT login_id FROM login_history
-#                     WHERE employee_id = %s 
-#                     AND company_id = %s
-#                     AND login_ip = %s
-#                     AND login_device = %s
-#                     AND login_status = 'login'
-#                     ORDER BY login_time DESC
-#                     LIMIT 1
-#                 )
-#             """, (datetime.now(), employee_id, company_id, login_ip, login_device))
-#         result = cur.fetchone()
-#         if result:
-#             login_id = result[0]
-
-#     else:
-#         # ✅ Insert new login entry
-#         cur.execute("""
-#             INSERT INTO login_history 
-#             (employee_id, company_id, login_device, login_ip, login_time, login_status)
-#             VALUES (%s, %s, %s, %s, %s, %s)
-#         """, (employee_id, company_id, login_device, login_ip, datetime.now(), 'login'))
-        
-#     conn.commit()
-#     cur.close()
-#     conn.close()
-#     return login_id
 def insert_login_history(employee_id, company_id, login_device, login_ip, login_status, login_id=None):
     conn = get_db_connection()
     cur = conn.cursor()
@@ -4959,17 +4349,6 @@ def logout():
 
     login_device = request.user_agent.string
     login_ip = request.remote_addr
-    # try:
-    #     user_id = int(data.get('user_id'))  # convert to int
-    # except (TypeError, ValueError):
-    #     user_id = None
-
-
-    # # Only log if user_id is provided
-    # if user_id:
-    #     # logout_history(user_id, company_id, login_device, login_ip)
-    #     print("user_id====================",user_id,company_id,login_device,login_ip)
-    #     insert_login_history(user_id, company_id, login_device, login_ip, 'logout')
     try:
         user_id_int = int(user_id)
     except (TypeError, ValueError):
@@ -5448,34 +4827,6 @@ def receive_chart_details():
         cursor.execute(query, (chart_id,))
         selectedUser = cursor.fetchone()
         print("selectedUser",selectedUser)
-        # connection = get_db_connection_view(databaseName)
-        # df = fetch_chart_data(connection, tableName)
-        # if selectedUser is None:
-        #     print("No selectedUser found for this chart_id.")
-        #     connection = get_db_connection_view(databaseName)
-        # else:
-        #     selectedUser = selectedUser[0]  # Extract the actual value from the tuple
-        #     print("Fetched selectedUser:", selectedUser)
-
-
-        #     if selectedUser:
-        #         connection = fetch_external_db_connection(databaseName, selectedUser)
-        #         host = connection[3]
-        #         dbname = connection[7]
-        #         user = connection[4]
-        #         password = connection[5]
-
-        #         # Create a new psycopg2 connection using the details from the tuple
-        #         connection = psycopg2.connect(
-        #             dbname=dbname,
-        #             user=user,
-        #             password=password,
-        #             host=host
-        #         )
-        #         print('External Connection established:', connection)
-        #     else:
-        #         print("No valid selectedUser found.")
-        #         connection = get_db_connection_view(databaseName)
         connection = get_db_connection_or_path(selectedUser, databaseName)
         print("dashboard connection",connection)
         masterdatabasecon=get_db_connection()
@@ -5722,13 +5073,7 @@ def receive_chart_details():
                     })
             if chart_type == "duealChart"  :
                     print("Dual y-axis chart detected")
-                    # print("filter_options====================", filter_options)
-                    # print("filtertype====================", type(filter_options))
                     data = fetch_data_for_duel(tableName, x_axis, filter_options, y_axis, aggregate, databaseName, selectedUser,calculation_data,dateGranularity)
-                    # print("Data from fetch_data_for_duel:")  # Print before returning
-                    # print("Categories:", [row[0] for row in data])
-                    # print("Series1:", [row[1] for row in data])
-                    # print("Series2:", [row[2] for row in data])
                     description = f"{user_name} viewed the chart '{chart}' from table '{tableName}'."
                     log_activity(
                             company_name=databaseName,
@@ -5746,53 +5091,8 @@ def receive_chart_details():
                         # "dataframe": df_json
                          "optimizeData": optimizeData, 
                     })
-            
-            # if aggregate == 'count':
-              
-            #     df, x_axis, y_axis = apply_calculation_to_df(df, calculation_data, x_axis, y_axis)
-
-            #     grouped_df = df.groupby(x_axis[0]).size().reset_index(name="count")
-            #     print("Grouped DataFrame with all rows:", grouped_df)
-            #     filtered_df_valid = df[df[y_axis[0]].notnull()]
-            #     grouped_df_valid = filtered_df_valid.groupby(x_axis[0])[y_axis[0]].count().reset_index(name="count")
-            #     print("Grouped DataFrame with valid rows:", grouped_df_valid)
-            #     chosen_grouped_df = grouped_df_valid
-            #     categories = chosen_grouped_df[x_axis[0]].tolist()
-            #     values = chosen_grouped_df["count"].tolist()
-            #     # print("categories====================", categories)
-            #     # print("values====================", values)
-            #     allowed_categories = filter_options.get(x_axis[0], [])  # Get the list of valid categories
-            #     filtered_categories = []
-            #     filtered_values = []
-
-            #     for category, value in zip(categories, values):
-            #         # if category.strip() in allowed_categories:  # Ensure category matches the filter
-            #         if str(category).strip() in allowed_categories:
-            #             filtered_categories.append(category)
-            #             filtered_values.append(value)
-            #         else:
-            #             print(f"Category '{category}' not in filter_options[{x_axis[0]}]")
-
-
-            #     # print("filtered_categories====================3333", filtered_categories)
-            #     # print("filtered_values====================33333", filtered_values)
-
-            #     connection.close()
-
-            #     return jsonify({
-            #         "message": "Chart details received successfully!",
-            #         "categories": filtered_categories,
-            #         "values": filtered_values,
-            #         "chart_type": chart_type,
-            #         "chart_heading": chart_heading,
-            #         "x_axis": x_axis,
-            #         "y_axis": y_axis,
-            #          "optimizeData": optimizeData, 
-            #     }), 200
             if aggregate == 'count':
                 print("Count aggregation detected")
-
-                # apply calculations first (keeps original behavior)
                 df, x_axis, y_axis = apply_calculation_to_df(df, calculation_data, x_axis, y_axis)
 
                 # ---------- DATE GRANULARITY (COUNT SECTION) ----------
@@ -6161,361 +5461,8 @@ def receive_chart_details():
                         "optimizeData": optimizeData,
                     }), 200
 
-            # if aggregate == 'count':
-            #     print("Count aggregation detected")
-                
-            #     df, x_axis, y_axis = apply_calculation_to_df(df, calculation_data, x_axis, y_axis)
-                
-            #     # Parse the filter options
-            #     allowed_categories = json.loads(data.get('filter_options'))
-            #     print("allowed_categories====================", allowed_categories)
-                
-            #     # Apply filters to the dataframe BEFORE grouping
-            #     filtered_df = df.copy()
-                
-            #     # Apply each filter condition
-            #     for column, valid_values in allowed_categories.items():
-            #         if column in filtered_df.columns:
-            #             # Filter the dataframe to only include rows where the column value is in valid_values
-            #             filtered_df = filtered_df[filtered_df[column].isin(valid_values)]
-            #             print(f"After filtering {column}: {len(filtered_df)} rows remaining")
-            #         else:
-            #             print(f"Warning: Column '{column}' not found in dataframe")
-                
-            #     print(f"Original dataframe rows: {len(df)}")
-            #     print(f"Filtered dataframe rows: {len(filtered_df)}")
-                
-            #     # Now group the filtered dataframe
-            #     grouped_df = filtered_df.groupby(x_axis[0]).size().reset_index(name="count")
-            #     print("Grouped DataFrame with all rows:", grouped_df)
-                
-            #     # For valid rows (non-null y_axis values)
-            #     filtered_df_valid = filtered_df[filtered_df[y_axis[0]].notnull()]
-            #     grouped_df_valid = filtered_df_valid.groupby(x_axis[0])[y_axis[0]].count().reset_index(name="count")
-            #     print("Grouped DataFrame with valid rows:", grouped_df_valid)
-                
-            #     chosen_grouped_df = grouped_df_valid
-            #     categories = chosen_grouped_df[x_axis[0]].tolist()
-            #     values = chosen_grouped_df["count"].tolist()
-            #     category_value_pairs = list(zip(categories, values))
-            #     optimized_categories = []
-            #     optimized_values = []
-
-            #     if optimizeData == "top10":
-            #                 # Sort by values in descending order and take top 10
-            #         sorted_pairs = sorted(category_value_pairs, key=lambda x: x[1], reverse=True)
-            #         optimized_pairs = sorted_pairs[:10]
-                            
-            #     elif optimizeData == "bottom10":
-            #                 # Sort by values in ascending order and take bottom 10
-            #         sorted_pairs = sorted(category_value_pairs, key=lambda x: x[1])
-            #         optimized_pairs = sorted_pairs[:10]
-                            
-            #     elif optimizeData == "both10":
-            #                 # Get bottom 5
-            #         sorted_asc = sorted(category_value_pairs, key=lambda x: x[1])
-            #         bottom5_pairs = sorted_asc[:5]
-                            
-            #                 # Get top 5
-            #         sorted_desc = sorted(category_value_pairs, key=lambda x: x[1], reverse=True)
-            #         top5_pairs = sorted_desc[:5]
-                            
-            #                 # Combine bottom 5 and top 5
-            #         optimized_pairs = bottom5_pairs + top5_pairs
-                            
-            #     else:
-            #                 # Default: return all filtered data
-            #         optimized_pairs = category_value_pairs
-
-            #             # Separate back into categories and values
-            #     optimized_categories = [pair[0] for pair in optimized_pairs]
-            #     optimized_values = [pair[1] for pair in optimized_pairs]
-                
-            #     print("Final categories====================", categories)
-            #     print("Final values====================", values)
-                
-            #     connection.close()
-            #     description = f"{user_name} viewed the chart '{chart}' from table '{tableName}'."
-            #     log_activity(
-            #         company_name=databaseName,
-            #         user_email=user_email,
-            #         action_type="View Chart",
-            #         table_name=tableName,
-            #         dashboard_name=chart,
-            #         description=description
-            #     )
-            #     return jsonify({
-            #         "message": "Chart details received successfully!",
-            #         "categories": optimized_categories,
-            #         "values": optimized_values,
-            #         "chart_type": chart_type,
-            #         "chart_heading": chart_heading,
-            #         "x_axis": x_axis,
-            #         "y_axis": y_axis,
-            #         "optimizeData": optimizeData, 
-            #     }), 200
-
-
-            # else:
-            #     # if len(y_axis) == 2:
-            #     if chart_type == "duealChart":
-            #         print("Dual y-axis chart detected") 
-            #         if 'OptimizationData' in locals() or 'OptimizationData' in globals():
-            #             df = pd.DataFrame(data, columns=[x_axis[0], 'series1', 'series2'])
-                            
-            #             if optimizeData == 'top10':
-            #                 df = df.sort_values(by='series1', ascending=False).head(10)
-            #             elif optimizeData == 'bottom10':
-            #                 df = df.sort_values(by='series1', ascending=True).head(10)
-            #             elif optimizeData == 'both5':
-            #                 top_df = df.sort_values(by='series1', ascending=False).head(5)
-            #                 bottom_df = df.sort_values(by='series1', ascending=True).head(5)
-            #                 df = pd.concat([top_df, bottom_df])
-
-            #         df, x_axis, y_axis = apply_calculation_to_df(df, calculation_data, x_axis, y_axis)
-            #         for axis in y_axis:
-            #             try:
-            #                 df[axis] = pd.to_datetime(df[axis], errors='raise', format='%H:%M:%S')
-            #                 df[axis] = df[axis].apply(lambda x: x.hour * 60 + x.minute)
-            #             except (ValueError, TypeError):
-            #                 df[axis] = pd.to_numeric(df[axis], errors='coerce')
-
-            #         grouped_df = df.groupby(x_axis)[y_axis].agg(aggregate_py).reset_index()
-            #         print("Grouped DataFrame (dual y-axis): ", grouped_df.head())
-
-            #         # categories = grouped_df[x_axis[0]].tolist()
-            #         # categories = [category.strftime('%Y-%m-%d') for category in grouped_df[x_axis[0]]]
-            #         categories = grouped_df[x_axis[0]].tolist()
-
-            #         # Check if the elements are datetime objects before formatting
-            #         if isinstance(categories[0], pd.Timestamp):  # Assumes at least one value is present
-            #             categories = [category.strftime('%Y-%m-%d') for category in categories]
-            #         else:
-            #             categories = [str(category) for category in categories]  
-
-
-                    
-            #         values1 = [float(value) for value in grouped_df[y_axis[0]]]  # Convert Decimal to float
-            #         values2 = [float(value) for value in grouped_df[y_axis[1]]]  # Convert Decimal to float
-            #         print("duel axis categories====================", categories)
-
-            #         # Filter categories and values based on filter_options
-            #         filtered_categories = []
-            #         filtered_values1 = []
-            #         filtered_values2 = []
-
-            #         # Extract the filter values dynamically (e.g., filter_options['region'])
-            #         filter_values = list(filter_options.values())[0]  # Extract the first filter list dynamically
-
-            #         for category, value1, value2 in zip(categories, values1, values2):
-            #             if category in filter_values:  # Dynamically check category
-            #                 filtered_categories.append(category)
-            #                 filtered_values1.append(value1)
-            #                 filtered_values2.append(value2)
-
-            #         print("filtered_categories====================", filtered_categories)
-            #         print("filtered_values1====================", filtered_values1)
-            #         print("filtered_values2====================", filtered_values2)
-
-
-            #         connection.close()
-            #         description = f"{user_name} viewed the chart '{chart}' from table '{tableName}'."
-            #         log_activity(
-            #             company_name=databaseName,
-            #             user_email=user_email,
-            #             action_type="View Chart",
-            #             table_name=tableName,
-            #             dashboard_name=chart,
-            #             description=description
-            #         )
-
-            #         # Return the filtered data for both series
-            #         return jsonify({
-            #             "message": "Chart details received successfully!",
-            #             "categories": filtered_categories,
-            #             "series1": filtered_values1,
-            #             "series2": filtered_values2,
-            #             "chart_type": chart_type,
-            #             "chart_heading": chart_heading,
-            #             "x_axis": x_axis,
-            #              "optimizeData": optimizeData, 
-            #         }), 200
-            #     if chart_type == "Butterfly":
-            #         print("Dual y-axis chart detected") 
-                    
-            #         df, x_axis, y_axis = apply_calculation_to_df(df, calculation_data, x_axis, y_axis)
-
-            #         grouped_df = df.groupby(x_axis)[y_axis].agg(aggregate_py).reset_index()
-            #         print("Grouped DataFrame (dual y-axis): ", grouped_df.head())
-
-            #         # categories = grouped_df[x_axis[0]].tolist()
-            #         # categories = [category.strftime('%Y-%m-%d') for category in grouped_df[x_axis[0]]]
-            #         categories = grouped_df[x_axis[0]].tolist()
-
-            #         # Check if the elements are datetime objects before formatting
-            #         if isinstance(categories[0], pd.Timestamp):  # Assumes at least one value is present
-            #             categories = [category.strftime('%Y-%m-%d') for category in categories]
-            #         else:
-            #             categories = [str(category) for category in categories]  
-
-
-                    
-            #         values1 = [float(value) for value in grouped_df[y_axis[0]]]  # Convert Decimal to float
-            #         values2 = [float(value) for value in grouped_df[y_axis[1]]]  # Convert Decimal to float
-            #         print("duel axis categories====================", categories)
-
-            #         # Filter categories and values based on filter_options
-            #         filtered_categories = []
-            #         filtered_values1 = []
-            #         filtered_values2 = []
-
-            #         # Extract the filter values dynamically (e.g., filter_options['region'])
-            #         filter_values = list(filter_options.values())[0]  # Extract the first filter list dynamically
-
-            #         for category, value1, value2 in zip(categories, values1, values2):
-            #             if category in filter_values:  # Dynamically check category
-            #                 filtered_categories.append(category)
-            #                 filtered_values1.append(value1)
-            #                 filtered_values2.append(value2)
-
-            #         print("filtered_categories====================", filtered_categories)
-            #         print("filtered_values1====================", filtered_values1)
-            #         print("filtered_values2====================", filtered_values2)
-
-
-            #         connection.close()
-            #         description = f"{user_name} viewed the chart '{chart}' from table '{tableName}'."
-            #         log_activity(
-            #             company_name=databaseName,
-            #             user_email=user_email,
-            #             action_type="View Chart",
-            #             table_name=tableName,
-            #             dashboard_name=chart,
-            #             description=description
-            #         )
-
-            #         # Return the filtered data for both series
-            #         return jsonify({
-            #             "message": "Chart details received successfully!",
-            #             "categories": filtered_categories,
-            #             "series1": filtered_values1,
-            #             "series2": filtered_values2,
-            #             "chart_type": chart_type,
-            #             "chart_heading": chart_heading,
-            #             "x_axis": x_axis,
-            #             "optimizeData": optimizeData, 
-            #             "optimizeData": optimizeData, 
-            #         }), 200
                 else:
-                    
-                  
-
-                    # df, x_axis, y_axis = apply_calculation_to_df(df, calculation_data, x_axis, y_axis)
-                    # grouped_df = df.groupby(x_axis[0])[y_axis].agg(aggregate_py).reset_index()
-
-                    # print("Grouped DataFrame: ", grouped_df.head())
-
-                    # categories = grouped_df[x_axis[0]].tolist()
-                    # if isinstance(categories[0], pd.Timestamp):  # Assumes at least one value is present
-                    #     categories = [category.strftime('%Y-%m-%d') for category in categories]
-                    # else:
-                    #     categories = [str(category) for category in categories]  
-
-                    # values = [float(value) for value in grouped_df[y_axis[0]]]  # Convert Decimal to float
-
-                    # print("categories====================22222", categories) 
-                    # print("values====================22222", values)
-                    # # allowed_categories = filter_options.get(x_axis[0], [])  # Get the list of valid categories
-                    # allowed_categories = list(map(str, filter_options.get(x_axis[0], [])))
-
-                    # filtered_categories = []
-                    # filtered_values = []
-
-                    # # for category, value in zip(categories, values):
-                    # #     # if category.strip() in allowed_categories:  # Ensure category matches the filter
-                    # #     if str(category).strip() in allowed_categories:
-
-                    # #         filtered_categories.append(category)
-                    # #         filtered_values.append(value)
-                    # #     else:
-                    # #         print(f"Category '{category}' not in filter_options[{x_axis[0]}]")
-                    # for category, value in zip(categories, values):
-                    #     print("Type of category:", type(category), "Value:", category)
-                    #     if str(category).strip() in allowed_categories:
-                    #         filtered_categories.append(category)
-                    #         filtered_values.append(value)
-                    #     else:
-                    #         print(f"Category '{category}' not in filter_options[{x_axis[0]}]")
-
-
-                    # print("filtered_categories====================1111", filtered_categories)
-                    # print("filtered_values====================", filtered_values)
-
-                    # # Create a combined list of (category, value) pairs
-                    # category_value_pairs = list(zip(filtered_categories, filtered_values))
-
-                    # # Sort based on optimization strategy
-                    # optimized_categories = []
-                    # optimized_values = []
-
-                    # if optimizeData == "top10":
-                    #     # Sort by values in descending order and take top 10
-                    #     sorted_pairs = sorted(category_value_pairs, key=lambda x: x[1], reverse=True)
-                    #     optimized_pairs = sorted_pairs[:10]
-                        
-                    # elif optimizeData == "bottom10":
-                    #     # Sort by values in ascending order and take bottom 10
-                    #     sorted_pairs = sorted(category_value_pairs, key=lambda x: x[1])
-                    #     optimized_pairs = sorted_pairs[:10]
-                        
-                    # elif optimizeData == "both10":
-                    #     # Get bottom 5
-                    #     sorted_asc = sorted(category_value_pairs, key=lambda x: x[1])
-                    #     bottom5_pairs = sorted_asc[:5]
-                        
-                    #     # Get top 5
-                    #     sorted_desc = sorted(category_value_pairs, key=lambda x: x[1], reverse=True)
-                    #     top5_pairs = sorted_desc[:5]
-                        
-                    #     # Combine bottom 5 and top 5
-                    #     optimized_pairs = bottom5_pairs + top5_pairs
-                        
-                    # else:
-                    #     # Default: return all filtered data
-                    #     optimized_pairs = category_value_pairs
-
-                    # # Separate back into categories and values
-                    # optimized_categories = [pair[0] for pair in optimized_pairs]
-                    # optimized_values = [pair[1] for pair in optimized_pairs]
-
-                    # print(f"{optimizeData} optimized_categories====================", optimized_categories)
-                    # print(f"{optimizeData} optimized_values====================", optimized_values)
-
-                    # connection.close()
-                    # description = f"{user_name} viewed the chart '{chart}' from table '{tableName}'."
-                    # log_activity(
-                    #     company_name=databaseName,
-                    #     user_email=user_email,
-                    #     action_type="View Chart",
-                    #     table_name=tableName,
-                    #     dashboard_name=chart,
-                    #     description=description
-                    # )
-
-                    # # Return the optimized data
-                    # return jsonify({
-                    #     "message": "Chart details received successfully!",
-                    #     "categories": optimized_categories,
-                    #     "values": optimized_values,
-                    #     "chart_type": chart_type,
-                    #     "chart_heading": chart_heading,
-                    #     "tableName": tableName,
-                    #     "x_axis": x_axis,
-                    #     "optimizeData": optimizeData, 
-                    # }), 200
-                    # ----------------------------- START REPLACEMENT BLOCK -----------------------------
-
-                    # Convert selectedFrequency string → dict
+                                # Convert selectedFrequency string → dict
                     if isinstance(dateGranularity, str):
                         try:
                             dateGranularity = json.loads(dateGranularity)
@@ -6697,16 +5644,7 @@ def receive_chart_details():
 
                     # ------------------------------ END REPLACEMENT BLOCK ------------------------------
 
-        else:
-            print("Tree hierarchy chart detected")
-            print("tableName====================", tableName)
-            print("x_axis====================", x_axis)
-            print("filter_options====================", filter_options)
-            print("y_axis====================", y_axis)
-            print("aggregate====================", aggregate)
-            print("databaseName====================", databaseName)
-            print("selectedUser====================", selectedUser)
-            
+        else:            
             data = fetch_data_tree(tableName, x_axis, filter_options, y_axis, aggregate, databaseName,selectedUser,calculation_data)
             categories = data.get("categories", [])
             values = data.get("values", [])
@@ -6828,10 +5766,6 @@ def dashboard_data(dashboard_name,company_name):
         image_data_list = []
         conn = create_connection() 
         if image_ids:
-            # if isinstance(image_ids, str):
-            #     image_ids = list(map(str.strip, image_ids.strip('{}').split(',')))
-            # if isinstance(image_ids, str):
-            #     image_ids = list(filter(None, map(str.strip, image_ids.strip('{}').split(','))))
             if isinstance(image_ids, str):
                 try:
                     image_ids = json.loads(image_ids)
@@ -7962,32 +6896,6 @@ def get_db_connectiondb(company_name, selected_user=None):
     connection = None
     if not company_name:
         raise ValueError("Database name is missing")
-
-    # if not selected_user or selected_user.lower() == 'null':
-    #     print("Using default local database connection...")
-    #     connection_string = f"dbname={company_name} user={USER_NAME} password={PASSWORD} host={HOST}"
-    #     connection = psycopg2.connect(connection_string)
-    # else:  # External connection
-    #     connection_details = fetch_external_db_connection(company_name, selected_user)
-    #     if not connection_details:
-    #         raise Exception(f"Unable to fetch external database connection details for user '{selected_user}'")
-
-    #     db_details = {
-    #         "host": connection_details[3],
-    #         "database": connection_details[7],
-    #         "user": connection_details[4],
-    #         "password": connection_details[5],
-    #         "port": int(connection_details[6])
-    #     }
-        
-    #     print(f"Connecting to external database: {db_details['database']}@{db_details['host']}:{db_details['port']} as {db_details['user']}")
-    #     connection = psycopg2.connect(
-    #         dbname=db_details['database'],
-    #         user=db_details['user'],
-    #         password=db_details['password'],
-    #         host=db_details['host'],
-    #         port=db_details['port'],
-    #     )
     if not selected_user or selected_user.lower() == 'null':
         print("🟢 Using default local database connection...")
         connection_string = f"dbname={company_name} user={USER_NAME} password={PASSWORD} host={HOST} port={PORT}"
@@ -8313,66 +7221,7 @@ def create_connection( db_name=DB_NAME,
         return conn
     except psycopg2.Error as e:
         return str(e)
-
-
-# @app.route('/save_connection', methods=['POST'])
-# def save_connection():
-#     data = request.json
-#     dbType = data.get('dbType')
-#     provider = data.get('provider')
-#     dbUsername = data.get('dbUsername')
-#     dbPassword = data.get('dbPassword')
-#     saveName=data.get('saveName')
-#     port = data.get('port')
-#     dbName = data.get('dbName')
-#     company_name=data.get('company_name')
-#     print(data)
-#     try:
-#             # Save the connection details to your local database
-#             save_connection_details(company_name,dbType, provider, dbUsername, dbPassword, port, dbName,saveName)
-#             print("save_connection_details",save_connection_details)
-#             return jsonify(success=True, message="Connection details saved successfully.")
-#     except Exception as e:
-#             return jsonify(success=False, error=f"Failed to save connection details: {str(e)}")
-# def save_connection_details(company_name,dbType, provider, dbUsername, dbPassword, port, dbName,saveName):
-#     try:
-#         # Connect to your local database where you want to store the connection details
-#         conn = psycopg2.connect(
-#              dbname=company_name,  # Ensure this is the correct company database
-#         user=USER_NAME,password=PASSWORD,host=HOST,port=PORT
-            
-#         )
-#         cursor = conn.cursor()
-#      # Create the table if it doesn't exist
-#         create_table_query = """
-#         CREATE TABLE IF NOT EXISTS external_db_connections (
-#             id SERIAL PRIMARY KEY,
-#             saveName VARCHAR(100),
-#             db_type VARCHAR(100),
-#             provider VARCHAR(100),
-#             db_username VARCHAR(100),
-#             db_password VARCHAR(100),
-#             port VARCHAR(10),
-#             db_name VARCHAR(100),
-#             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-#         );
-#         """
-#         cursor.execute(create_table_query)
-#         # Insert the connection details into the table
-#         insert_query = sql.SQL("""
-#             INSERT INTO external_db_connections (saveName,db_type, provider, db_username, db_password, port, db_name)
-#             VALUES (%s, %s, %s, %s, %s, %s,%s)
-#         """)
-#         cursor.execute(insert_query, (saveName,dbType, provider, dbUsername, dbPassword, port, dbName))
-
-#         # Commit the changes
-#         conn.commit()
-#         cursor.close()
-#         conn.close()
-#     except Exception as e:
-#         raise Exception(f"Failed to save connection details: {str(e)}")
-
-
+    
 @app.route('/save_connection', methods=['POST'])
 @token_required
 def save_connection():
@@ -8525,335 +7374,6 @@ def get_Edb_connection(username, password, host, port, db_name):
     except Exception as e:
         raise Exception(f"Unable to connect to the database: {str(e)}")
 
-# from pymongo import MongoClient
-# import mysql.connector
-# import cx_Oracle
-# try:
-#     cx_Oracle.init_oracle_client(lib_dir="C:\instantclient-basic-windows\instantclient_23_6")  # Update the path for your system
-# except cx_Oracle.InterfaceError as e:
-#     if "already been initialized" in str(e):
-#         print("Oracle Client library has already been initialized. Skipping re-initialization.")
-#     else:
-#         raise e
-
-
-# @app.route('/connect', methods=['POST'])
-# def connect_and_fetch_tables():
-#     data = request.json
-#     dbType = data.get('dbType')
-#     username = data.get('username')
-#     password = data.get('password')
-#     host = data.get('host', HOST)  # Default to localhost if not provided
-#     port = data.get('port')  # Port should be provided based on the database type
-#     db_name = data.get('dbName')
-#     print("data", data)
-
-#     try:
-#         if dbType == "Oracle":
-#             # Connect to Oracle
-#             # conn = cx_Oracle.connect(
-#             #     user=username,
-#             #     password=password,
-#             #     dsn=f"{host}:{port}/{db_name}"  # For Oracle, the DSN includes host, port, and service name
-#             # )
-#             # cursor = conn.cursor()
-#             # print("Connection successful:", conn)
-#             if username.lower() == "sys":
-#                 conn = cx_Oracle.connect(
-#                     user=username,
-#                     password=password,
-#                     dsn=f"{host}:{port}/{db_name}",
-#                     mode=cx_Oracle.SYSDBA  # Use SYSDBA mode for SYS user
-#                 )
-#             else:
-#                 conn = cx_Oracle.connect(
-#                     user=username,
-#                     password=password,
-#                     dsn=f"{host}:{port}/{db_name}"
-#                 )
-
-#             cursor = conn.cursor()
-#             print("Connection successful:", conn)
-
-#             # Query to get all table names from the current schema
-#             cursor.execute("""
-#                 SELECT table_name 
-#                 FROM all_tables 
-#                 WHERE owner = :schema_name
-#             """, {"schema_name": username.upper()})  # Pass parameter as a dictionary
-
-#             tables = [row[0] for row in cursor.fetchall()]
-#             conn.close()
-
-#         elif dbType == "PostgreSQL":
-#             import psycopg2
-#             # Connect to PostgreSQL
-#             conn = psycopg2.connect(
-#                 dbname=db_name, user=username, password=password, host=host, port=port
-#             )
-#             cursor = conn.cursor()
-#             cursor.execute("SELECT table_name FROM information_schema.tables WHERE table_schema = 'public';")
-#             tables = [row[0] for row in cursor.fetchall()]
-#             conn.close()
-
-#         elif dbType == "MongoDB":
-#             from pymongo import MongoClient
-#             # Connect to MongoDB
-#             mongo_uri = f"mongodb://{username}:{password}@{host}:{port}/{db_name}"
-#             client = MongoClient(mongo_uri)
-#             db = client[db_name]
-#             tables = db.list_collection_names()
-
-#         elif dbType == "MySQL":
-#             import mysql.connector
-#             # Connect to MySQL
-#             conn = mysql.connector.connect(
-#                 host=host, user=username, password=password, database=db_name, port=port
-#             )
-#             cursor = conn.cursor()
-#             cursor.execute("SHOW TABLES;")
-#             tables = [row[0] for row in cursor.fetchall()]
-#             conn.close()
-
-#         else:
-#             return jsonify(success=False, error="Unsupported database type.")
-
-#         return jsonify(success=True, tables=tables)
-
-#     except cx_Oracle.DatabaseError as e:
-#         return jsonify(success=False, error=f"Oracle Database Error: {str(e)}")
-
-#     except cx_Oracle.InterfaceError as e:
-#         return jsonify(success=False, error=f"Oracle Interface Error: {str(e)}")
-
-#     except Exception as e:
-#         return jsonify(success=False, error=f"Failed to connect: {str(e)}")
-
-# from sshtunnel import SSHTunnelForwarder
-# @app.route('/connect', methods=['POST'])
-# def connect_and_fetch_tables():
-#     data = request.json
-#     dbType = data.get('dbType')
-#     username = data.get('username')
-#     password = data.get('password')
-#     host = data.get('host')
-#     port = data.get('port')
-#     db_name = data.get('dbName')
-#     try:
-#         port = int(port)
-#     except (ValueError, TypeError):
-#         port = None
-
-#     # Optional SSH fields
-#     ssh_host = data.get('ssh_host')
-#     ssh_port = data.get('ssh_port', 22)
-#     ssh_username = data.get('ssh_username')
-#     ssh_key_path = data.get('ssh_key_path')
-
-#     print("Received Data:", data)
-
-#     tunnel = None  # for cleanup
-
-#     try:
-#         # ✅ If SSH details are provided → create tunnel
-#         if ssh_host and ssh_username and ssh_key_path:
-#             tunnel = SSHTunnelForwarder(
-#                 (ssh_host, ssh_port),
-#                 ssh_username=ssh_username,
-#                 ssh_pkey=ssh_key_path,
-#                 remote_bind_address=(host, int(port))
-#             )
-#             tunnel.start()
-#             print(f"🔐 SSH Tunnel established on local port: {tunnel.local_bind_port}")
-#             host = "127.0.0.1"
-#             port = tunnel.local_bind_port
-
-#         # --- Database Connection Section ---
-#         if dbType == "Oracle":
-#             if username.lower() == "sys":
-#                 conn = cx_Oracle.connect(
-#                     user=username,
-#                     password=password,
-#                     dsn=f"{host}:{port}/{db_name}",
-#                     mode=cx_Oracle.SYSDBA
-#                 )
-#             else:
-#                 conn = cx_Oracle.connect(
-#                     user=username,
-#                     password=password,
-#                     dsn=f"{host}:{port}/{db_name}"
-#                 )
-
-#             cursor = conn.cursor()
-#             cursor.execute("""
-#                 SELECT table_name 
-#                 FROM all_tables 
-#                 WHERE owner = :schema_name
-#             """, {"schema_name": username.upper()})
-#             tables = [row[0] for row in cursor.fetchall()]
-#             conn.close()
-
-#         elif dbType == "PostgreSQL":
-#             conn = psycopg2.connect(
-#                 dbname=db_name, user=username, password=password, host=host, port=port
-#             )
-#             cursor = conn.cursor()
-#             cursor.execute("SELECT table_name FROM information_schema.tables WHERE table_schema = 'public';")
-#             tables = [row[0] for row in cursor.fetchall()]
-#             conn.close()
-
-#         elif dbType == "MySQL":
-#             conn = mysql.connector.connect(
-#                 host=host, user=username, password=password, database=db_name, port=port
-#             )
-#             cursor = conn.cursor()
-#             cursor.execute("SHOW TABLES;")
-#             tables = [row[0] for row in cursor.fetchall()]
-#             conn.close()
-
-#         elif dbType == "MongoDB":
-#             mongo_uri = f"mongodb://{username}:{password}@{host}:{port}/{db_name}"
-#             client = MongoClient(mongo_uri)
-#             db = client[db_name]
-#             tables = db.list_collection_names()
-
-#         else:
-#             return jsonify(success=False, error="Unsupported database type.")
-
-#         # ✅ Success Response
-#         return jsonify(success=True, tables=tables)
-
-#     except cx_Oracle.DatabaseError as e:
-#         return jsonify(success=False, error=f"Oracle Database Error: {str(e)}")
-
-#     except cx_Oracle.InterfaceError as e:
-#         return jsonify(success=False, error=f"Oracle Interface Error: {str(e)}")
-
-#     except Exception as e:
-#         return jsonify(success=False, error=f"Failed to connect: {str(e)}")
-
-#     finally:
-#         # ✅ Close SSH tunnel if used
-#         if tunnel:
-#             tunnel.stop()
-#             print("🔒 SSH Tunnel closed.")
-
-# import cx_Oracle
-# import psycopg2
-# import mysql.connector
-# from pymongo import MongoClient
-# import paramiko
-
-# # 🩹 Patch for compatibility (only if DSSKey missing)
-# if not hasattr(paramiko, "DSSKey"):
-#     from paramiko import dsskey
-#     paramiko.DSSKey = dsskey.DSSKey
-
-# from sshtunnel import SSHTunnelForwarder
-
-
-# @app.route('/connect', methods=['POST'])
-# def connect_and_fetch_tables():
-#     data = request.json
-#     dbType = data.get('dbType')
-#     username = data.get('username')
-#     password = data.get('password')
-#     host = data.get('host')
-#     port = data.get('port')
-#     db_name = data.get('dbName')
-
-#     # ✅ Ensure numeric ports
-#     try:
-#         port = int(port)
-#     except (ValueError, TypeError):
-#         port = None
-
-#     # Optional SSH fields (convert ssh_port to int)
-#     ssh_host = data.get('ssh_host')
-#     try:
-#         ssh_port = int(data.get('ssh_port', 22))
-#     except (ValueError, TypeError):
-#         ssh_port = 22
-#     ssh_username = data.get('ssh_username')
-#     ssh_key_path = data.get('ssh_key_path')
-
-#     print("Received Data:", data)
-#     tunnel = None  # for cleanup
-
-#     try:
-#         # ✅ If SSH details are provided → create tunnel
-#         if ssh_host and ssh_username and ssh_key_path:
-#             tunnel = SSHTunnelForwarder(
-#                 (ssh_host, ssh_port),
-#                 ssh_username=ssh_username,
-#                 ssh_pkey=ssh_key_path,
-#                 remote_bind_address=(host, port)
-#             )
-#             tunnel.start()
-#             print(f"🔐 SSH Tunnel established on local port: {tunnel.local_bind_port}")
-#             host = "127.0.0.1"
-#             port = tunnel.local_bind_port
-
-#         # --- Database Connection Section ---
-#         if dbType == "Oracle":
-#             if username.lower() == "sys":
-#                 conn = cx_Oracle.connect(
-#                     user=username,
-#                     password=password,
-#                     dsn=f"{host}:{port}/{db_name}",
-#                     mode=cx_Oracle.SYSDBA
-#                 )
-#             else:
-#                 conn = cx_Oracle.connect(
-#                     user=username,
-#                     password=password,
-#                     dsn=f"{host}:{port}/{db_name}"
-#                 )
-#             cursor = conn.cursor()
-#             cursor.execute("""
-#                 SELECT table_name 
-#                 FROM all_tables 
-#                 WHERE owner = :schema_name
-#             """, {"schema_name": username.upper()})
-#             tables = [row[0] for row in cursor.fetchall()]
-#             conn.close()
-
-#         elif dbType == "PostgreSQL":
-#             conn = psycopg2.connect(
-#                 dbname=db_name, user=username, password=password, host=host, port=port
-#             )
-#             cursor = conn.cursor()
-#             cursor.execute("SELECT table_name FROM information_schema.tables WHERE table_schema = 'public';")
-#             tables = [row[0] for row in cursor.fetchall()]
-#             conn.close()
-
-#         elif dbType == "MySQL":
-#             conn = mysql.connector.connect(
-#                 host=host, user=username, password=password, database=db_name, port=port
-#             )
-#             cursor = conn.cursor()
-#             cursor.execute("SHOW TABLES;")
-#             tables = [row[0] for row in cursor.fetchall()]
-#             conn.close()
-
-#         elif dbType == "MongoDB":
-#             mongo_uri = f"mongodb://{username}:{password}@{host}:{port}/{db_name}"
-#             client = MongoClient(mongo_uri)
-#             db = client[db_name]
-#             tables = db.list_collection_names()
-
-#         else:
-#             return jsonify(success=False, error="Unsupported database type.")
-
-#         return jsonify(success=True, tables=tables)
-
-#     except Exception as e:
-#         return jsonify(success=False, error=f"Failed to connect: {str(e)}")
-
-#     finally:
-#         if tunnel:
-#             tunnel.stop()
-#             print("🔒 SSH Tunnel closed.")
 import pymongo
 # import cx_Oracle
 import psycopg2
@@ -8861,192 +7381,9 @@ import mysql.connector
 from pymongo import MongoClient
 import paramiko
 from sshtunnel import SSHTunnelForwarder
-
-# @app.route('/connect', methods=['POST'])
-# def connect_and_fetch_tables():
-#     data = request.json
-#     dbType = data.get('dbType')
-#     username = data.get('username')
-#     password = data.get('password')
-#     host = data.get('host')
-#     port = data.get('port')
-#     db_name = data.get('dbName')
-#     print("data", data)
-
-#     # ✅ Ensure numeric port
-#     try:
-#         port = int(port)
-#     except (ValueError, TypeError):
-#         port = 5432  # default for PostgreSQL
-
-#     # ✅ Optional SSH info
-#     ssh_host = data.get('ssh_host')
-#     ssh_username = data.get('ssh_username')
-#     ssh_key_path = data.get('ssh_key_path')
-#     ssh_port = int(data.get('ssh_port', 22))
-
-#     print("Received Data:", data)
-#     tunnel = None
-
-#     try:
-#         # ✅ Create SSH Tunnel if SSH details exist
-#         if ssh_host and ssh_username and ssh_key_path:
-#             print("🔐 Creating SSH tunnel...")
-#             tunnel = SSHTunnelForwarder(
-#                 (ssh_host, ssh_port),
-#                 ssh_username=ssh_username,
-#                 ssh_pkey=ssh_key_path,
-#                 remote_bind_address=(host, port)
-#             )
-#             tunnel.start()
-#             print(f"✅ SSH Tunnel established on local port: {tunnel.local_bind_port}")
-#             host = "127.0.0.1"
-#             port = tunnel.local_bind_port
-
-#         # --- Database Connection ---
-#         if dbType == "PostgreSQL":
-#             conn = psycopg2.connect(
-#                 dbname=db_name,
-#                 user=username,
-#                 password=password,
-#                 host=host,
-#                 port=port
-#             )
-#             cursor = conn.cursor()
-#             cursor.execute("SELECT table_name FROM information_schema.tables WHERE table_schema = 'public';")
-#             tables = [row[0] for row in cursor.fetchall()]
-#             conn.close()
-
-#         elif dbType == "MySQL":
-#             conn = mysql.connector.connect(
-#                 host=host,
-#                 user=username,
-#                 password=password,
-#                 database=db_name,
-#                 port=port
-#             )
-#             cursor = conn.cursor()
-#             cursor.execute("SHOW TABLES;")
-#             tables = [row[0] for row in cursor.fetchall()]
-#             conn.close()
-
-#         elif dbType == "MongoDB":
-#             mongo_uri = f"mongodb://{username}:{password}@{host}:{port}/{db_name}"
-#             client = MongoClient(mongo_uri)
-#             db = client[db_name]
-#             tables = db.list_collection_names()
-
-#         elif dbType == "Oracle":
-#             conn = cx_Oracle.connect(
-#                 user=username,
-#                 password=password,
-#                 dsn=f"{host}:{port}/{db_name}"
-#             )
-#             cursor = conn.cursor()
-#             cursor.execute("SELECT table_name FROM all_tables")
-#             tables = [row[0] for row in cursor.fetchall()]
-#             conn.close()
-
-#         else:
-#             return jsonify(success=False, error="Unsupported database type.")
-
-#         return jsonify(success=True, tables=tables)
-
-#     except Exception as e:
-#         return jsonify(success=False, error=f"Failed to connect: {str(e)}")
-
-#     finally:
-#         if tunnel:
-#             tunnel.stop()
-#             print("🔒 SSH Tunnel closed.")
-
-
 import socket
 import paramiko
 
-# @app.route('/connect', methods=['POST'])
-# def connect_and_fetch_tables():
-#     data = request.json
-#     dbType = data.get('dbType')
-#     username = data.get('username')
-#     password = data.get('password')
-#     host = data.get('host')
-#     port = int(data.get('port', 5432))
-#     db_name = data.get('dbName')
-
-#     ssh_host = data.get('ssh_host')
-#     ssh_username = data.get('ssh_username')
-#     ssh_key_path = data.get('ssh_key_path')
-#     ssh_port = int(data.get('ssh_port', 22))
-
-#     print("Received Data:", data)
-#     tunnel = None
-
-#     try:
-#         # ✅ Create SSH Tunnel manually
-#         if ssh_host and ssh_username and ssh_key_path:
-#             print("🔐 Establishing SSH tunnel manually (Paramiko)...")
-#             private_key = paramiko.RSAKey.from_private_key_file(ssh_key_path)
-#             ssh_client = paramiko.SSHClient()
-#             ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-#             ssh_client.connect(
-#                 ssh_host,
-#                 username=ssh_username,
-#                 pkey=private_key,
-#                 port=ssh_port,
-#                 timeout=10
-#             )
-
-#             # Forward a local socket to PostgreSQL through SSH
-#             local_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-#             local_sock.bind(('127.0.0.1', 0))
-#             local_port = local_sock.getsockname()[1]
-#             local_sock.close()
-#             print(f"✅ SSH Tunnel established on local port {local_port}")
-
-#             transport = ssh_client.get_transport()
-#             # tunnel = transport.open_channel(
-#             #     "direct-tcpip",
-#             #     (host, port),
-#             #     ("127.0.0.1", local_port)
-#             # )
-#             # ✅ Connect to PostgreSQL inside EC2
-#             tunnel = transport.open_channel(
-#                 "direct-tcpip",
-#                 ("127.0.0.1", 5432),  # PostgreSQL runs on localhost:5432 INSIDE EC2
-#                 ("127.0.0.1", 0)
-#             )
-
-
-#             host = "127.0.0.1"
-#             port = local_port
-
-#         # ✅ Database connection
-#         if dbType == "PostgreSQL":
-#             conn = psycopg2.connect(
-#                 dbname=db_name,
-#                 user=username,
-#                 password=password,
-#                 host=host,
-#                 port=port
-#             )
-#             cursor = conn.cursor()
-#             cursor.execute("SELECT table_name FROM information_schema.tables WHERE table_schema = 'public';")
-#             tables = [row[0] for row in cursor.fetchall()]
-#             conn.close()
-#         else:
-#             return jsonify(success=False, error="Unsupported database type.")
-
-#         return jsonify(success=True, tables=tables)
-
-#     except Exception as e:
-#         print(f"❌ Error: {e}")
-#         return jsonify(success=False, error=f"Failed to connect: {str(e)}")
-
-#     finally:
-#         if tunnel:
-#             tunnel.close()
-#             print("🔒 SSH Tunnel closed.")
 
 @app.route('/connect', methods=['POST'])
 @token_required
@@ -9214,74 +7551,6 @@ def fetch_external_db_connection(company_name,savename):
     except Exception as e:
         print(f"Error fetching connection details: {e}")
         return None
-
-# def fetch_table_names_from_external_db(db_details):
-#     try:
-#         db_type = db_details.get('dbType')
-#         if db_type == "PostgreSQL":
-#             # Connect to PostgreSQL
-#             conn = psycopg2.connect(
-#                 host=db_details['host'],
-#                 database=db_details['database'],
-#                 user=db_details['user'],
-#                 password=db_details['password']
-#             )
-#             cursor = conn.cursor()
-#             cursor.execute("SELECT table_name FROM information_schema.tables WHERE table_schema = 'public';")
-#             table_names = [table[0] for table in cursor.fetchall()]
-#             conn.close()
-#         elif db_type == "MongoDB":
-#             # Connect to MongoDB
-#             mongo_uri = f"mongodb://{db_details['user']}:{db_details['password']}@{db_details['host']}:{db_details['port']}/{db_details['database']}"
-#             client = MongoClient(mongo_uri)
-#             db = client[db_details['database']]
-#             table_names = db.list_collection_names()
-#         elif db_type == "MySQL":
-#             # Connect to MySQL
-#             conn = mysql.connector.connect(
-#                 host=db_details['host'],
-#                 user=db_details['user'],
-#                 password=db_details['password'],
-#                 database=db_details['database'],
-#                 port=db_details.get('port', 3306)
-#             )
-#             cursor = conn.cursor()
-#             cursor.execute("SHOW TABLES;")
-#             table_names = [table[0] for table in cursor.fetchall()]
-#             conn.close()
-#         elif db_type == "Oracle":
-#             # Connect to Oracle
-             
-#             # Connect to Oracle
-#             if username.lower() == "sys":
-#                 conn = cx_Oracle.connect(
-#                     user=db_details['user'],
-#                     password=db_details['password'],
-#                     dsn=f"{db_details['host']}:{db_details.get('port', 1521)}/{db_details['database']}",
-#                     mode=cx_Oracle.SYSDBA  # Use SYSDBA mode for SYS user
-#                 )
-#             else:
-#                 conn = cx_Oracle.connect(
-#                     user=db_details['user'],
-#                     password=db_details['password'],
-#                     dsn=f"{db_details['host']}:{db_details.get('port', 1521)}/{db_details['database']}"
-#                 )
-
-#             cursor = conn.cursor()
-#             cursor = conn.cursor()
-#             cursor.execute("SELECT table_name FROM all_tables")
-#             table_names = [table[0] for table in cursor.fetchall()]
-#             conn.close()
-#         else:
-#             raise ValueError("Unsupported database type provided.")
-        
-#         return table_names  # Return list of table names
-
-#     except Exception as e:
-#         print(f"Error fetching table names: {e}")
-#         return []
-
-
 def fetch_table_names_from_external_db(db_details):
     ssh_client = None
     tunnel_thread = None
@@ -9424,29 +7693,7 @@ def fetch_table_names_from_external_db(db_details):
         if ssh_client:
             ssh_client.close()
         print("🔒 SSH Tunnel closed.")
-# @app.route('/external-db/tables', methods=['GET'])
-# def get_external_db_table_names():
-    
-#     company_name = request.args.get('databaseName')
-#     savename=request.args.get('user')
-#     print("companydb", company_name)
-#     print("savename", savename)
-#     external_db_connection = fetch_external_db_connection(company_name, savename)
-#     print("External DB Connection Details:", external_db_connection)
 
-#     if external_db_connection:
-#         db_details = {
-#             "host": external_db_connection[3],
-#             "database": external_db_connection[7],
-#             "user": external_db_connection[4],
-#             "password": external_db_connection[5],
-#             "dbType": external_db_connection[2],
-#             "port": external_db_connection[6],
-#         }
-#         table_names = fetch_table_names_from_external_db(db_details)
-#         return jsonify(table_names)
-#     else:
-#         return jsonify({"error": "Could not retrieve external database connection details"}), 500
 @app.route('/external-db/tables', methods=['GET'])
 @token_required
 def get_external_db_table_names():
@@ -9479,84 +7726,6 @@ def get_external_db_table_names():
     else:
         return jsonify({"error": "Could not retrieve external database connection details"}), 500
 
-# @app.route('/external-db/tables/<table_name>', methods=['GET'])
-# def get_externaltable_data(table_name):
-#     company_name = request.args.get('databaseName')
-#     savename=request.args.get('user')
-#     print("companydb", company_name)
-#     print("username", savename)
-#     external_db_connection = fetch_external_db_connection(company_name,savename)
-#     if external_db_connection:
-#         db_details = {
-#              "host": external_db_connection[3],
-#             "database": external_db_connection[7],
-#             "user": external_db_connection[4],
-#             "password": external_db_connection[5],
-#             "dbType": external_db_connection[2],
-#             "port": external_db_connection[6],
-#         }
-#         try:
-#             # Fetch data from the specified table
-#             table_data = fetch_data_from_table(db_details, table_name)
-#             return jsonify(table_data)
-#         except Exception as e:
-#             return jsonify({"error": f"Error fetching data from table '{table_name}': {str(e)}"}), 500
-#     else:
-#         return jsonify({"error": "Could not retrieve external database connection details"}), 500
-
-# def fetch_data_from_table(db_details, table_name):
-#     try:
-#         dbType = db_details.get('dbType')
-#         if dbType == "PostgreSQL":
-#             conn = psycopg2.connect(
-#                 host=db_details["host"],
-#                 database=db_details["database"],
-#                 user=db_details["user"],
-#                 password=db_details["password"]
-#             )
-#         elif dbType == "MongoDB":
-#             mongo_uri = f"mongodb://{db_details['user']}:{db_details['password']}@{db_details['host']}:{db_details['port']}/{db_details['database']}"
-#             client = MongoClient(mongo_uri)
-#             db = client[db_details['database']]
-#             collection = db[table_name]
-#             data = list(collection.find().limit(10))  # Fetch data from MongoDB
-#             return data
-#         elif dbType == "MySQL":
-#             conn = mysql.connector.connect(
-#                 host=db_details["host"],
-#                 user=db_details["user"],
-#                 password=db_details["password"],
-#                 database=db_details["database"],
-#                 port=db_details["port"]
-#             )
-#         elif dbType == "Oracle":
-#             if db_details["user"].lower() == "sys":
-#                 conn = cx_Oracle.connect(
-#                     user=db_details["user"],
-#                     password=db_details["password"],
-#                     dsn=f"{db_details['host']}:{db_details.get['port']}/{db_details['database']}",
-#                     mode=cx_Oracle.SYSDBA  # Use SYSDBA mode for SYS user
-#                 )
-#             else:
-#                 conn = cx_Oracle.connect(
-#                 user=db_details["user"],
-#                 password=db_details["password"],
-#                 dsn=f"{db_details['host']}:{db_details['port']}/{db_details['database']}"
-#             )
-#         else:
-#             raise Exception("Unsupported database type.")
-
-#         cursor = conn.cursor()
-#         query = f"SELECT * FROM {table_name} FETCH FIRST 10 ROWS ONLY" if dbType == "Oracle" else f"SELECT * FROM {table_name} LIMIT 10;"
-#         cursor.execute(query)
-#         rows = cursor.fetchall()
-#         columns = [desc[0] for desc in cursor.description]
-#         return [dict(zip(columns, row)) for row in rows]
-#     except Exception as e:
-#         raise Exception(f"Error querying table '{table_name}': {str(e)}")
-#     finally:
-#         if 'conn' in locals():
-#             conn.close()
 @app.route('/external-db/tables/<table_name>', methods=['GET'])
 @token_required
 def get_externaltable_data(table_name):
@@ -10062,36 +8231,6 @@ def create_roles_table():
     cursor.close()
     conn.close()
 
-# @app.route('/updateroles', methods=['POST'])
-# def add_role():
-#     try:
-#         create_roles_table()
-#         data = request.json
-#         print(data)
-#         role_name = data['role_name']
-#         permissions = data['permissions']  # Expect permissions as a list
-
-#         # Convert list to comma-separated string
-#         permissions_str = ', '.join(permissions)
-
-#         conn = get_db_connection()
-#         cursor = conn.cursor()
-#         cursor.execute(
-#             """
-#             INSERT INTO role (role_name, permissions)
-#             VALUES (%s, %s)
-#             ON CONFLICT (role_name) DO NOTHING;
-#             """,
-#             (role_name, permissions_str)
-#         )
-#         conn.commit()
-#         cursor.close()
-#         conn.close()
-#         return jsonify({"message": "Role added successfully"}), 201
-
-#     except Exception as e:
-#         logging.error(f"Error adding role: {str(e)}")
-#         return jsonify({"error": str(e)}), 500
 @app.route('/updateroles', methods=['POST'])
 @token_required
 def add_role():
@@ -10226,8 +8365,6 @@ def update_chart_position():
 def save_dashboard():
     data = request.json
     user_id = data['user_id']
-    # dashboard_name = data['dashboard_name']
-    # dashboard_name = data['dashboard_name'].strip()
     dashboard_name_data = data.get("dashboard_name")
     company=data.get("company")
 
@@ -10259,13 +8396,9 @@ def save_dashboard():
     print("chart_details:", chart_details)
     print("positions:", position)
     print("droppableBgColor",droppableBgColor)
-    # print("imagePositions",imagePositions)
-    # print("Bgcolour",Bgcolour)
-
     try:
         conn = get_db_connection()
         cur = conn.cursor()
-        # Step: Delete old image records not in current imagePositions list
         cur.execute("""
             SELECT image_ids FROM table_dashboard
             WHERE user_id = %s AND TRIM(file_name) = %s
@@ -10413,14 +8546,6 @@ def save_dashboard():
                         img['disableDragging']
                     ))
                     conn.commit()
-
-                # # Then update table_dashboard with image_ids
-                # image_ids_pg_array = '{' + ','.join(image_ids) + '}'
-                # cur.execute("""
-                #     UPDATE table_dashboard
-                #     SET image_ids = %s
-                #     WHERE user_id = %s AND file_name = %s;
-                # """, (image_ids_pg_array, user_id, dashboard_name))
                 image_ids_json = json.dumps(image_ids)
                 print("image_ids_json",image_ids_json)
 
@@ -10491,15 +8616,6 @@ def save_dashboard():
         print(traceback.format_exc())
         return jsonify({"error": str(e)}), 500
 
-# from flask import request
-# from urllib.parse import quote_plus
-# import sweetviz as sv
-# from sqlalchemy import create_engine
-# from flask import Flask, jsonify
-
-# if not os.path.exists('static'):
-#     os.makedirs('static')
-
 
 @app.route('/api/generate-dashboard', methods=['GET'])
 @token_required
@@ -10526,13 +8642,11 @@ def generate_dashboard():
 
         dashboard_filename = f'dashboard_{db_name}_{table_name}.html'
         print("dashboard_filename",dashboard_filename)
-        # dashboard_path = os.path.join('static', dashboard_filename)
         dashboard_path = os.path.join(app.static_folder, dashboard_filename) # Use app.static_folder here
         
         # Ensure the static directory exists
         os.makedirs(app.static_folder, exist_ok=True)
         print("dashboard_path",dashboard_path)
-        # Generate report using sample
         report = sv.analyze(df)
         report.show_html(dashboard_path, open_browser=False)
         dashboard_url = f'http://localhost:5000/static/{dashboard_filename}'
@@ -10623,29 +8737,7 @@ def connect_and_fetch_dbtables():
         return jsonify(success=False, error=f"Failed to connect: {str(e)}")
     
 
-
-# from apscheduler.schedulers.background import BackgroundScheduler
-
-# scheduler = BackgroundScheduler()
-# scheduler.start()
-
-
-# Initialize scheduler
 app.config['SCHEDULER_API_ENABLED'] = True
-
-
-
-# scheduler.scheduler.jobstores = {
-#     'default': SQLAlchemyJobStore(
-#         url=f'postgresql://{USER_NAME}:{PASSWORD}@{HOST}:{PORT}/{DB_NAME}'
-#     )
-# }
-# app.config['SCHEDULER_JOBSTORES'] = {
-#     'default': SQLAlchemyJobStore(
-#         url=f'postgresql://{USER_NAME}:{PASSWORD}@{HOST}:{PORT}/{DB_NAME}'
-#     )
-# }
-
 
 encoded_password = urllib.parse.quote_plus(PASSWORD)
 
@@ -10663,90 +8755,8 @@ app.config['SCHEDULER_JOB_DEFAULTS'] = {
 scheduler = APScheduler()
 scheduler.init_app(app)
 scheduler.start()
-# def update_last_transfer_status(source_table, dest_table, status, message, destination_config):
-#     try:
-#         dbname = destination_config.get('dbName')
-#         conn = psycopg2.connect(
-#             dbname =dbname,
-#             user=USER_NAME,
-#             password=PASSWORD,
-#             host=HOST,
-#             port=PORT
-#         )
-#         cur = conn.cursor()
-#         cur.execute("""
-#             CREATE TABLE IF NOT EXISTS last_transfer_status (
-#                 id SERIAL PRIMARY KEY,
-#                 company_name VARCHAR NOT NULL,
-#                 source_table VARCHAR NOT NULL,
-#                 destination_table VARCHAR NOT NULL,
-#                 last_transfer_time TIMESTAMP,
-#                 status VARCHAR,
-#                 message TEXT,
-#                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-#                 UNIQUE (company_name,source_table, destination_table)
-#             );
-#         """)
-#         conn.commit()
-#         company_name = dbname 
-#         upsert_query = """
-#             INSERT INTO last_transfer_status (
-#                 company_name,source_table, destination_table, last_transfer_time, status, message,log_id INT REFERENCES data_transfer_logs(id) ON DELETE CASCADE,
-#                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-#                 UNIQUE (company_name, source_table, destination_table)
-#             )
-#             VALUES (%s,%s, %s, %s, %s, %s)
-#             ON CONFLICT (company_name,source_table, destination_table)
-#             DO UPDATE SET
-#                 last_transfer_time = EXCLUDED.last_transfer_time,
-#                 status = EXCLUDED.status,
-#                 message = EXCLUDED.message,
-#                 updated_at = CURRENT_TIMESTAMP;
-#         """
-#         cur.execute(upsert_query, (
-#             company_name,source_table, dest_table, datetime.utcnow(), status, message
-#         ))
-#         conn.commit()
-#         cur.close()
-#         conn.close()
-#     except Exception as e:
-#         print(f"❌ Failed to update last transfer status: {str(e)}")
 
 
-# def create_log_table_if_not_exists(destination_config):
-#     try:
-#         db_name=destination_config.get("dbName")
-#         conn = get_company_db_connection(db_name)
-#         # conn = psycopg2.connect(**LOG_DB_CONFIG)
-#         cur = conn.cursor()
-#         cur.execute("""
-#             CREATE TABLE IF NOT EXISTS data_transfer_logs (
-#                 id SERIAL PRIMARY KEY,
-#                 company_name VARCHAR NOT NULL,
-#                 source_table VARCHAR,
-#                 destination_table VARCHAR,
-#                 schedule_type VARCHAR,
-#                 run_time TIMESTAMP,
-#                 status VARCHAR,
-#                 message TEXT,
-#                 record_count INTEGER,
-#                 data_size_mb FLOAT,
-#                 user_email VARCHAR,
-#                 user_id INTEGER REFERENCES employee_list(employee_id),
-#                 job_id VARCHAR,
-#                 time_taken_seconds FLOAT,
-#                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-#                 inserted_count INTEGER DEFAULT 0,
-#                 updated_count INTEGER DEFAULT 0,
-#                 skipped_count INTEGER DEFAULT 0
-#             );
-#         """)
-#         conn.commit()
-#         cur.close()
-#         conn.close()
-#         print("✅ 'data_transfer_logs' table ensured.")
-#     except Exception as e:
-#         print(f"❌ Failed to create table: {e}")
 def to_native(val):
     """Convert NumPy datatypes to Python-native types."""
     if isinstance(val, (np.integer,)):
@@ -10756,92 +8766,7 @@ def to_native(val):
     if isinstance(val, (np.bool_,)):
         return bool(val)
     return val
-# def log_data_transfer(source_table, dest_table, schedule_type, run_time,
-#                       status, message, record_count, data_size_mb, email, job_id,time_taken_seconds, inserted_count=0, updated_count=0, skipped_count=0):
-#     try:
-#         conn = psycopg2.connect(
-#             dbname=DB_NAME,  # Update this
-#             user=USER_NAME,
-#             password=PASSWORD,
-#             host=HOST,
-#             port=PORT
-#         )
-#         cur = conn.cursor()
-#         insert_query = """
-#             INSERT INTO data_transfer_logs (
-#                 source_table, destination_table, schedule_type, run_time,
-#                 status, message, record_count, data_size_mb, user_email, job_id,time_taken_seconds, inserted_count, updated_count, skipped_count
-#             )
-#             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s,%s,%s, %s, %s)
-#         """
-#         # cur.execute(insert_query, (
-#         #     source_table, dest_table, schedule_type, run_time,
-#         #     status, message, record_count, data_size_mb, email, job_id,time_taken_seconds, inserted_count, updated_count, skipped_count
-#         # ))
-#         values = (
-#             source_table, dest_table, schedule_type, run_time,
-#             status, message, record_count, data_size_mb,
-#             email, job_id, time_taken_seconds,
-#             inserted_count, updated_count, skipped_count
-#         )
 
-#         cur.execute(insert_query, tuple(to_native(v) for v in values))
-
-#         conn.commit()
-#         cur.close()
-#         conn.close()
-#     except Exception as e:
-#         print(f"❌ Failed to log data transfer: {str(e)}")
-# def log_data_transfer(source_table, dest_table, schedule_type, run_time,
-#                       status, message, record_count, data_size_mb, email, job_id,
-#                       time_taken_seconds, destination_config, user_id=None,
-#                       inserted_count=0, updated_count=0, skipped_count=0):
-#     try:
-#         dbname=destination_config.get("dbName")
-#         conn = get_company_db_connection(dbname)
-       
-#         cur = conn.cursor()
-#         insert_query = """
-#             INSERT INTO data_transfer_logs (
-#                 company_name,source_table, destination_table, schedule_type, run_time,
-#                 status, message, record_count, data_size_mb,
-#                 user_email, user_id, job_id, time_taken_seconds,
-#                 inserted_count, updated_count, skipped_count
-#             )
-#             VALUES (%s,%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-#         """
-#         values = (
-#             dbname,source_table, dest_table, schedule_type, run_time,
-#             status, message, record_count, data_size_mb,
-#             email, user_id, job_id, time_taken_seconds,
-#             inserted_count, updated_count, skipped_count
-#         )
-#         cur.execute(insert_query, tuple(to_native(v) for v in values))
-#         conn.commit()
-#         cur.close()
-#         conn.close()
-#     except Exception as e:
-#         print(f"❌ Failed to log data transfer: {str(e)}")
-
-# def send_notification_email(recipient, subject, body):
-#     try:
-#         print("Using Hotmail SMTP to send email...")
-
-#         # Create email
-#         msg = MIMEText(body, "plain")
-#         # msg = MIMEText(body, "plain", "utf-8") 
-#         msg["Subject"] = subject
-#         msg["From"] = HOTMAIL_USER
-#         msg["To"] = recipient
-
-#         with smtplib.SMTP("smtp.hostinger.com", 587) as server:
-#             server.starttls()
-#             server.login(HOTMAIL_USER, HOTMAIL_PASS)
-#             server.sendmail(HOTMAIL_USER, recipient, msg.as_string())
-
-#         print("Email sent successfully")
-#     except Exception as e:
-#         print("Hotmail SMTP error:", e)
 def send_notification_email(recipient, subject, body):
     try:
         print("Using Hotmail SMTP to send email...")
@@ -10860,173 +8785,6 @@ def send_notification_email(recipient, subject, body):
         print("✅ Email sent successfully")
     except Exception as e:
         print("Hotmail SMTP error:", e)
-
-
-    # try:
-    #     print("Using SendGrid API to send email...")
-    #     message = Mail(
-    #         from_email=FROM_EMAIL,
-    #         to_emails=recipient,
-    #         subject=subject,
-    #         plain_text_content=body
-    #     )
-    #     sg = SendGridAPIClient(SENDGRID_API_KEY)
-    #     print("message", message)
-
-    #     response = sg.send(message)
-    #     print(f"SendGrid response: {response.status_code}")
-    # except Exception as e:
-    #     print("SendGrid error:", e)
-
-# def job_logic(cols=None, source_config=None, destination_config=None,
-#               source_table_name=None, dest_table_name=None,
-#               update_existing_table=False, create_view_if_exists=False, email=None):
-#     print(f"[{datetime.now()}] Job triggered with columns: {cols}")
-#     try:
-#         source_df, fetch_error = fetch_data_with_columns(source_config, source_table_name, cols)
-#         if fetch_error:
-#             msg = f"Failed to fetch data: {fetch_error}"
-#             print(msg)
-#             if email:
-#                 send_notification_email(email, "Data Transfer Failed", msg)
-#             return {"success": False, "error": msg}
-
-#         if source_df is None or source_df.empty:
-#             msg = f"No data found in table '{source_table_name}'"
-#             print(msg)
-#             if email:
-#                 send_notification_email(email, "Data Transfer Skipped", msg)
-#             return {"success": True, "message": msg}
-
-#         insert_success, insert_error, view_created, view_name = insert_dataframe_with_upsert(
-#             destination_config, dest_table_name, source_df, source_table_name, cols, create_view_if_exists
-#         )
-
-#         if not insert_success:
-#             msg = f"Failed to insert data: {insert_error}"
-#             print(msg)
-#             if email:
-#                 send_notification_email(email, "Data Transfer Failed", msg)
-#             return {"success": False, "error": msg}
-
-#         records_count = len(source_df)
-#         data_size = source_df.memory_usage(deep=True).sum() / (1024 * 1024)
-#         transfer_time = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
-#         view_info = f"\nA view named '{view_name}' was created." if view_name else ""
-
-#         email_body = f"""\nSubject: 3A Vision Data Transfer Completed
-
-# Hello {email},
-
-# Data transfer from '{source_config.get('dbName')}' to '{destination_config.get('dbName')}' completed.
-
-# Details:
-# Table: {source_table_name}
-# Records: {records_count}
-# Size: {data_size:.2f} MB
-# Time: {transfer_time}
-# {view_info}
-
-# Regards,
-# 3A Vision Team
-# """
-#         if email:
-#             send_notification_email(email, "3A Vision Data Transfer Completed", email_body)
-
-#         return {"success": True, "message": f"Data transferred from '{source_table_name}' to '{dest_table_name}'."}
-
-#     except Exception as e:
-#         error_msg = f"Unexpected error: {str(e)}"
-#         print(traceback.format_exc())
-#         if email:
-#             send_notification_email(email, "Data Transfer Failed", error_msg)
-#         return {"success": False, "error": error_msg}
-# def job_logic(cols=None, source_config=None, destination_config=None,
-#               source_table_name=None, dest_table_name=None,
-#               update_existing_table=False, create_view_if_exists=False,
-#               email=None, schedule_type=None, job_id=None,user_id=None):
-#     start_time = datetime.utcnow()
-#     print(f"[{datetime.now()}] Job triggered for table: {source_table_name}")
-#     create_log_table_if_not_exists(destination_config)
-
-#     try:
-#         # Placeholder for your actual data fetch logic
-#         source_df, fetch_error = fetch_data_with_columns(source_config, source_table_name, cols)
-#         if fetch_error:
-#             msg = f"Failed to fetch data: {fetch_error}"
-#             print(msg)
-#             if email:
-#                 send_notification_email(email, "Data Transfer Failed", msg)
-#             return {"success": False, "error": msg}
-
-#         if source_df is None:
-#             msg = f"No data found in '{source_table_name}'"
-#             if email:
-#                 send_notification_email(email, "Data Transfer Skipped", msg)
-#             log_data_transfer(source_table_name, dest_table_name, schedule_type,
-#                               datetime.utcnow(), "Skipped", msg, 0, 0.0, email, job_id, 0.0,destination_config, user_id,inserted_count=0, updated_count=0, skipped_count=0)
-#             print("Data transfer logged successfully1.")
-#             update_last_transfer_status(source_table_name, dest_table_name, "Skipped", msg,destination_config)
-#             return {"success": True, "message": msg}
-
-#         # Placeholder for insert logic
-#         insert_success = True  # Replace with actual insert result
-#         insert_error = None
-#         view_name = None
-#         insert_success, insert_error, view_created, view_name ,inserted_count, updated_count = insert_dataframe_with_upsert(
-#             destination_config, dest_table_name, source_df,source_config, source_table_name, cols, create_view_if_exists
-#         )
-#         skipped_count = len(source_df) - inserted_count - updated_count
-#         if not insert_success:
-#             msg = f"Insert failed: {insert_error}"
-#             if email:
-#                 send_notification_email(email, "Data Transfer Failed", msg)
-#             log_data_transfer(source_table_name, dest_table_name, schedule_type,
-#                               datetime.utcnow(), "Failed", msg, 0, 0.0, email, job_id, 0.0,destination_config, user_id,inserted_count, updated_count, skipped_count)
-#             print("Data transfer logged successfully.2")
-#             update_last_transfer_status(source_table_name, dest_table_name, "Failed", msg,destination_config)
-#             return {"success": False, "error": msg}
-
-#         records_count = len(source_df)
-#         data_size = source_df.memory_usage(deep=True).sum() / (1024 * 1024)
-
-#         msg = f"Transferred {records_count} records from {source_table_name} to {dest_table_name}."
-
-#         email_body = f"""
-# Subject: 3A Vision Data Transfer Completed
-
-# Hello {email},
-
-# ✅ Data transfer from '{source_config.get('dbName')}' to '{destination_config.get('dbName')}' completed.
-
-# Details:
-# Table: {source_table_name}
-# Records: {records_count}
-# Size: {data_size:.2f} MB
-# Time: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')}
-
-# Regards,
-# 3A Vision Team
-# """
-#         if email:
-#             send_notification_email(email, "3A Vision Data Transfer Completed", email_body)
-#         end_time = datetime.utcnow()
-#         time_taken_seconds = (end_time - start_time).total_seconds()
-#         log_data_transfer(source_table_name, dest_table_name, schedule_type,
-#                           datetime.utcnow(), "Success", msg, records_count, data_size, email, job_id,time_taken_seconds,destination_config, user_id,inserted_count, updated_count, skipped_count)
-#         print("Data transfer logged successfully.")
-#         update_last_transfer_status(source_table_name, dest_table_name, "Success", msg,destination_config)
-#         return {"success": True, "message": msg}
-
-#     except Exception as e:
-#         error_msg = f"Unexpected error: {str(e)}"
-#         print(traceback.format_exc())
-#         if email:
-#             send_notification_email(email, "Data Transfer Failed", error_msg)
-#         log_data_transfer(source_table_name, dest_table_name, schedule_type,
-#                           datetime.utcnow(), "Failed", error_msg, 0, 0.0, email, job_id,0.0,destination_config, user_id,inserted_count=0, updated_count=0, skipped_count=0)
-#         print("Data transfer logged successfully.3")
-#         return {"success": False, "error": error_msg}
 
 
 
@@ -11251,117 +9009,6 @@ Regards,
         update_last_transfer_status(source_table_name, dest_table_name, "Failed", error_msg, destination_config, log_id)
         return {"success": False, "error": error_msg}
 
-
-# @app.route('/api/transfer_data', methods=['POST'])
-# def transfer_and_verify_data():
-#     data = request.get_json()
-#     source_config = data.get('source')
-#     destination_config = data.get('destination')
-#     source_table_name = data.get('sourceTable')
-#     dest_table_name = data.get('destinationTable')
-#     selected_columns = data.get('selectedColumns')
-#     schedule_type = data.get('scheduleType')
-#     schedule_time = data.get('scheduleTime')
-#     update_existing_table = data.get('updateExistingTable', False)
-#     create_view_if_exists = data.get('createViewIfExists', False)
-#     email = data.get('email')
-
-#     if not dest_table_name:
-#         timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
-#         dest_table_name = f"{source_table_name}_copy_{timestamp}"
-
-#     if not source_config or not destination_config or not source_table_name or not dest_table_name:
-#         return jsonify({"success": False, "error": "Missing configuration or table names"}), 400
-
-#     if not schedule_type or schedule_type == '':
-#         result = job_logic(selected_columns)
-#         return jsonify(result)
-
-#     # Scheduled job
-#     job_id = f"{source_table_name}_to_{dest_table_name}_{datetime.utcnow().strftime('%Y%m%d%H%M%S')}"
-#     try:
-#         schedule_hour, schedule_minute = map(int, schedule_time.split(':')) if schedule_time else (0, 0)
-#         now = datetime.now()
-#         # job_kwargs = {"cols": selected_columns}
-#         job_kwargs = {
-#     "cols": selected_columns,
-#     "source_config": source_config,
-#     "destination_config": destination_config,
-#     "source_table_name": source_table_name,
-#     "dest_table_name": dest_table_name,
-#     "update_existing_table": update_existing_table,
-#     "create_view_if_exists": create_view_if_exists,
-#     "email": email
-# }
-
-#         print("job_kwargs",job_kwargs)
-
-#         if schedule_type == 'once':
-#             run_time = now.replace(hour=schedule_hour, minute=schedule_minute, second=0, microsecond=0)
-#             if run_time < now:
-#                 run_time += timedelta(days=1)
-#             scheduler.add_job(func=job_logic, trigger='date', run_date=run_time, id=job_id, kwargs=job_kwargs)
-#         elif schedule_type == 'hourly':
-#             scheduler.add_job(
-#     func=job_logic,
-#     trigger='interval',
-#     hours=1,
-#     id=job_id,
-#     kwargs=job_kwargs,
-#     replace_existing=True,
-#     misfire_grace_time=3600,
-#     next_run_time=datetime.now()
-# )
-
-
-#             # scheduler.add_job(func=job_logic, trigger='interval', hours=1, id=job_id, kwargs=job_kwargs)
-#         elif schedule_type == 'daily':
-#             scheduler.add_job(func=job_logic, trigger='cron', hour=schedule_hour, minute=schedule_minute, id=job_id, kwargs=job_kwargs,next_run_time=datetime.now())
-#         else:
-#             return jsonify({"success": False, "error": f"Invalid schedule type: {schedule_type}"}), 400
-
-#         # return jsonify({"success": True, "message": f"Job scheduled successfully ({schedule_type})", "job_id": job_id})
-#         # Print all scheduled jobs in terminal
-#         print("\n📋 Scheduled Jobs List:")
-#         for job in scheduler.get_jobs():
-#             print(job)
-#             print(f"- ID: {job.id}")
-#             print(f"  Next Run Time: {job.next_run_time}")
-#             print(f"  Trigger: {job.trigger}")
-#             print(f"  Function: {job.func_ref}")
-#             print(f"  Args: {job.args}")
-#             print(f"  Kwargs: {job.kwargs}")
-#             print("-" * 50)
-#         if email:
-#             schedule_msg = f"""\
-#             Subject: 3A Vision Data Transfer Scheduled
-
-#             Hello {email},
-
-#             Your data transfer job has been successfully scheduled.
-
-#             Details:
-#             Source Table: {source_table_name}
-#             Destination Table: {dest_table_name}
-#             Schedule Type: {schedule_type}
-#             Scheduled Time: {schedule_time if schedule_time else 'N/A'}
-#             Job ID: {job_id}
-
-#             Regards,
-#             3A Vision Team
-#             """
-#             send_notification_email(email, "3A Vision Data Transfer Scheduled", schedule_msg)
-
-#             return jsonify({"success": True, "message": f"Job scheduled successfully ({schedule_type})", "job_id": job_id})
-
-#         # return jsonify({"success": True, "message": f"Job scheduled successfully ({schedule_type})", "job_id": job_id})
-
-#     except Exception as e:
-#         error_msg = f"Failed to schedule job: {str(e)}"
-#         print(error_msg)
-#         if email:
-#             send_notification_email(email, "Data Transfer Scheduling Failed", error_msg)
-#         return jsonify({"success": False, "error": error_msg}), 500
 @app.route('/api/transfer_data', methods=['POST'])
 @token_required
 def transfer_and_verify_data():
@@ -11379,16 +9026,8 @@ def transfer_and_verify_data():
     email = data.get('email')
     print("dest_table_name",dest_table_name)
     user_id=data.get('user_id')
-
-    # if not dest_table_name:
-
-    #     dest_table_name = f"{source_table_name}_copy_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}"
-
     if not source_config or not destination_config or not source_table_name:
         return jsonify({"success": False, "error": "Missing configuration or table names"}), 400
-        # if not source_config or not destination_config or not source_table_name:
-        # return jsonify({"success": False, "error": "Missing configuration or table names"}), 400
-
     # If destination table name is not provided, determine it dynamically
     if not dest_table_name:
         try:
@@ -11400,16 +9039,6 @@ def transfer_and_verify_data():
             port=destination_config['port'] or '5432'
             )
             dest_cursor = conn.cursor()
-            # Connect to destination DB
-            # dest_conn = psycopg2.connect(
-            #     host=destination_config["host"],
-            #     port=destination_config["port"],
-            #     user=destination_config["user"],
-            #     password=destination_config["password"],
-            #     database=destination_config["database"]
-            # )
-            # dest_cursor = dest_conn.cursor()
-
             # Check if source table exists in destination DB
             dest_cursor.execute("""
                 SELECT EXISTS (
@@ -11560,39 +9189,6 @@ def transfer_and_verify_data():
             send_notification_email(email, "Data Transfer Scheduling Failed", error_msg)
         return jsonify({"success": False, "error": error_msg}), 500
 
-
-    
-# from flask import Flask, request, jsonify
-# from datetime import datetime, timedelta
-
-# # from sendgrid.helpers.mail import Mail
-# import os
-
-# # app = Flask(__name__)
-# # scheduler = APScheduler()
-# # scheduler.init_app(app)
-# # scheduler.start()
-
-# import requests
-# import requests
-
-# # Replace this with your actual Mailgun domain (e.g., sandbox****.mailgun.org)
-# MAILGUN_DOMAIN = 'sandbox0b04e19327dd4497a05f05cf2ec275ee.mailgun.org'
-# MAILGUN_API_KEY = 'e71583bb-e10355bcxxxxxxxxxxxx'  # Use full correct API key
-# FROM_EMAIL = f"DataApp <postmaster@{MAILGUN_DOMAIN}>"
-
-# def send_notification_email(to_email, subject, message):
-#     return requests.post(
-#         f"https://api.mailgun.net/v3/{MAILGUN_DOMAIN}/messages",
-#         auth=("api", MAILGUN_API_KEY),
-#         data={
-#             "from": FROM_EMAIL,
-#             "to": [to_email],
-#             "subject": subject,
-#             "text": message
-#         }
-#     )
-
 @app.route('/get_tables', methods=['POST'])
 @token_required
 def get_tables():
@@ -11677,16 +9273,8 @@ def create_single_table_view():
     if not isinstance(selected_columns, list) or not selected_columns:
         return jsonify({"success": False, "message": "Selected columns must be a non-empty list."}), 400
 
-    # --- SQL Injection Prevention (CRITICAL!) ---
-    # Database object names (table names, column names, view names) cannot be parameterized.
-    # Therefore, we must rigorously sanitize them.
-    # This example uses basic alphanumeric and underscore sanitization.
-    # For production, consider using a library or ensuring names come from a trusted whitelist.
 
     def sanitize_sql_identifier(identifier):
-        # Basic sanitization: allow alphanumeric and underscore.
-        # Replace any other character with an underscore or remove it.
-        # Check your database's specific rules for identifiers.
         return ''.join(c for c in identifier if c.isalnum() or c == '_')
 
     sanitized_view_name = sanitize_sql_identifier(view_name)
@@ -11699,10 +9287,6 @@ def create_single_table_view():
     # Ensure columns list is not empty after sanitization
     if not sanitized_columns:
         return jsonify({"success": False, "message": "No valid columns selected for the view after sanitization."}), 400
-
-    # --- Construct the CREATE VIEW SQL Query ---
-    # Using CREATE OR REPLACE VIEW is safer as it updates the view if it already exists,
-    # preventing an error if the user tries to save a view with the same name.
     columns_list_str = ", ".join(sanitized_columns)
 
     # Note: If your database driver expects schema.table_name format,
@@ -11715,13 +9299,6 @@ def create_single_table_view():
             f'SELECT {columns_list_str} '
             f'FROM "{sanitized_original_table_name}";'
         )
-
-    # For PostgreSQL, use double quotes for identifiers:
-    # query = (
-    #     f'CREATE OR REPLACE VIEW "{sanitized_view_name}" AS '
-    #     f'SELECT {columns_list_str} '
-    #     f'FROM "{sanitized_original_table_name}";'
-    # )
 
     print("Executing query:", query)
 
@@ -11798,13 +9375,6 @@ def upload_logo():
             "logo_url": f"http://localhost:5000/static/{url_path}" if url_path else None
         })
 
-        # return jsonify({
-        #     "message": "Logo uploaded successfully",
-        #     "logo_url": f"/{UPLOAD_ROOT}/{relative_path.replace(os.sep, '/')}"
-        #     # "logo_url": f"http://localhost:5000/{UPLOAD_ROOT}/{relative_path.replace(os.sep, '/')}"
-
-        # })
-
     except Exception as e:
         print("Error:", e)
         return jsonify({"message": "Error uploading logo"}), 500
@@ -11818,16 +9388,16 @@ from werkzeug.utils import secure_filename
 def save_logo(logo, organizationName, db_cursor, db_conn):
     logo_filename = None
 
-    # 🔧 Step 1: Ensure "logo" column exists in the table
-    db_cursor.execute("""
-        SELECT column_name 
-        FROM information_schema.columns 
-        WHERE table_name='organizationdatatest' AND column_name='logo'
-    """)
-    if db_cursor.fetchone() is None:
-        db_cursor.execute("""ALTER TABLE organizationdatatest ADD COLUMN logo TEXT""")
-        db_conn.commit()
-        print("✅ 'logo' column added to organizationdatatest table.")
+    # # 🔧 Step 1: Ensure "logo" column exists in the table
+    # db_cursor.execute("""
+    #     SELECT column_name 
+    #     FROM information_schema.columns 
+    #     WHERE table_name='organizationdatatest' AND column_name='logo'
+    # """)
+    # if db_cursor.fetchone() is None:
+    #     db_cursor.execute("""ALTER TABLE organizationdatatest ADD COLUMN logo TEXT""")
+    #     db_conn.commit()
+    #     print("✅ 'logo' column added to organizationdatatest table.")
 
     if logo:
         # 📁 Step 2: Create and clean org folder
@@ -11861,23 +9431,6 @@ def save_logo(logo, organizationName, db_cursor, db_conn):
     return logo_filename
 
 
-
-# @app.route('/api/calculation-suggestions', methods=['GET'])
-# def get_calculation_suggestions():
-#     try:
-#         conn = psycopg2.connect(
-#             dbname=DB_NAME, user=USER_NAME, password=PASSWORD,
-#             host=HOST, port=PORT
-#         )
-#         cursor = conn.cursor()
-#         cursor.execute("SELECT keyword, template FROM calculation_suggestions ORDER BY keyword;")
-#         suggestions = [{'keyword': row[0], 'template': row[1]} for row in cursor.fetchall()]
-#         cursor.close()
-#         conn.close()
-#         return jsonify(suggestions)
-#     except Exception as e:
-#         return jsonify({'error': str(e)}), 500
-    
 @app.route('/api/calculation-suggestions', methods=['GET'])
 @token_required
 def get_calculation_suggestions():
@@ -12003,39 +9556,6 @@ def delete_table():
         return jsonify({'status': 'error', 'message': str(e)}), 500
         
 
-
-# @app.route('/api/get_all_users', methods=['GET'])
-# def get_all_user_id():
-#     company_name = request.args.get('company_name')
-
-#     if not company_name:
-#         return jsonify({'message': 'company_name is required'}), 400
-
-#     # Connect to the specific company's database
-#     conn = get_company_db_connection(company_name)
-#     if not conn:
-#         print(f"Failed to connect to company database for {company_name}.")
-#         return jsonify({'message': 'Failed to connect to company database'}), 500
-
-#     try:
-#         cursor = conn.cursor()
-#         cursor.execute("SELECT employee_id, employee_name FROM employee_list")
-#         rows = cursor.fetchall()
-#         cursor.close()
-
-#         # Convert the result to a list of dictionaries
-#         users = [{'employee_id': row[0], 'employee_name': row[1]} for row in rows]
-
-#         return jsonify(users), 200
-
-#     except Exception as e:
-#         print(f"Error fetching users: {e}")
-#         return jsonify({'message': 'Error fetching users'}), 500
-
-#     finally:
-#         conn.close()
-
-
 @app.route('/api/get_all_users', methods=['GET'])
 @token_required
 def get_all_user_id():
@@ -12099,424 +9619,6 @@ def safe_json(value):
         return json.dumps(value)
     return value
 
-# @app.route('/api/share_dashboard', methods=['POST'])
-# @token_required
-# def share_dashboard():
-#     conn = None 
-#     try:
-#         data = request.get_json()
-#         print("Received Data:", data)
-#         # user_id, dashboard_name = dashboard_name.split(",", 1)  # Split only once
-#         # Support both field names
-#         dashboard_name_data = data.get("dashboard_name")
-
-#         if isinstance(dashboard_name_data, list):
-#             # Expect [id, name]
-#             if len(dashboard_name_data) == 2:
-#                 user_id, dashboard_name = dashboard_name_data
-#             else:
-#                 return jsonify({"message": "Invalid dashboard_name format"}), 400
-#         elif isinstance(dashboard_name_data, str):
-#             user_id, dashboard_name = dashboard_name_data.split(",", 1)
-#         else:
-#             return jsonify({"message": "dashboard_name must be string or list"}), 400
-
-#         to_user_id = data.get("to_user_id") or data.get("to_username")
-#         # dashboard_name = data.get("dashboard_name")
-#         from_user = data.get("from_user")  # original user ID (who is sharing)
-#         company_name = data.get("company_name")
-#         print("user_id",user_id)
-#         print("dashboard_name",dashboard_name)
-#         if not all([to_user_id, dashboard_name, from_user, company_name]):
-#             print("Missing one or more required fields.")
-#             return jsonify({"message": "Missing required fields"}), 400
-
-#         conn = get_db_connection()
-#         if not conn:
-#             print("Database connection failed.")
-#             return jsonify({"message": "Failed to connect to database"}), 500
-
-#         cursor = conn.cursor(cursor_factory=RealDictCursor)
-
-#         # Step 1: Get original dashboard
-#         cursor.execute("""
-#             SELECT * FROM table_dashboard 
-#             WHERE user_id = %s AND file_name = %s AND company_name = %s
-#         """, (user_id, dashboard_name, company_name))
-#         original_dashboard = cursor.fetchone()
-
-#         if not original_dashboard:
-#             print("Original dashboard not found.")
-#             return jsonify({"message": "Original dashboard not found"}), 404
-
-#         print("Fetched original dashboard:", original_dashboard)
-#         raw_ids = original_dashboard['chart_ids']
-#         original_chart_ids = [int(id.strip()) for id in raw_ids.strip('{}').split(',') if id.strip()]
-
-#         # original_chart_ids = eval(original_dashboard['chart_ids'])  # assuming stored as list
-#         if not isinstance(original_chart_ids, list):
-#             print("chart_ids is not a list.")
-#             return jsonify({"message": "chart_ids should be a list"}), 400
-
-#         print("Original chart IDs:", original_chart_ids)
-
-#         new_chart_ids = []
-
-#         # Step 2: Copy each chart from table_chart_save
-#         # for old_chart_id in original_chart_ids:
-#         #     cursor.execute("""
-#         #         SELECT * FROM table_chart_save 
-#         #         WHERE id = %s 
-#         #     """, (old_chart_id, user_id))
-#         #     old_chart = cursor.fetchone()
-#         for old_chart_id in original_chart_ids:
-#             cursor.execute("""
-#                 SELECT * FROM table_chart_save 
-#                 WHERE id = %s
-#             """, (old_chart_id,))
-#             old_chart = cursor.fetchone()
-
-#             if not old_chart:
-#                 print(f"Chart not found for ID: {old_chart_id}")
-#                 continue
-
-#             # Ensure unique chart_id
-#             cursor.execute("SELECT MAX(id) FROM table_chart_save")
-#             last_chart_id = cursor.fetchone()['max'] or 0
-#             new_chart_id = last_chart_id + 1
-#             new_chart_ids.append(new_chart_id)
-#             print("new_chart_ids",new_chart_ids)
-#             cursor.execute("""
-#                 INSERT INTO table_chart_save (
-#                     id, user_id, company_name, chart_name, timestamp, database_name,
-#                     selected_table, x_axis, y_axis, aggregate, chart_type, chart_color, chart_heading,
-#                     drilldown_chart_color, filter_options, ai_chart_data, selectedUser,
-#                     xFontSize, fontStyle, categoryColor, yFontSize, valueColor, headingColor,
-#                     ClickedTool, Bgcolour, OptimizationData, calculationData, selectedFrequency,xAxisTitle, yAxisTitle
-#                 ) VALUES (
-#                     %s, %s, %s, %s, CURRENT_TIMESTAMP, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-#                     %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,%s,%s
-#                 )
-#             """, (
-#                 new_chart_id,
-#                 to_user_id,
-#                 old_chart["company_name"],
-#                 old_chart["chart_name"],
-#                 old_chart["database_name"],
-#                 old_chart["selected_table"],
-#                 old_chart["x_axis"],
-#                 old_chart["y_axis"],
-#                 old_chart["aggregate"],
-#                 old_chart["chart_type"],
-#                 old_chart["chart_color"],
-#                 old_chart["chart_heading"],
-#                 old_chart["drilldown_chart_color"],
-#                 json.dumps(old_chart["filter_options"]) if isinstance(old_chart["filter_options"], dict) else old_chart["filter_options"],
-#                 json.dumps(old_chart["ai_chart_data"]) if isinstance(old_chart["ai_chart_data"], dict) else old_chart["ai_chart_data"],
-#                 old_chart.get("selectedUser"),
-#                 old_chart.get("xFontSize"),
-#                 old_chart.get("fontStyle"),
-#                 old_chart.get("categoryColor"),
-#                 old_chart.get("yFontSize"),
-#                 old_chart.get("valueColor"),
-#                 old_chart.get("headingColor"),
-#                 old_chart.get("ClickedTool"),
-#                 old_chart.get("Bgcolour"),
-#                 json.dumps(old_chart.get("OptimizationData")) if isinstance(old_chart.get("OptimizationData"), dict) else old_chart.get("OptimizationData"),
-#                 json.dumps(old_chart.get("calculationData")) if isinstance(old_chart.get("calculationData"), dict) else old_chart.get("calculationData"),
-#                 old_chart.get("selectedFrequency"),
-#                 json.dumps(old_chart.get("xAxisTitle")) if isinstance(old_chart.get("xAxisTitle"), dict) else old_chart.get("xAxisTitle"),
-#                 json.dumps(old_chart.get("yAxisTitle")) if isinstance(old_chart.get("yAxisTitle"), dict) else old_chart.get("yAxisTitle")
-                
-               
-
-#             ))
-#             print(f"Copied chart {old_chart_id} to new chart {new_chart_id}")
-
-#         print("All new chart IDs:", new_chart_ids)
-
-#         # Step 3: Copy dashboard and insert under new user
-#         # new_dashboard_id = str(uuid.uuid4())
-#         # Ensure unique dashboard_id
-               
-#         cursor.execute("SELECT MAX(id) FROM table_dashboard")
-#         last_dashboard_id = cursor.fetchone()['max'] or 0
-#         new_dashboard_id = last_dashboard_id + 1
-
-#         # Get the original dashboard values
-#         original_dashboard_values = {
-#             "company_name": original_dashboard.get("company_name"),
-#             "file_name": original_dashboard.get("file_name"),
-#             "position": safe_json(original_dashboard.get("position")),
-#             "chart_size": safe_json(original_dashboard.get("chart_size")),
-#             "chart_type": safe_json(original_dashboard.get("chart_type")),
-#             "chart_xaxis": safe_json(original_dashboard.get("chart_xaxis")),
-#             "chart_yaxis": safe_json(original_dashboard.get("chart_yaxis")),
-#             "chart_aggregate": safe_json(original_dashboard.get("chart_aggregate")),
-#             "filterdata": safe_json(original_dashboard.get("filterdata")),
-#             "clicked_category": original_dashboard.get("clicked_category"),
-#             "heading": original_dashboard.get("heading"),
-#             "dashboard_name": original_dashboard.get("dashboard_name"),
-#             "chartcolor": safe_json(original_dashboard.get("chartcolor")),
-#             "droppablebgcolor": original_dashboard.get("droppablebgcolor"),
-#             "opacity": safe_json(original_dashboard.get("opacity")),
-#             "image_ids": safe_json(original_dashboard.get("image_ids", [])),
-#             "project_name": original_dashboard.get("project_name"),
-#             "font_style_state": original_dashboard.get("font_style_state"),
-#             "font_size": original_dashboard.get("font_size"),
-#             "font_color": original_dashboard.get("font_color"),
-#         }
-
-
-#         # The chart_ids field needs special handling for PostgreSQL array format
-#         chart_ids_str = f"{{{','.join(map(str, new_chart_ids))}}}"
-
-
-#         cursor.execute("""
-#             INSERT INTO table_dashboard (
-#                 id, user_id, company_name, file_name, chart_ids, position, chart_size,
-#                 chart_type, chart_xaxis, chart_yaxis, chart_aggregate, filterdata,
-#                 clicked_category, heading, dashboard_name, chartcolor,
-#                 droppablebgcolor, opacity, image_ids, project_name,
-#                 font_style_state, font_size, font_color
-#             ) VALUES (
-#                 %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-#                 %s, %s, %s, %s, %s, %s, %s
-#             )
-#         """, (
-#             new_dashboard_id,
-#             to_user_id,
-#             original_dashboard_values["company_name"],
-#             original_dashboard_values["file_name"],
-#             chart_ids_str,
-#             original_dashboard_values["position"],
-#             original_dashboard_values["chart_size"],
-#             original_dashboard_values["chart_type"],
-#             original_dashboard_values["chart_xaxis"],
-#             original_dashboard_values["chart_yaxis"],
-#             original_dashboard_values["chart_aggregate"],
-#             original_dashboard_values["filterdata"],
-#             original_dashboard_values["clicked_category"],
-#             original_dashboard_values["heading"],
-#             original_dashboard_values["dashboard_name"],
-#             original_dashboard_values["chartcolor"],
-#             original_dashboard_values["droppablebgcolor"],
-#             original_dashboard_values["opacity"],
-#             original_dashboard_values["image_ids"],
-#             original_dashboard_values["project_name"],
-#             original_dashboard_values["font_style_state"],
-#             original_dashboard_values["font_size"],
-#             original_dashboard_values["font_color"]
-#         ))
-
-
-
-#         print("Dashboard copied with new ID:", new_dashboard_id)
-
-#         conn.commit()
-#         # ✅ Step 4: Log activity
-#         try:
-#             # Fetch user email for logging
-#             # ✅ Fetch sender (from_user) details
-#             email_conn = connect_db(company_name)
-#             email_cur = email_conn.cursor()
-#             email_cur.execute(
-#                 "SELECT email, username FROM employee_list WHERE employee_id = %s;", 
-#                 (from_user,)
-#             )
-#             sender_result = email_cur.fetchone()
-
-#             if sender_result:
-#                 sender_email, sender_username = sender_result
-#             else:
-#                 sender_email, sender_username = "Unknown", "Unknown"
-
-#             # ✅ Fetch receiver (to_user_id) details
-#             email_cur.execute(
-#                 "SELECT email, username FROM employee_list WHERE employee_id = %s;", 
-#                 (to_user_id,)
-#             )
-#             receiver_result = email_cur.fetchone()
-
-#             if receiver_result:
-#                 receiver_email, receiver_username = receiver_result
-#             else:
-#                 receiver_email, receiver_username = "Unknown", "Unknown"
-
-#             email_cur.close()
-#             email_conn.close()
-
-#             # ✅ Log the activity
-#             log_activity(
-#                 user_email=sender_email,
-#                 action_type="Dashboard Shared",
-#                 description=(
-#                     f"Dashboard '{dashboard_name}' shared successfully by {sender_username} "
-#                     f"({sender_email}) to {receiver_username} ({receiver_email})."
-#                 ),
-#                 table_name="table_dashboard",
-#                 company_name=company_name,
-#                 dashboard_name=dashboard_name
-#             )
-
-#         except Exception as log_err:
-#             print("⚠️ Error logging dashboard share activity:", log_err)
-#         return jsonify({"message": "Dashboard shared successfully!"}), 200
-
-#     except Exception as e:
-#         print(f"Error in share_dashboard: {e}")
-#         return jsonify({"message": "Error sharing dashboard"}), 500
-
-#     finally:
-#         if conn:
-#             conn.close()
-
-# @app.route('/api/share_dashboard', methods=['POST'])
-# def share_dashboard():
-#     conn = None
-#     try:
-#         data = request.get_json()
-#         print("📩 Received Data:", data)
-
-#         dashboard_name_data = data.get("dashboard_name")
-#         to_user_id = data.get("to_user_id") or data.get("to_username")
-#         from_user = data.get("from_user")
-#         company_name = data.get("company_name")
-#         project_name = data.get("project_name")
-#         new_dashboard_name = data.get("new_dashboard_name")  # <-- rename parameter
-
-#         # Parse dashboard_name_data
-#         if isinstance(dashboard_name_data, list):
-#             if len(dashboard_name_data) == 2:
-#                 user_id, dashboard_name = dashboard_name_data
-#             else:
-#                 return jsonify({"message": "Invalid dashboard_name format"}), 400
-#         elif isinstance(dashboard_name_data, str):
-#             if "," in dashboard_name_data:
-#                 user_id, dashboard_name = dashboard_name_data.split(",", 1)
-#             else:
-#                 dashboard_name = dashboard_name_data
-#                 user_id = from_user
-#         else:
-#             return jsonify({"message": "dashboard_name must be string or list"}), 400
-
-#         if not all([to_user_id, dashboard_name, from_user, company_name]):
-#             return jsonify({"message": "Missing required fields"}), 400
-
-#         conn = get_db_connection()
-#         cursor = conn.cursor(cursor_factory=RealDictCursor)
-
-#         # ✅ Check if dashboard already exists for this user
-#         cursor.execute("""
-#             SELECT * FROM table_dashboard
-#             WHERE user_id = %s AND file_name = %s AND project_name=%s AND company_name = %s
-#         """, (to_user_id, dashboard_name,project_name, company_name))
-#         existing_dashboard = cursor.fetchone()
-
-#         if existing_dashboard and not new_dashboard_name:
-#             return jsonify({
-#                 "status": "exists",
-#                 "message": f"Dashboard '{dashboard_name}' already exists for this user.",
-#                 "dashboard_name": dashboard_name
-#             }), 409  # Conflict
-
-#         # ✅ Fetch the original dashboard
-#         cursor.execute("""
-#             SELECT * FROM table_dashboard 
-#             WHERE user_id = %s AND file_name = %s AND company_name = %s
-#         """, (user_id, dashboard_name, company_name))
-#         original_dashboard = cursor.fetchone()
-
-#         if not original_dashboard:
-#             return jsonify({"message": "Original dashboard not found"}), 404
-
-#         raw_ids = original_dashboard['chart_ids']
-#         original_chart_ids = [int(id.strip()) for id in raw_ids.strip('{}').split(',') if id.strip()]
-#         new_chart_ids = []
-
-#         # ✅ Copy charts to new user
-#         for old_chart_id in original_chart_ids:
-#             cursor.execute("SELECT * FROM table_chart_save WHERE id = %s", (old_chart_id,))
-#             old_chart = cursor.fetchone()
-#             if not old_chart:
-#                 continue
-
-#             cursor.execute("SELECT MAX(id) FROM table_chart_save")
-#             last_chart_id = cursor.fetchone()['max'] or 0
-#             new_chart_id = last_chart_id + 1
-#             new_chart_ids.append(new_chart_id)
-
-#             cursor.execute("""
-#                 INSERT INTO table_chart_save (
-#                     id, user_id, company_name, chart_name, timestamp, database_name,
-#                     selected_table, x_axis, y_axis, aggregate, chart_type, chart_color, chart_heading,
-#                     drilldown_chart_color, filter_options, ai_chart_data, selectedUser,
-#                     xFontSize, fontStyle, categoryColor, yFontSize, valueColor, headingColor,
-#                     ClickedTool, Bgcolour, OptimizationData, calculationData, selectedFrequency,
-#                     xAxisTitle, yAxisTitle
-#                 ) VALUES (
-#                     %s, %s, %s, %s, CURRENT_TIMESTAMP, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-#                     %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
-#                 )
-#             """, (
-#                 new_chart_id, to_user_id, old_chart["company_name"], old_chart["chart_name"],
-#                 old_chart["database_name"], old_chart["selected_table"], old_chart["x_axis"],
-#                 old_chart["y_axis"], old_chart["aggregate"], old_chart["chart_type"],
-#                 old_chart["chart_color"], old_chart["chart_heading"], old_chart["drilldown_chart_color"],
-#                 json.dumps(old_chart["filter_options"]) if isinstance(old_chart["filter_options"], dict) else old_chart["filter_options"],
-#                 json.dumps(old_chart["ai_chart_data"]) if isinstance(old_chart["ai_chart_data"], dict) else old_chart["ai_chart_data"],
-#                 old_chart.get("selectedUser"), old_chart.get("xFontSize"), old_chart.get("fontStyle"),
-#                 old_chart.get("categoryColor"), old_chart.get("yFontSize"), old_chart.get("valueColor"),
-#                 old_chart.get("headingColor"), old_chart.get("ClickedTool"), old_chart.get("Bgcolour"),
-#                 json.dumps(old_chart.get("OptimizationData")) if isinstance(old_chart.get("OptimizationData"), dict) else old_chart.get("OptimizationData"),
-#                 json.dumps(old_chart.get("calculationData")) if isinstance(old_chart.get("calculationData"), dict) else old_chart.get("calculationData"),
-#                 old_chart.get("selectedFrequency"),
-#                 json.dumps(old_chart.get("xAxisTitle")) if isinstance(old_chart.get("xAxisTitle"), dict) else old_chart.get("xAxisTitle"),
-#                 json.dumps(old_chart.get("yAxisTitle")) if isinstance(old_chart.get("yAxisTitle"), dict) else old_chart.get("yAxisTitle")
-#             ))
-
-#         # ✅ Insert new dashboard with renamed or same name
-#         cursor.execute("SELECT MAX(id) FROM table_dashboard")
-#         last_dashboard_id = cursor.fetchone()['max'] or 0
-#         new_dashboard_id = last_dashboard_id + 1
-#         chart_ids_str = f"{{{','.join(map(str, new_chart_ids))}}}"
-#         target_dashboard_name = new_dashboard_name or dashboard_name
-
-#         cursor.execute("""
-#             INSERT INTO table_dashboard (
-#                 id, user_id, company_name, file_name, chart_ids, position, chart_size,
-#                 chart_type, chart_xaxis, chart_yaxis, chart_aggregate, filterdata,
-#                 clicked_category, heading, dashboard_name, chartcolor,
-#                 droppablebgcolor, opacity, image_ids, project_name,
-#                 font_style_state, font_size, font_color
-#             )
-#             SELECT
-#                 %s, %s, company_name, %s, %s, position, chart_size,
-#                 chart_type, chart_xaxis, chart_yaxis, chart_aggregate, filterdata,
-#                 clicked_category, heading, dashboard_name, chartcolor,
-#                 droppablebgcolor, opacity, image_ids, project_name,
-#                 font_style_state, font_size, font_color
-#             FROM table_dashboard WHERE id = %s
-#         """, (
-#             new_dashboard_id, to_user_id, target_dashboard_name,
-#             chart_ids_str, original_dashboard["id"]
-#         ))
-
-#         conn.commit()
-#         print(f"✅ Shared successfully as '{target_dashboard_name}'")
-
-#         return jsonify({
-#             "status": "success",
-#             "message": f"Dashboard shared successfully as '{target_dashboard_name}'!"
-#         }), 200
-
-#     except Exception as e:
-#         print("❌ Error:", e)
-#         return jsonify({"message": "Error sharing dashboard", "error": str(e)}), 500
-
-#     finally:
-#         if conn:
-#             conn.close()
 @app.route('/api/share_dashboard', methods=['POST'])
 def share_dashboard():
     conn = None
@@ -12581,257 +9683,6 @@ def share_dashboard():
         original_chart_ids = [int(i.strip()) for i in raw_ids.strip('{}').split(',') if i.strip()]
         chart_ids_str = None
 
-        # ✅ If update: reuse existing chart_ids, update their contents
-        # if existing_dashboard and action == "update" and not new_dashboard_name:
-        #     print(f"🔄 Updating existing dashboard '{dashboard_name}'...")
-
-        #     existing_chart_ids = [
-        #         int(i.strip()) for i in existing_dashboard['chart_ids'].strip('{}').split(',') if i.strip()
-        #     ]
-
-        #     for old_chart_id, existing_chart_id in zip(original_chart_ids, existing_chart_ids):
-        #         cursor.execute("SELECT * FROM table_chart_save WHERE id=%s", (old_chart_id,))
-        #         old_chart = cursor.fetchone()
-        #         if not old_chart:
-        #             continue
-
-        #         cursor.execute("""
-        #             UPDATE table_chart_save SET
-        #                 company_name=%s, chart_name=%s, timestamp=CURRENT_TIMESTAMP, database_name=%s,
-        #                 selected_table=%s, x_axis=%s, y_axis=%s, aggregate=%s, chart_type=%s,
-        #                 chart_color=%s, chart_heading=%s, drilldown_chart_color=%s, filter_options=%s,
-        #                 ai_chart_data=%s, selectedUser=%s, xfontsize=%s, fontStyle=%s, categoryColor=%s,
-        #                 yfontsize=%s, valueColor=%s, headingColor=%s, ClickedTool=%s, Bgcolour=%s,
-        #                 OptimizationData=%s, calculationData=%s, selectedFrequency=%s,
-        #                 xAxisTitle=%s, yAxisTitle=%s
-        #             WHERE id=%s
-        #         """, (
-        #             old_chart["company_name"],
-        #             old_chart["chart_name"],
-        #             old_chart["database_name"],
-        #             old_chart["selected_table"],
-        #             old_chart["x_axis"],
-        #             old_chart["y_axis"],
-        #             old_chart["aggregate"],
-        #             old_chart["chart_type"],
-        #             old_chart["chart_color"],
-        #             old_chart["chart_heading"],
-        #             old_chart["drilldown_chart_color"],
-        #             json.dumps(old_chart["filter_options"]) if isinstance(old_chart.get("filter_options"), dict) else old_chart.get("filter_options"),
-        #             json.dumps(old_chart["ai_chart_data"]) if isinstance(old_chart.get("ai_chart_data"), dict) else old_chart.get("ai_chart_data"),
-        #             old_chart.get("selectedUser"),
-        #             old_chart.get("xFontSize"),
-        #             old_chart.get("fontStyle"),
-        #             old_chart.get("categoryColor"),
-        #             old_chart.get("yFontSize"),
-        #             old_chart.get("valueColor"),
-        #             old_chart.get("headingColor"),
-        #             old_chart.get("ClickedTool"),
-        #             old_chart.get("Bgcolour"),
-        #             json.dumps(old_chart.get("OptimizationData")) if isinstance(old_chart.get("OptimizationData"), dict) else old_chart.get("OptimizationData"),
-        #             json.dumps(old_chart.get("calculationData")) if isinstance(old_chart.get("calculationData"), dict) else old_chart.get("calculationData"),
-        #             old_chart.get("selectedFrequency"),
-        #             json.dumps(old_chart.get("xAxisTitle")) if isinstance(old_chart.get("xAxisTitle"), dict) else old_chart.get("xAxisTitle"),
-        #             json.dumps(old_chart.get("yAxisTitle")) if isinstance(old_chart.get("yAxisTitle"), dict) else old_chart.get("yAxisTitle"),
-        #             existing_chart_id
-        #         ))
-
-        #     chart_ids_str = existing_dashboard["chart_ids"]
-
-        #     # ✅ Update dashboard layout and style
-        #     cursor.execute("""
-        #         UPDATE table_dashboard
-        #         SET chart_ids = %s,
-        #             position = %s,
-        #             chart_size = %s,
-        #             chart_type = %s,
-        #             chart_xaxis = %s,
-        #             chart_yaxis = %s,
-        #             chart_aggregate = %s,
-        #             filterdata = %s,
-        #             font_style_state = %s,
-        #             font_size = %s,
-        #             font_color = %s,
-        #             clicked_category = %s,
-        #             heading = %s,
-        #             dashboard_name = %s,
-        #             chartcolor = %s,
-        #             droppablebgcolor = %s,
-        #             opacity = %s,
-        #             image_ids = %s,
-        #             updated_at = CURRENT_TIMESTAMP
-        #         WHERE id = %s
-        #     """, (
-        #         chart_ids_str,
-        #         safe_json(original_dashboard.get("position")),
-        #         safe_json(original_dashboard.get("chart_size")),
-        #         safe_json(original_dashboard.get("chart_type")),
-        #         safe_json(original_dashboard.get("chart_xaxis")),
-        #         safe_json(original_dashboard.get("chart_yaxis")),
-        #         safe_json(original_dashboard.get("chart_aggregate")),
-        #         safe_json(original_dashboard.get("filterdata")),
-        #         original_dashboard.get("font_style_state"),
-        #         original_dashboard.get("font_size"),
-        #         original_dashboard.get("font_color"),
-        #         original_dashboard.get("clicked_category"),
-        #         original_dashboard.get("heading"),
-        #         original_dashboard.get("dashboard_name"),
-        #         safe_json(original_dashboard.get("chartcolor")),
-        #         original_dashboard.get("droppablebgcolor"),
-        #         safe_json(original_dashboard.get("opacity")),
-        #         safe_json(original_dashboard.get("image_ids")),
-        #         existing_dashboard["id"]
-        #     ))
-
-        #     conn.commit()
-        #     print("✅ Dashboard updated successfully (charts reused).")
-        #     return jsonify({
-        #         "status": "updated",
-        #         "message": f"Dashboard '{dashboard_name}' updated successfully using existing chart IDs."
-        #     }), 200
-        # ✅ If update: reuse existing chart_ids, update their contents
-        # if existing_dashboard and action == "update" and not new_dashboard_name:
-        #     print(f"🔄 Updating existing dashboard '{dashboard_name}'...")
-
-        #     existing_chart_ids = [
-        #         int(i.strip()) for i in existing_dashboard['chart_ids'].strip('{}').split(',') if i.strip()
-        #     ]
-
-        #     # --- Case 1: Update charts that exist in both original and target ---
-        #     for old_chart_id, existing_chart_id in zip(original_chart_ids[:len(existing_chart_ids)], existing_chart_ids):
-        #         cursor.execute("SELECT * FROM table_chart_save WHERE id=%s", (old_chart_id,))
-        #         old_chart = cursor.fetchone()
-        #         if not old_chart:
-        #             continue
-
-        #         cursor.execute("""
-        #             UPDATE table_chart_save SET
-        #                 company_name=%s, chart_name=%s, timestamp=CURRENT_TIMESTAMP, database_name=%s,
-        #                 selected_table=%s, x_axis=%s, y_axis=%s, aggregate=%s, chart_type=%s,
-        #                 chart_color=%s, chart_heading=%s, drilldown_chart_color=%s, filter_options=%s,
-        #                 ai_chart_data=%s, selectedUser=%s, xfontsize=%s, fontStyle=%s, categoryColor=%s,
-        #                 yfontsize=%s, valueColor=%s, headingColor=%s, ClickedTool=%s, Bgcolour=%s,
-        #                 OptimizationData=%s, calculationData=%s, selectedFrequency=%s,
-        #                 xAxisTitle=%s, yAxisTitle=%s
-        #             WHERE id=%s
-        #         """, (
-        #             old_chart["company_name"],
-        #             old_chart["chart_name"],
-        #             old_chart["database_name"],
-        #             old_chart["selected_table"],
-        #             old_chart["x_axis"],
-        #             old_chart["y_axis"],
-        #             old_chart["aggregate"],
-        #             old_chart["chart_type"],
-        #             old_chart["chart_color"],
-        #             old_chart["chart_heading"],
-        #             old_chart["drilldown_chart_color"],
-        #             json.dumps(old_chart["filter_options"]) if isinstance(old_chart.get("filter_options"), dict) else old_chart.get("filter_options"),
-        #             json.dumps(old_chart["ai_chart_data"]) if isinstance(old_chart.get("ai_chart_data"), dict) else old_chart.get("ai_chart_data"),
-        #             old_chart.get("selectedUser"),
-        #             old_chart.get("xfontsize"),
-        #             old_chart.get("fontStyle"),
-        #             old_chart.get("categoryColor"),
-        #             old_chart.get("yfontsize"),
-        #             old_chart.get("valueColor"),
-        #             old_chart.get("headingColor"),
-        #             old_chart.get("ClickedTool"),
-        #             old_chart.get("Bgcolour"),
-        #             json.dumps(old_chart.get("OptimizationData")) if isinstance(old_chart.get("OptimizationData"), dict) else old_chart.get("OptimizationData"),
-        #             json.dumps(old_chart.get("calculationData")) if isinstance(old_chart.get("calculationData"), dict) else old_chart.get("calculationData"),
-        #             old_chart.get("selectedFrequency"),
-        #             json.dumps(old_chart.get("xAxisTitle")) if isinstance(old_chart.get("xAxisTitle"), dict) else old_chart.get("xAxisTitle"),
-        #             json.dumps(old_chart.get("yAxisTitle")) if isinstance(old_chart.get("yAxisTitle"), dict) else old_chart.get("yAxisTitle"),
-        #             existing_chart_id
-        #         ))
-
-        #     # --- Case 2: Original dashboard has extra charts (create new ones) ---
-        #     if len(original_chart_ids) > len(existing_chart_ids):
-        #         print("➕ Original dashboard has new charts, copying extra ones...")
-        #         for old_chart_id in original_chart_ids[len(existing_chart_ids):]:
-        #             cursor.execute("SELECT * FROM table_chart_save WHERE id=%s", (old_chart_id,))
-        #             old_chart = cursor.fetchone()
-        #             if not old_chart:
-        #                 continue
-
-        #             cursor.execute("SELECT COALESCE(MAX(id), 0) AS max_id FROM table_chart_save")
-        #             new_chart_id = cursor.fetchone()["max_id"] + 1
-
-        #             cursor.execute("""
-        #                 INSERT INTO table_chart_save (
-        #                     id, user_id, company_name, chart_name, timestamp, database_name,
-        #                     selected_table, x_axis, y_axis, aggregate, chart_type, chart_color, chart_heading,
-        #                     drilldown_chart_color, filter_options, ai_chart_data, selectedUser,
-        #                     xfontsize, fontStyle, categoryColor, yfontsize, valueColor, headingColor,
-        #                     ClickedTool, Bgcolour, OptimizationData, calculationData, selectedFrequency,
-        #                     xAxisTitle, yAxisTitle
-        #                 )
-        #                 SELECT
-        #                     %s, %s, company_name, chart_name, CURRENT_TIMESTAMP, database_name,
-        #                     selected_table, x_axis, y_axis, aggregate, chart_type, chart_color, chart_heading,
-        #                     drilldown_chart_color, filter_options, ai_chart_data, selectedUser,
-        #                     xfontsize, fontStyle, categoryColor, yfontsize, valueColor, headingColor,
-        #                     ClickedTool, Bgcolour, OptimizationData, calculationData, selectedFrequency,
-        #                     xAxisTitle, yAxisTitle
-        #                 FROM table_chart_save WHERE id=%s
-        #             """, (new_chart_id, to_user_id, old_chart_id))
-
-        #             existing_chart_ids.append(new_chart_id)  # append to list
-
-        #     # --- Update the dashboard record with all chart_ids (old + new) ---
-        #     chart_ids_str = f"{{{','.join(map(str, existing_chart_ids))}}}"
-
-        #     cursor.execute("""
-        #         UPDATE table_dashboard
-        #         SET chart_ids = %s,
-        #             position = %s,
-        #             chart_size = %s,
-        #             chart_type = %s,
-        #             chart_xaxis = %s,
-        #             chart_yaxis = %s,
-        #             chart_aggregate = %s,
-        #             filterdata = %s,
-        #             font_style_state = %s,
-        #             font_size = %s,
-        #             font_color = %s,
-        #             clicked_category = %s,
-        #             heading = %s,
-        #             dashboard_name = %s,
-        #             chartcolor = %s,
-        #             droppablebgcolor = %s,
-        #             opacity = %s,
-        #             image_ids = %s,
-        #             updated_at = CURRENT_TIMESTAMP
-        #         WHERE id = %s
-        #     """, (
-        #         chart_ids_str,
-        #         safe_json(original_dashboard.get("position")),
-        #         safe_json(original_dashboard.get("chart_size")),
-        #         safe_json(original_dashboard.get("chart_type")),
-        #         safe_json(original_dashboard.get("chart_xaxis")),
-        #         safe_json(original_dashboard.get("chart_yaxis")),
-        #         safe_json(original_dashboard.get("chart_aggregate")),
-        #         safe_json(original_dashboard.get("filterdata")),
-        #         original_dashboard.get("font_style_state"),
-        #         original_dashboard.get("font_size"),
-        #         original_dashboard.get("font_color"),
-        #         original_dashboard.get("clicked_category"),
-        #         original_dashboard.get("heading"),
-        #         original_dashboard.get("dashboard_name"),
-        #         safe_json(original_dashboard.get("chartcolor")),
-        #         original_dashboard.get("droppablebgcolor"),
-        #         safe_json(original_dashboard.get("opacity")),
-        #         safe_json(original_dashboard.get("image_ids")),
-        #         existing_dashboard["id"]
-        #     ))
-
-        #     conn.commit()
-        #     print("✅ Dashboard updated successfully (including new charts if any).")
-
-        #     return jsonify({
-        #         "status": "updated",
-        #         "message": f"Dashboard '{dashboard_name}' updated successfully (new charts added if any)."
-        #     }), 200
         if existing_dashboard and action == "update" and not new_dashboard_name:
             print(f"🔄 Updating existing dashboard '{dashboard_name}'...")
 
@@ -13271,58 +10122,6 @@ def reset_password():
         print("Error in reset_password:", str(e))
         return jsonify({"message": "Invalid or expired token"}), 400
 import requests
-# @app.route('/fetch-api', methods=['POST'])
-# def fetch_api_data(): 
-#     try: 
-#         data = request.json 
-#         api_url = data.get('apiUrl') 
-#         if not api_url: 
-#             return jsonify({"error": "API URL is required"}), 400 # Fetch data from the provided API 
-#         response = requests.get(api_url) 
-#         response.raise_for_status() # Raise error for bad response 
-#         api_data = response.json() # Return fetched data 
-#         return jsonify(api_data) 
-#         print("api_data",api_data)
-#     except requests.exceptions.RequestException as e: 
-#         return jsonify({"error": str(e)}), 500 
-#     except Exception as e: 
-#         return jsonify({"error": str(e)}), 500
-# @app.route('/fetch-api', methods=['POST'])
-# def fetch_api_data():
-#     try:
-#         data = request.json
-#         api_url = data.get('apiUrl')
-#         method = data.get('method', 'GET').upper()
-#         headers = data.get('headers', {})
-#         body = data.get('body', None)
-
-#         if not api_url:
-#             return jsonify({"error": "API URL is required"}), 400
-
-#         if method == 'POST':
-#             response = requests.post(api_url, json=body, headers=headers)
-#         else:
-#             response = requests.get(api_url, headers=headers)
-
-#         response.raise_for_status()
-
-#         try:
-#             api_data = response.json()
-#         except ValueError:
-#             return jsonify({"error": "Response is not valid JSON"}), 400
-
-#         return jsonify({
-#             "status": "success",
-#             "source_url": api_url,
-#             "data_type": type(api_data).__name__,
-#             "data": api_data
-#         })
-
-#     except requests.exceptions.RequestException as e:
-#         return jsonify({"error": f"API request failed: {str(e)}"}), 500
-#     except Exception as e:
-#         return jsonify({"error": f"Unexpected error: {str(e)}"}), 500
-
 
 @app.route('/fetch-api', methods=['POST'])
 @token_required
@@ -13361,55 +10160,6 @@ def fetch_api_data():
         return jsonify({"error": f"API request failed: {str(e)}"}), 500
     except Exception as e:
         return jsonify({"error": f"Unexpected error: {str(e)}"}), 500
-# @app.route('/save-api-data', methods=['POST'])
-# def save_api_data():
-#     try:
-#         data = request.json
-#         dataset = data.get('data')
-#         print("Data to save:", dataset)
-#         # Add logic here to save to your PostgreSQL / MongoDB
-#         return jsonify({"message": "Data saved successfully"})
-#     except Exception as e:
-#         return jsonify({"error": str(e)}), 500
-
-# @app.route('/save-api-data', methods=['POST'])
-# def save_api_data():
-#     try:
-#         data = request.json
-#         dataset = data.get('data')
-#         database_name = request.form.get('company_database')
-#         primary_key_column = data.get('primary_key_column', None)
-#         table_name = request.form.get("table_name")
-
-#         import tempfile
-#         if not all([dataset, database_name, username, password]):
-#             return jsonify({"error": "Missing required parameters"}), 400
-
-#         # 🔹 Save dataset temporarily as JSON file
-#         with tempfile.NamedTemporaryFile(delete=False, suffix=".json") as temp_file:
-#             json.dump(dataset, temp_file, indent=4)
-#             temp_file_path = temp_file.name
-
-#         print(f"✅ JSON temporarily saved at: {temp_file_path}")
-
-#         # 🔹 Call your upload function
-#         result = upload_json_to_postgresql(
-#             database_name,
-#             username,
-#             password,
-#             temp_file_path,
-#             primary_key_column,
-#             host,
-#             port
-#         )
-
-#         # Cleanup temp file
-#         os.remove(temp_file_path)
-
-#         return jsonify({"message": "Data saved successfully", "result": result})
-
-#     except Exception as e:
-#         return jsonify({"error": str(e)}), 500
 
 @app.route('/save-api-data', methods=['POST'])
 @token_required
@@ -13427,14 +10177,6 @@ def save_api_data():
             return jsonify({"error": "Missing required parameters"}), 400
 
         dataset = json.loads(data_json)
-        
-        # # 🔹 Save dataset temporarily as JSON file
-        # with tempfile.NamedTemporaryFile(delete=False, suffix=".json") as temp_file:
-        #     json.dump(dataset, temp_file, indent=4)
-        #     temp_file_path = temp_file.name
-
-        # print(f"✅ JSON temporarily saved at: {temp_file_path}")
-        # 🔹 Save dataset as a JSON “template” in tmp/
         os.makedirs('tmp', exist_ok=True)
         json_file_name = secure_filename(f"{table_name}_template.json")
         temp_file_path = os.path.join('tmp', json_file_name)
@@ -13464,85 +10206,6 @@ def save_api_data():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-# @app.route('/api/system_summary', methods=['GET'])
-# def system_summary():
-#     try:
-#         company_name = request.args.get('company_name')
-#         user_id = request.args.get('user_id')
-
-#         if not company_name:
-#             return jsonify({"error": "Company name is required"}), 400
-
-#         # ---- 1️⃣ Connect to the main (admin) DB ----
-#         admin_conn = get_company_db_connection(company_name)
-#         admin_cur = admin_conn.cursor()
-
-#         # ---- 2️⃣ Connect to the company’s own database ----
-#         conn = get_db_connection()
-#         cur = conn.cursor()
-
-#         # ---- 3️⃣ Count total tables in the company DB ----
-#         admin_cur.execute("""
-#             SELECT COUNT(*) 
-#             FROM information_schema.tables 
-#             WHERE table_schema = 'public';
-#         """)
-#         num_tables = admin_cur.fetchone()[0]
-
-#         # ---- 4️⃣ Fetch last updated table from admin DB ----
-#         admin_cur.execute("""
-#             SELECT data_source_name
-#             FROM datasource
-#             ORDER BY id DESC
-#             LIMIT 1;
-#                 """)
-
-#         latest_table = admin_cur.fetchone()
-
-#         # Extract table name safely
-#         latest_table_name = latest_table[0] if latest_table else None
-
-
-#         # ---- 5️⃣ Fetch total projects from table_dashboard (unique project_name) ----
-#         cur.execute("""
-#             SELECT COUNT(DISTINCT project_name)
-#             FROM table_dashboard
-#             WHERE company_name = %s AND user_id = %s;
-#         """, (company_name, user_id))
-#         total_projects = cur.fetchone()[0] or 0
-
-#         # # ---- 6️⃣ Fetch last data transfer info ----
-#         # cur.execute("""
-#         #     SELECT last_transfer_time, status
-#         #     FROM last_transfer_status
-#         #     WHERE company_name = %s
-#         #     ORDER BY last_transfer_time DESC
-#         #     LIMIT 1;
-#         # """, (company_name,))
-#         # last_transfer = cur.fetchone()
-
-#         # last_transfer_time = last_transfer[0] if last_transfer else None
-#         # transfer_status = last_transfer[1] if last_transfer else "Unknown"
-
-#         # ---- ✅ Close all connections ----
-#         cur.close()
-#         conn.close()
-#         admin_cur.close()
-#         admin_conn.close()
-
-#         # ---- ✅ Return system summary ----
-#         return jsonify({
-#             "num_tables": num_tables,
-#             "latest_table": latest_table_name,
-#             "total_projects": total_projects,
-#             # "last_transfer_time": last_transfer_time,
-#             # "transfer_status": transfer_status
-#         })
-
-#     except Exception as e:
-#         print("Error:", e)
-#         return jsonify({"error": str(e)}), 500
-
 @app.route('/api/system_summary', methods=['GET'])
 # @token_required
 def system_summary():
@@ -13560,13 +10223,6 @@ def system_summary():
         conn = get_db_connection()
         cur = conn.cursor()
 
-        # ---- 2️⃣ Count total tables ----
-        # admin_cur.execute("""
-        #     SELECT COUNT(*) 
-        #     FROM information_schema.tables 
-        #     WHERE table_schema = 'public';
-        # """)
-        # num_tables = admin_cur.fetchone()[0]
         admin_cur.execute("""
             SELECT COUNT(*)
             FROM information_schema.tables
@@ -13574,17 +10230,6 @@ def system_summary():
             AND table_name NOT IN ('category', 'role', 'role_permission', 'user', 'employee_list', 'datasource');
         """)
         num_tables = admin_cur.fetchone()[0]
-
-
-        # ---- 3️⃣ Fetch latest updated table ----
-        # admin_cur.execute("""
-        #     SELECT data_source_name
-        #     FROM datasource
-        #     ORDER BY id DESC
-        #     LIMIT 1;
-        # """)
-        # latest_table = admin_cur.fetchone()
-        # latest_table_name = latest_table[0] if latest_table else "N/A"
         admin_cur.execute("""
             SELECT data_source_name, created_at
             FROM datasource
@@ -13611,9 +10256,6 @@ def system_summary():
             last_table_name, last_transfer_time, transfer_status = last_transfer
         else:
             last_table_name, last_transfer_time, transfer_status = "N/A", None, "Unknown"
-
-
-
         # ---- 4️⃣ Fetch total projects ----
         cur.execute("""
             SELECT COUNT(DISTINCT project_name)
@@ -14071,31 +10713,7 @@ def get_org_license_status():
             return jsonify({'message': 'No license assigned yet ⚠️'}), 200
     except Exception as e:
         return jsonify({'error': str(e)}), 500
-# @app.route("/check_company_plan/<int:company_id>", methods=["GET"])
-# def check_company_plan(company_id):
-#     conn = get_db_connection()
-#     cur = conn.cursor()
 
-#     cur.execute("""
-#         SELECT p.plan_name, cl.start_date, cl.end_date, cl.is_active
-#         FROM organization_license cl
-#         JOIN license_plan p ON cl.plan_id = p.id
-#         WHERE cl.company_id = %s AND cl.is_active = TRUE
-#     """, (company_id,))
-
-#     plan = cur.fetchone()
-#     cur.close()
-#     conn.close()
-
-#     if plan:
-#         return jsonify({
-#             "active": True,
-#             "plan_name": plan[0],
-#             "start_date": plan[1],
-#             "end_date": plan[2]
-#         })
-#     else:
-#         return jsonify({"active": False})
 @app.route("/check_company_plan/<int:company_id>", methods=["GET"])
 @token_required
 def check_company_plan(company_id):
@@ -14376,10 +10994,6 @@ def check_login_status_route():
     cur = None
     try:
         data = request.get_json()
-        
-        # 1. Extract required parameters
-        # user_id is passed but not strictly needed for this specific query, 
-        # but login_id is mandatory.
         login_id = data.get('login_id')
         
         if not login_id:
