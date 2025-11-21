@@ -372,7 +372,7 @@ def test_db():
 
 def upload_file_excel():
     try:
-        create_table()
+        # create_table()
         
         # Validate required form data
         database_name = request.form.get('company_database')
@@ -492,7 +492,7 @@ def upload_file_excel():
 
 def upload_file_csv():
     try:
-        create_table()  # Ensure table structure exists
+        # create_table()  # Ensure table structure exists
         
         # Validate required form data
         database_name = request.form.get('company_database')
