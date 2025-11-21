@@ -3445,10 +3445,16 @@ def perform_calculation(dataframe, columnName, calculation):
         raise ValueError(f"Failed to evaluate general expression: {str(e)}")
 
 
-def fetchText_data(databaseName, table_Name, x_axis, aggregate_py,selectedUser):
+def fetchText_data(databaseName, table_Name, x_axis, aggregate,selectedUser):
     # print("aggregate===========================>>>>", aggregate_py)   
     print(table_Name)
-    
+    aggregate_py = {
+    'count': 'count',
+    'sum': 'sum',
+    'average': 'mean',
+    'minimum': 'min',
+    'maximum': 'max'
+}.get(aggregate, 'sum')  # Default to 'sum' if no match
 
     
     conn = get_db_connection_or_path(selectedUser, databaseName)
