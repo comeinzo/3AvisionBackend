@@ -8123,7 +8123,7 @@ def check_filename(fileName, company_name):
     try:
         conn = get_db_connection()
         cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-        create_dashboard_table(conn)
+        # create_dashboard_table(conn)
         
         # Query to check if the file name exists for the given company name
         query = """
