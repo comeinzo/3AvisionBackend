@@ -2144,7 +2144,76 @@ def get_bar_chart_route():
         print("Single treeHierarchy chart")
 
         try:
-            
+            temp_df = new_df.copy()
+            # ============== DATE GRANULARITY PROCESSING ==============
+            # Handle date granularity - convert date columns to specified granularity
+            if dateGranularity and isinstance(dateGranularity, dict):
+                for date_col, granularity in dateGranularity.items():
+                    if date_col in temp_df.columns and date_col in x_axis_columns:
+                        print(f"Applying date granularity: {date_col} -> {granularity}")
+                        
+                        # Ensure the column is datetime
+                        temp_df[date_col] = pd.to_datetime(temp_df[date_col], errors='coerce')
+                        
+                        # Create new column name for the granularity
+                        granularity_col = f"{date_col}_{granularity}"
+                        
+                        # Extract based on granularity
+                        granularity_lower = granularity.lower()
+                        if granularity_lower == 'year':
+                            temp_df[granularity_col] = temp_df[date_col].dt.year.astype(str)
+                        elif granularity_lower == 'quarter':
+                            temp_df[granularity_col] = 'Q' + temp_df[date_col].dt.quarter.astype(str)
+                        elif granularity_lower == 'month':
+                            # Extract month as full name (January, February, etc.)
+                            temp_df[granularity_col] = temp_df[date_col].dt.strftime('%B')
+                        elif granularity_lower == 'week':
+                            # Week number with year (e.g., "Week 1", "Week 2")
+                            temp_df[granularity_col] = 'Week ' + temp_df[date_col].dt.isocalendar().week.astype(str)
+                        elif granularity_lower == 'day':
+                            temp_df[granularity_col] = temp_df[date_col].dt.date.astype(str)
+                        # FORMAT X-AXIS DATE PROPERLY AND MAKE SURE GROUPING WORKS
+                        # if granularity_lower == 'year':
+                        #     temp_df[granularity_col] = temp_df[date_col].dt.to_period("Y").dt.to_timestamp()
+
+                        # elif granularity_lower == 'quarter':
+                        #     temp_df[granularity_col] = temp_df[date_col].dt.to_period("Q").dt.to_timestamp()
+
+                        # elif granularity_lower == 'month':
+                        #     temp_df[granularity_col] = temp_df[date_col].dt.to_period("M").dt.to_timestamp()
+
+                        # elif granularity_lower == 'week':
+                        #     temp_df[granularity_col] = temp_df[date_col].dt.to_period("W").dt.to_timestamp()
+
+                        # elif granularity_lower == 'day':
+                        #     temp_df[granularity_col] = temp_df[date_col].dt.normalize()
+
+                        else:
+                            raise ValueError(f"Unsupported date granularity: {granularity}")
+                        
+                        # Replace the date column in x_axis_columns with the granularity column
+                        x_axis_columns = [granularity_col if col == date_col else col for col in x_axis_columns]
+                        
+                        print(f"Created granularity column '{granularity_col}' from '{date_col}'")
+                        print(f"Sample values: {temp_df[granularity_col].head()}")
+                    # ============== END DATE GRANULARITY PROCESSING ==============
+
+                    x_axis_columns_str = x_axis_columns
+
+                    # Build filter options for x-axis
+                    options = []
+                    for col in x_axis_columns:
+                        if col in filter_options:
+                            options.extend(filter_options[col])
+                    options = list(map(str, options))
+                    # print("options:", options)
+
+                    # Filter again based on x-axis
+                    if options:
+                        new_df = temp_df[temp_df[x_axis_columns[0]].isin(options)]
+                    else:
+                        new_df = temp_df
+                    
             # Check if we need aggregation
             if aggregation and y_axis_columns:
                 if aggregation == "sum":
@@ -2787,43 +2856,196 @@ def get_edit_chart_route():
     
     elif chartType  == "tablechart"  and len(x_axis_columns) > 0: 
     # elif chartType == "treeHierarchy" and len(x_axis_columns) > 0:  # Tree Hierarchy logic
-        print("treeHierarchy-----------------------------")
+        # print("treeHierarchy-----------------------------")
+        # try:
+        #     conn = get_company_db_connection(db_nameeee)
+
+        #     new_df = fetch_chart_data(conn, table_name)
+        #     # new_df = fetch_tree_data(db_nameeee, table_name, x_axis_columns, y_axis_columns,checked_option, selectedUser)
+        #     temp_df = new_df.copy()
+        #     # ============== DATE GRANULARITY PROCESSING ==============
+        #     # Handle date granularity - convert date columns to specified granularity
+        #     if dateGranularity and isinstance(dateGranularity, dict):
+        #         for date_col, granularity in dateGranularity.items():
+        #             if date_col in temp_df.columns and date_col in x_axis_columns:
+        #                 print(f"Applying date granularity: {date_col} -> {granularity}")
+                        
+        #                 # Ensure the column is datetime
+        #                 temp_df[date_col] = pd.to_datetime(temp_df[date_col], errors='coerce')
+                        
+        #                 # Create new column name for the granularity
+        #                 granularity_col = f"{date_col}_{granularity}"
+                        
+        #                 # Extract based on granularity
+        #                 granularity_lower = granularity.lower()
+        #                 if granularity_lower == 'year':
+        #                     temp_df[granularity_col] = temp_df[date_col].dt.year.astype(str)
+        #                 elif granularity_lower == 'quarter':
+        #                     temp_df[granularity_col] = 'Q' + temp_df[date_col].dt.quarter.astype(str)
+        #                 elif granularity_lower == 'month':
+        #                     # Extract month as full name (January, February, etc.)
+        #                     temp_df[granularity_col] = temp_df[date_col].dt.strftime('%B')
+        #                 elif granularity_lower == 'week':
+        #                     # Week number with year (e.g., "Week 1", "Week 2")
+        #                     temp_df[granularity_col] = 'Week ' + temp_df[date_col].dt.isocalendar().week.astype(str)
+        #                 elif granularity_lower == 'day':
+        #                     temp_df[granularity_col] = temp_df[date_col].dt.date.astype(str)
+        #                 else:
+        #                     raise ValueError(f"Unsupported date granularity: {granularity}")
+                        
+        #                 # Replace the date column in x_axis_columns with the granularity column
+        #                 x_axis_columns = [granularity_col if col == date_col else col for col in x_axis_columns]
+                        
+        #                 print(f"Created granularity column '{granularity_col}' from '{date_col}'")
+        #                 print(f"Sample values: {temp_df[granularity_col].head()}")
+        #             # ============== END DATE GRANULARITY PROCESSING ==============
+
+        #             x_axis_columns_str = x_axis_columns
+
+        #             # Build filter options for x-axis
+        #             options = []
+        #             for col in x_axis_columns:
+        #                 if col in checked_option:
+        #                     options.extend(checked_option[col])
+        #             options = list(map(str, options))
+        #             # print("options:", options)
+
+        #             # Filter again based on x-axis
+        #             if options:
+        #                 new_df = temp_df[temp_df[x_axis_columns[0]].isin(options)]
+        #             else:
+        #                 new_df = temp_df
+        #     # Check if we need aggregation
+        #     if aggregation and y_axis_columns:
+        #         if aggregation == "sum":
+        #             new_df = new_df.groupby(x_axis_columns, as_index=False)[y_axis_columns[0]].sum()
+        #         elif aggregation == "count":
+        #             new_df = new_df.groupby(x_axis_columns, as_index=False)[y_axis_columns[0]].count()
+        #         elif aggregation == "mean":
+        #             new_df = new_df.groupby(x_axis_columns, as_index=False)[y_axis_columns[0]].mean()
+        #         else:
+        #             return jsonify({"error": f"Unsupported aggregation type: {aggregation}"})
+            
+        #     # Prepare data for tree hierarchy
+        #     categories = []
+        #     values = []
+
+        #     for index, row in new_df.iterrows():
+        #         category = {col: row[col] for col in x_axis_columns}  # Hierarchy levels
+        #         categories.append(category)
+        #         values.append(row[y_axis_columns[0]] if y_axis_columns else 1)  # Use aggregated value
+        #     print("aggregation",aggregation)
+        #     return jsonify({
+        #         "categories": categories,
+        #         "values": values,
+        #         "chartType": "treeHierarchy",
+        #     })
+           
+
+        # except Exception as e:
+        #     print("Error preparing Tree Hierarchy data:", e)
+        #     return jsonify({"error": str(e)})
+        print("treeHierarchy -----------------------------")
+
         try:
             conn = get_company_db_connection(db_nameeee)
 
-            new_df = fetch_chart_data(conn, table_name)
-            # new_df = fetch_tree_data(db_nameeee, table_name, x_axis_columns, y_axis_columns,checked_option, selectedUser)
+            # Fetch raw data
+            df = fetch_chart_data(conn, table_name)
+            temp_df = df.copy()
 
-            # Check if we need aggregation
+            # ============================================
+            #         DATE GRANULARITY PROCESSING
+            # ============================================
+            if dateGranularity and isinstance(dateGranularity, dict):
+                for date_col, granularity in dateGranularity.items():
+
+                    # Check if column exists and is part of X-axis
+                    if date_col in temp_df.columns and date_col in x_axis_columns:
+                        print(f"Applying date granularity: {date_col} → {granularity}")
+
+                        temp_df[date_col] = pd.to_datetime(temp_df[date_col], errors="coerce")
+
+                        # New column
+                        granularity_col = f"{date_col}_{granularity.lower()}"
+
+                        g = granularity.lower()
+                        if g == "year":
+                            temp_df[granularity_col] = temp_df[date_col].dt.year.astype(str)
+                        elif g == "quarter":
+                            temp_df[granularity_col] = "Q" + temp_df[date_col].dt.quarter.astype(str)
+                        elif g == "month":
+                            temp_df[granularity_col] = temp_df[date_col].dt.strftime("%B")
+                        elif g == "week":
+                            temp_df[granularity_col] = (
+                                "Week " + temp_df[date_col].dt.isocalendar().week.astype(str)
+                            )
+                        elif g == "day":
+                            temp_df[granularity_col] = temp_df[date_col].dt.date.astype(str)
+                        else:
+                            raise ValueError(f"Unsupported date granularity: {granularity}")
+
+                        # Replace the original X-axis column with granularity column
+                        x_axis_columns = [
+                            granularity_col if col == date_col else col
+                            for col in x_axis_columns
+                        ]
+
+                        print(f"Created {granularity_col} from {date_col}")
+                        print("Sample values:", temp_df[granularity_col].head())
+
+            # ============================================
+            #              APPLY FILTERS
+            # ============================================
+            filter_values = []
+            for col in x_axis_columns:
+                if col in checked_option:
+                    filter_values.extend(checked_option[col])
+
+            filter_values = list(map(str, filter_values))
+
+            if filter_values:
+                df_filtered = temp_df[temp_df[x_axis_columns[0]].isin(filter_values)]
+            else:
+                df_filtered = temp_df
+
+            # ============================================
+            #              APPLY AGGREGATION
+            # ============================================
             if aggregation and y_axis_columns:
+                y_col = y_axis_columns[0]
+
                 if aggregation == "sum":
-                    new_df = new_df.groupby(x_axis_columns, as_index=False)[y_axis_columns[0]].sum()
+                    df_filtered = df_filtered.groupby(x_axis_columns, as_index=False)[y_col].sum()
                 elif aggregation == "count":
-                    new_df = new_df.groupby(x_axis_columns, as_index=False)[y_axis_columns[0]].count()
+                    df_filtered = df_filtered.groupby(x_axis_columns, as_index=False)[y_col].count()
                 elif aggregation == "mean":
-                    new_df = new_df.groupby(x_axis_columns, as_index=False)[y_axis_columns[0]].mean()
+                    df_filtered = df_filtered.groupby(x_axis_columns, as_index=False)[y_col].mean()
                 else:
                     return jsonify({"error": f"Unsupported aggregation type: {aggregation}"})
-            
-            # Prepare data for tree hierarchy
+
+            # ============================================
+            #              PREPARE TREE DATA
+            # ============================================
             categories = []
             values = []
 
-            for index, row in new_df.iterrows():
-                category = {col: row[col] for col in x_axis_columns}  # Hierarchy levels
-                categories.append(category)
-                values.append(row[y_axis_columns[0]] if y_axis_columns else 1)  # Use aggregated value
-            print("aggregation",aggregation)
+            for _, row in df_filtered.iterrows():
+                categories.append({col: row[col] for col in x_axis_columns})
+                values.append(row[y_col] if y_axis_columns else 1)
+
+            print("aggregation:", aggregation)
+
             return jsonify({
                 "categories": categories,
                 "values": values,
                 "chartType": "treeHierarchy",
             })
-           
 
         except Exception as e:
             print("Error preparing Tree Hierarchy data:", e)
             return jsonify({"error": str(e)})
+
     elif chartType == "timeSeriesDecomposition":
         print("Time Series Decomposition Chart")
         if not x_axis_columns or not y_axis_columns:
@@ -2947,6 +3169,63 @@ def get_edit_chart_route():
         print("treeHierarchy-----------------------------")
         try:
             # new_df = fetch_tree_data(db_nameeee, table_name, x_axis_columns, y_axis_columns,checked_option, selectedUser)
+            temp_df = df.copy()
+
+            # ============================================
+            #         DATE GRANULARITY PROCESSING
+            # ============================================
+            if dateGranularity and isinstance(dateGranularity, dict):
+                for date_col, granularity in dateGranularity.items():
+
+                    # Check if column exists and is part of X-axis
+                    if date_col in temp_df.columns and date_col in x_axis_columns:
+                        print(f"Applying date granularity: {date_col} → {granularity}")
+
+                        temp_df[date_col] = pd.to_datetime(temp_df[date_col], errors="coerce")
+
+                        # New column
+                        granularity_col = f"{date_col}_{granularity.lower()}"
+
+                        g = granularity.lower()
+                        if g == "year":
+                            temp_df[granularity_col] = temp_df[date_col].dt.year.astype(str)
+                        elif g == "quarter":
+                            temp_df[granularity_col] = "Q" + temp_df[date_col].dt.quarter.astype(str)
+                        elif g == "month":
+                            temp_df[granularity_col] = temp_df[date_col].dt.strftime("%B")
+                        elif g == "week":
+                            temp_df[granularity_col] = (
+                                "Week " + temp_df[date_col].dt.isocalendar().week.astype(str)
+                            )
+                        elif g == "day":
+                            temp_df[granularity_col] = temp_df[date_col].dt.date.astype(str)
+                        else:
+                            raise ValueError(f"Unsupported date granularity: {granularity}")
+
+                        # Replace the original X-axis column with granularity column
+                        x_axis_columns = [
+                            granularity_col if col == date_col else col
+                            for col in x_axis_columns
+                        ]
+
+                        print(f"Created {granularity_col} from {date_col}")
+                        print("Sample values:", temp_df[granularity_col].head())
+
+            # ============================================
+            #              APPLY FILTERS
+            # ============================================
+            filter_values = []
+            for col in x_axis_columns:
+                if col in checked_option:
+                    filter_values.extend(checked_option[col])
+
+            filter_values = list(map(str, filter_values))
+
+            if filter_values:
+                df_filtered = temp_df[temp_df[x_axis_columns[0]].isin(filter_values)]
+            else:
+                df_filtered = temp_df
+            new_df = df_filtered
 
             # Check if we need aggregation
             if aggregation and y_axis_columns:
@@ -5227,6 +5506,7 @@ def receive_chart_details():
     chart_heading = data.get('chart_heading')
     optimizeData= data.get('optimizeData')
     user_id=data.get('user_id')
+    dateGranularity = data.get("selectedFrequency", {})
     try:
         filter_options_str = data.get('filter_options').replace('null', 'null') #this line is not needed.
         filter_options = json.loads(data.get('filter_options')) #use json.loads instead of ast.literal_eval.
@@ -5510,7 +5790,6 @@ def receive_chart_details():
                     print("Dual y-axis chart detected")
                     # print("filter_options====================", filter_options)
                     # print("filtertype====================", type(filter_options))
-                    dateGranularity= data.get("selectedFrequency",)
                     data = fetch_data_for_duel(tableName, x_axis, filter_options, y_axis, aggregate, databaseName, selectedUser,calculation_data,dateGranularity)
                     # print("Data from fetch_data_for_duel:")  # Print before returning
                     # print("Categories:", [row[0] for row in data])
@@ -5534,7 +5813,6 @@ def receive_chart_details():
                     })
             if chart_type == "duealChart"  :
                     print("Dual y-axis chart detected")
-                    dateGranularity= data.get("selectedFrequency",)
                     # print("filter_options====================", filter_options)
                     # print("filtertype====================", type(filter_options))
                     data = fetch_data_for_duel(tableName, x_axis, filter_options, y_axis, aggregate, databaseName, selectedUser,calculation_data,dateGranularity)
@@ -5602,46 +5880,107 @@ def receive_chart_details():
             #         "y_axis": y_axis,
             #          "optimizeData": optimizeData, 
             #     }), 200
-
             if aggregate == 'count':
                 print("Count aggregation detected")
-                
+
+                # apply calculations first (keeps original behavior)
                 df, x_axis, y_axis = apply_calculation_to_df(df, calculation_data, x_axis, y_axis)
+
+                # ---------- DATE GRANULARITY (COUNT SECTION) ----------
+                if isinstance(dateGranularity, str):
+                    try:
+                        dateGranularity = json.loads(dateGranularity)
+                    except Exception:
+                        dateGranularity = {}
+
+                if dateGranularity and isinstance(dateGranularity, dict):
+                    for date_col, granularity in dateGranularity.items():
+                        if date_col in df.columns and date_col in x_axis:
+                            print(f"[COUNT] Applying granularity: {date_col} -> {granularity}")
+                            df[date_col] = pd.to_datetime(df[date_col], errors='coerce')
+                            g = granularity.lower()
+                            granularity_col = f"{date_col}_{g}"
+
+                            if g == "year":
+                                df[granularity_col] = df[date_col].dt.year.astype(str)
+                            elif g == "quarter":
+                                df[granularity_col] = "Q" + df[date_col].dt.quarter.astype(str)
+                            elif g == "month":
+                                df[granularity_col] = df[date_col].dt.month_name()
+                            elif g == "week":
+                                df[granularity_col] = "Week " + df[date_col].dt.isocalendar().week.astype(str)
+                            elif g == "day":
+                                df[granularity_col] = df[date_col].dt.strftime("%Y-%m-%d")
+                            else:
+                                raise ValueError(f"Unsupported granularity: {granularity}")
+
+                            # Replace x_axis entry with granularity column
+                            x_axis = [granularity_col if c == date_col else c for c in x_axis]
+                            print(f"[COUNT] Created granularity column: {granularity_col}")
+                            print(df[[date_col, granularity_col]].head())
                 
+                
+
                 # Parse the filter options
-                allowed_categories = json.loads(data.get('filter_options'))
+                allowed_categories = json.loads(data.get('filter_options')) if data.get('filter_options') else {}
                 print("allowed_categories====================", allowed_categories)
-                
+                # --- FIX FILTERS FOR DATE GRANULARITY ---
+                fixed_allowed_categories = {}
+
+                for col, values in allowed_categories.items():
+                    # If this is the date column and granularity was applied
+                    if col in dateGranularity:
+                        gran = dateGranularity[col].lower()
+                        gran_col = f"{col}_{gran}"
+                        if gran_col in df.columns:
+                            fixed_allowed_categories[gran_col] = [str(v) for v in values]
+                            continue
+
+                    # Otherwise keep same
+                    fixed_allowed_categories[col] = values
+
+                allowed_categories = fixed_allowed_categories
+                print("Updated allowed_categories:", allowed_categories)
+
                 # Apply filters to the dataframe BEFORE grouping
                 filtered_df = df.copy()
-                
+
                 # Apply each filter condition
                 for column, valid_values in allowed_categories.items():
                     if column in filtered_df.columns:
-                        # Filter the dataframe to only include rows where the column value is in valid_values
                         filtered_df = filtered_df[filtered_df[column].isin(valid_values)]
                         print(f"After filtering {column}: {len(filtered_df)} rows remaining")
                     else:
                         print(f"Warning: Column '{column}' not found in dataframe")
-                
+
                 print(f"Original dataframe rows: {len(df)}")
                 print(f"Filtered dataframe rows: {len(filtered_df)}")
-                
-                # Now group the filtered dataframe
+
+                # Now group the filtered dataframe (all rows)
                 grouped_df = filtered_df.groupby(x_axis[0]).size().reset_index(name="count")
                 print("Grouped DataFrame with all rows:", grouped_df)
-                
+
                 # For valid rows (non-null y_axis values)
                 filtered_df_valid = filtered_df[filtered_df[y_axis[0]].notnull()]
                 grouped_df_valid = filtered_df_valid.groupby(x_axis[0])[y_axis[0]].count().reset_index(name="count")
                 print("Grouped DataFrame with valid rows:", grouped_df_valid)
-                
+
                 chosen_grouped_df = grouped_df_valid
-                categories = chosen_grouped_df[x_axis[0]].tolist()
+
+                # Normalize categories to strings (handle Timestamps / Periods / tuples)
+                def normalize_cat(c):
+                    if isinstance(c, pd.Timestamp):
+                        return c.strftime("%Y-%m-%d")
+                    # If it's a tuple-like (e.g., ('January',)) take first element
+                    if isinstance(c, (list, tuple)) and len(c) == 1:
+                        return str(c[0])
+                    return str(c)
+
+                categories = [normalize_cat(c) for c in chosen_grouped_df[x_axis[0]].tolist()]
                 values = chosen_grouped_df["count"].tolist()
+
                 category_value_pairs = list(zip(categories, values))
-                optimized_categories = []
-                optimized_values = []
+                optimized_pairs = []
 
                 if optimizeData == "top10":
                             # Sort by values in descending order and take top 10
@@ -5672,10 +6011,10 @@ def receive_chart_details():
                         # Separate back into categories and values
                 optimized_categories = [pair[0] for pair in optimized_pairs]
                 optimized_values = [pair[1] for pair in optimized_pairs]
-                
+
                 print("Final categories====================", categories)
                 print("Final values====================", values)
-                
+
                 connection.close()
                 description = f"{user_name} viewed the chart '{chart}' from table '{tableName}'."
                 log_activity(
@@ -5694,17 +6033,17 @@ def receive_chart_details():
                     "chart_heading": chart_heading,
                     "x_axis": x_axis,
                     "y_axis": y_axis,
-                    "optimizeData": optimizeData, 
+                    "optimizeData": optimizeData,
                 }), 200
 
-
+            # ---------- NON-COUNT AGGREGATIONS ----------
             else:
                 # if len(y_axis) == 2:
                 if chart_type == "duealChart":
-                    print("Dual y-axis chart detected") 
+                    print("Dual y-axis chart detected")
                     if 'OptimizationData' in locals() or 'OptimizationData' in globals():
                         df = pd.DataFrame(data, columns=[x_axis[0], 'series1', 'series2'])
-                            
+
                         if optimizeData == 'top10':
                             df = df.sort_values(by='series1', ascending=False).head(10)
                         elif optimizeData == 'bottom10':
@@ -5714,7 +6053,44 @@ def receive_chart_details():
                             bottom_df = df.sort_values(by='series1', ascending=True).head(5)
                             df = pd.concat([top_df, bottom_df])
 
+                    # apply calculations
                     df, x_axis, y_axis = apply_calculation_to_df(df, calculation_data, x_axis, y_axis)
+
+                    # ---------- DATE GRANULARITY (DUAL-AXIS SECTION) ----------
+                  
+                    if isinstance(dateGranularity, str):
+                        try:
+                            dateGranularity = json.loads(dateGranularity)
+                        except Exception:
+                            dateGranularity = {}
+
+                    if dateGranularity and isinstance(dateGranularity, dict):
+                        for date_col, granularity in dateGranularity.items():
+                            if date_col in df.columns and date_col in x_axis:
+                                print(f"[DUAL] Applying granularity: {date_col} -> {granularity}")
+                                df[date_col] = pd.to_datetime(df[date_col], errors='coerce')
+                                g = granularity.lower()
+                                granularity_col = f"{date_col}_{g}"
+
+                                if g == "year":
+                                    df[granularity_col] = df[date_col].dt.year.astype(str)
+                                elif g == "quarter":
+                                    df[granularity_col] = "Q" + df[date_col].dt.quarter.astype(str)
+                                elif g == "month":
+                                    df[granularity_col] = df[date_col].dt.month_name()
+                                elif g == "week":
+                                    df[granularity_col] = "Week " + df[date_col].dt.isocalendar().week.astype(str)
+                                elif g == "day":
+                                    df[granularity_col] = df[date_col].dt.strftime("%Y-%m-%d")
+                                else:
+                                    raise ValueError(f"Unsupported granularity: {granularity}")
+
+                                x_axis = [granularity_col if c == date_col else c for c in x_axis]
+                                print(f"[DUAL] Created granularity column: {granularity_col}")
+                                print(df[[date_col, granularity_col]].head())
+                    
+
+                    # Convert times or numeric y-axes
                     for axis in y_axis:
                         try:
                             df[axis] = pd.to_datetime(df[axis], errors='raise', format='%H:%M:%S')
@@ -5725,20 +6101,18 @@ def receive_chart_details():
                     grouped_df = df.groupby(x_axis)[y_axis].agg(aggregate_py).reset_index()
                     print("Grouped DataFrame (dual y-axis): ", grouped_df.head())
 
-                    # categories = grouped_df[x_axis[0]].tolist()
-                    # categories = [category.strftime('%Y-%m-%d') for category in grouped_df[x_axis[0]]]
-                    categories = grouped_df[x_axis[0]].tolist()
+                    # Normalize categories list
+                    def normalize_cat_dual(c):
+                        if isinstance(c, pd.Timestamp):
+                            return c.strftime("%Y-%m-%d")
+                        if isinstance(c, (list, tuple)) and len(c) == 1:
+                            return str(c[0])
+                        return str(c)
 
-                    # Check if the elements are datetime objects before formatting
-                    if isinstance(categories[0], pd.Timestamp):  # Assumes at least one value is present
-                        categories = [category.strftime('%Y-%m-%d') for category in categories]
-                    else:
-                        categories = [str(category) for category in categories]  
+                    categories = [normalize_cat_dual(c) for c in grouped_df[x_axis[0]].tolist()]
 
-
-                    
-                    values1 = [float(value) for value in grouped_df[y_axis[0]]]  # Convert Decimal to float
-                    values2 = [float(value) for value in grouped_df[y_axis[1]]]  # Convert Decimal to float
+                    values1 = [float(value) for value in grouped_df[y_axis[0]]]
+                    values2 = [float(value) for value in grouped_df[y_axis[1]]]
                     print("duel axis categories====================", categories)
 
                     # Filter categories and values based on filter_options
@@ -5747,10 +6121,10 @@ def receive_chart_details():
                     filtered_values2 = []
 
                     # Extract the filter values dynamically (e.g., filter_options['region'])
-                    filter_values = list(filter_options.values())[0]  # Extract the first filter list dynamically
+                    filter_values = list(filter_options.values())[0] if filter_options else []
 
                     for category, value1, value2 in zip(categories, values1, values2):
-                        if category in filter_values:  # Dynamically check category
+                        if category in filter_values:
                             filtered_categories.append(category)
                             filtered_values1.append(value1)
                             filtered_values2.append(value2)
@@ -5758,7 +6132,6 @@ def receive_chart_details():
                     print("filtered_categories====================", filtered_categories)
                     print("filtered_values1====================", filtered_values1)
                     print("filtered_values2====================", filtered_values2)
-
 
                     connection.close()
                     description = f"{user_name} viewed the chart '{chart}' from table '{tableName}'."
@@ -5780,30 +6153,62 @@ def receive_chart_details():
                         "chart_type": chart_type,
                         "chart_heading": chart_heading,
                         "x_axis": x_axis,
-                         "optimizeData": optimizeData, 
+                        "optimizeData": optimizeData,
                     }), 200
+
                 if chart_type == "Butterfly":
-                    print("Dual y-axis chart detected") 
-                    
+                    print("Dual y-axis chart detected")
+
                     df, x_axis, y_axis = apply_calculation_to_df(df, calculation_data, x_axis, y_axis)
+
+                    # ---------- DATE GRANULARITY (BUTTERFLY SECTION) ----------
+                    
+                    if isinstance(dateGranularity, str):
+                        try:
+                            dateGranularity = json.loads(dateGranularity)
+                        except Exception:
+                            dateGranularity = {}
+
+                    if dateGranularity and isinstance(dateGranularity, dict):
+                        for date_col, granularity in dateGranularity.items():
+                            if date_col in df.columns and date_col in x_axis:
+                                print(f"[BUTTERFLY] Applying granularity: {date_col} -> {granularity}")
+                                df[date_col] = pd.to_datetime(df[date_col], errors='coerce')
+                                g = granularity.lower()
+                                granularity_col = f"{date_col}_{g}"
+
+                                if g == "year":
+                                    df[granularity_col] = df[date_col].dt.year.astype(str)
+                                elif g == "quarter":
+                                    df[granularity_col] = "Q" + df[date_col].dt.quarter.astype(str)
+                                elif g == "month":
+                                    df[granularity_col] = df[date_col].dt.month_name()
+                                elif g == "week":
+                                    df[granularity_col] = "Week " + df[date_col].dt.isocalendar().week.astype(str)
+                                elif g == "day":
+                                    df[granularity_col] = df[date_col].dt.strftime("%Y-%m-%d")
+                                else:
+                                    raise ValueError(f"Unsupported granularity: {granularity}")
+
+                                x_axis = [granularity_col if c == date_col else c for c in x_axis]
+                                print(f"[BUTTERFLY] Created granularity column: {granularity_col}")
+                                print(df[[date_col, granularity_col]].head())
 
                     grouped_df = df.groupby(x_axis)[y_axis].agg(aggregate_py).reset_index()
                     print("Grouped DataFrame (dual y-axis): ", grouped_df.head())
 
-                    # categories = grouped_df[x_axis[0]].tolist()
-                    # categories = [category.strftime('%Y-%m-%d') for category in grouped_df[x_axis[0]]]
-                    categories = grouped_df[x_axis[0]].tolist()
+                    # Normalize categories
+                    def normalize_cat_bf(c):
+                        if isinstance(c, pd.Timestamp):
+                            return c.strftime("%Y-%m-%d")
+                        if isinstance(c, (list, tuple)) and len(c) == 1:
+                            return str(c[0])
+                        return str(c)
 
-                    # Check if the elements are datetime objects before formatting
-                    if isinstance(categories[0], pd.Timestamp):  # Assumes at least one value is present
-                        categories = [category.strftime('%Y-%m-%d') for category in categories]
-                    else:
-                        categories = [str(category) for category in categories]  
+                    categories = [normalize_cat_bf(c) for c in grouped_df[x_axis[0]].tolist()]
 
-
-                    
-                    values1 = [float(value) for value in grouped_df[y_axis[0]]]  # Convert Decimal to float
-                    values2 = [float(value) for value in grouped_df[y_axis[1]]]  # Convert Decimal to float
+                    values1 = [float(value) for value in grouped_df[y_axis[0]]]
+                    values2 = [float(value) for value in grouped_df[y_axis[1]]]
                     print("duel axis categories====================", categories)
 
                     # Filter categories and values based on filter_options
@@ -5812,10 +6217,10 @@ def receive_chart_details():
                     filtered_values2 = []
 
                     # Extract the filter values dynamically (e.g., filter_options['region'])
-                    filter_values = list(filter_options.values())[0]  # Extract the first filter list dynamically
+                    filter_values = list(filter_options.values())[0] if filter_options else []
 
                     for category, value1, value2 in zip(categories, values1, values2):
-                        if category in filter_values:  # Dynamically check category
+                        if category in filter_values:
                             filtered_categories.append(category)
                             filtered_values1.append(value1)
                             filtered_values2.append(value2)
@@ -5823,7 +6228,6 @@ def receive_chart_details():
                     print("filtered_categories====================", filtered_categories)
                     print("filtered_values1====================", filtered_values1)
                     print("filtered_values2====================", filtered_values2)
-
 
                     connection.close()
                     description = f"{user_name} viewed the chart '{chart}' from table '{tableName}'."
@@ -5845,106 +6249,532 @@ def receive_chart_details():
                         "chart_type": chart_type,
                         "chart_heading": chart_heading,
                         "x_axis": x_axis,
-                        "optimizeData": optimizeData, 
-                        "optimizeData": optimizeData, 
+                        "optimizeData": optimizeData,
                     }), 200
+
+            # if aggregate == 'count':
+            #     print("Count aggregation detected")
+                
+            #     df, x_axis, y_axis = apply_calculation_to_df(df, calculation_data, x_axis, y_axis)
+                
+            #     # Parse the filter options
+            #     allowed_categories = json.loads(data.get('filter_options'))
+            #     print("allowed_categories====================", allowed_categories)
+                
+            #     # Apply filters to the dataframe BEFORE grouping
+            #     filtered_df = df.copy()
+                
+            #     # Apply each filter condition
+            #     for column, valid_values in allowed_categories.items():
+            #         if column in filtered_df.columns:
+            #             # Filter the dataframe to only include rows where the column value is in valid_values
+            #             filtered_df = filtered_df[filtered_df[column].isin(valid_values)]
+            #             print(f"After filtering {column}: {len(filtered_df)} rows remaining")
+            #         else:
+            #             print(f"Warning: Column '{column}' not found in dataframe")
+                
+            #     print(f"Original dataframe rows: {len(df)}")
+            #     print(f"Filtered dataframe rows: {len(filtered_df)}")
+                
+            #     # Now group the filtered dataframe
+            #     grouped_df = filtered_df.groupby(x_axis[0]).size().reset_index(name="count")
+            #     print("Grouped DataFrame with all rows:", grouped_df)
+                
+            #     # For valid rows (non-null y_axis values)
+            #     filtered_df_valid = filtered_df[filtered_df[y_axis[0]].notnull()]
+            #     grouped_df_valid = filtered_df_valid.groupby(x_axis[0])[y_axis[0]].count().reset_index(name="count")
+            #     print("Grouped DataFrame with valid rows:", grouped_df_valid)
+                
+            #     chosen_grouped_df = grouped_df_valid
+            #     categories = chosen_grouped_df[x_axis[0]].tolist()
+            #     values = chosen_grouped_df["count"].tolist()
+            #     category_value_pairs = list(zip(categories, values))
+            #     optimized_categories = []
+            #     optimized_values = []
+
+            #     if optimizeData == "top10":
+            #                 # Sort by values in descending order and take top 10
+            #         sorted_pairs = sorted(category_value_pairs, key=lambda x: x[1], reverse=True)
+            #         optimized_pairs = sorted_pairs[:10]
+                            
+            #     elif optimizeData == "bottom10":
+            #                 # Sort by values in ascending order and take bottom 10
+            #         sorted_pairs = sorted(category_value_pairs, key=lambda x: x[1])
+            #         optimized_pairs = sorted_pairs[:10]
+                            
+            #     elif optimizeData == "both10":
+            #                 # Get bottom 5
+            #         sorted_asc = sorted(category_value_pairs, key=lambda x: x[1])
+            #         bottom5_pairs = sorted_asc[:5]
+                            
+            #                 # Get top 5
+            #         sorted_desc = sorted(category_value_pairs, key=lambda x: x[1], reverse=True)
+            #         top5_pairs = sorted_desc[:5]
+                            
+            #                 # Combine bottom 5 and top 5
+            #         optimized_pairs = bottom5_pairs + top5_pairs
+                            
+            #     else:
+            #                 # Default: return all filtered data
+            #         optimized_pairs = category_value_pairs
+
+            #             # Separate back into categories and values
+            #     optimized_categories = [pair[0] for pair in optimized_pairs]
+            #     optimized_values = [pair[1] for pair in optimized_pairs]
+                
+            #     print("Final categories====================", categories)
+            #     print("Final values====================", values)
+                
+            #     connection.close()
+            #     description = f"{user_name} viewed the chart '{chart}' from table '{tableName}'."
+            #     log_activity(
+            #         company_name=databaseName,
+            #         user_email=user_email,
+            #         action_type="View Chart",
+            #         table_name=tableName,
+            #         dashboard_name=chart,
+            #         description=description
+            #     )
+            #     return jsonify({
+            #         "message": "Chart details received successfully!",
+            #         "categories": optimized_categories,
+            #         "values": optimized_values,
+            #         "chart_type": chart_type,
+            #         "chart_heading": chart_heading,
+            #         "x_axis": x_axis,
+            #         "y_axis": y_axis,
+            #         "optimizeData": optimizeData, 
+            #     }), 200
+
+
+            # else:
+            #     # if len(y_axis) == 2:
+            #     if chart_type == "duealChart":
+            #         print("Dual y-axis chart detected") 
+            #         if 'OptimizationData' in locals() or 'OptimizationData' in globals():
+            #             df = pd.DataFrame(data, columns=[x_axis[0], 'series1', 'series2'])
+                            
+            #             if optimizeData == 'top10':
+            #                 df = df.sort_values(by='series1', ascending=False).head(10)
+            #             elif optimizeData == 'bottom10':
+            #                 df = df.sort_values(by='series1', ascending=True).head(10)
+            #             elif optimizeData == 'both5':
+            #                 top_df = df.sort_values(by='series1', ascending=False).head(5)
+            #                 bottom_df = df.sort_values(by='series1', ascending=True).head(5)
+            #                 df = pd.concat([top_df, bottom_df])
+
+            #         df, x_axis, y_axis = apply_calculation_to_df(df, calculation_data, x_axis, y_axis)
+            #         for axis in y_axis:
+            #             try:
+            #                 df[axis] = pd.to_datetime(df[axis], errors='raise', format='%H:%M:%S')
+            #                 df[axis] = df[axis].apply(lambda x: x.hour * 60 + x.minute)
+            #             except (ValueError, TypeError):
+            #                 df[axis] = pd.to_numeric(df[axis], errors='coerce')
+
+            #         grouped_df = df.groupby(x_axis)[y_axis].agg(aggregate_py).reset_index()
+            #         print("Grouped DataFrame (dual y-axis): ", grouped_df.head())
+
+            #         # categories = grouped_df[x_axis[0]].tolist()
+            #         # categories = [category.strftime('%Y-%m-%d') for category in grouped_df[x_axis[0]]]
+            #         categories = grouped_df[x_axis[0]].tolist()
+
+            #         # Check if the elements are datetime objects before formatting
+            #         if isinstance(categories[0], pd.Timestamp):  # Assumes at least one value is present
+            #             categories = [category.strftime('%Y-%m-%d') for category in categories]
+            #         else:
+            #             categories = [str(category) for category in categories]  
+
+
+                    
+            #         values1 = [float(value) for value in grouped_df[y_axis[0]]]  # Convert Decimal to float
+            #         values2 = [float(value) for value in grouped_df[y_axis[1]]]  # Convert Decimal to float
+            #         print("duel axis categories====================", categories)
+
+            #         # Filter categories and values based on filter_options
+            #         filtered_categories = []
+            #         filtered_values1 = []
+            #         filtered_values2 = []
+
+            #         # Extract the filter values dynamically (e.g., filter_options['region'])
+            #         filter_values = list(filter_options.values())[0]  # Extract the first filter list dynamically
+
+            #         for category, value1, value2 in zip(categories, values1, values2):
+            #             if category in filter_values:  # Dynamically check category
+            #                 filtered_categories.append(category)
+            #                 filtered_values1.append(value1)
+            #                 filtered_values2.append(value2)
+
+            #         print("filtered_categories====================", filtered_categories)
+            #         print("filtered_values1====================", filtered_values1)
+            #         print("filtered_values2====================", filtered_values2)
+
+
+            #         connection.close()
+            #         description = f"{user_name} viewed the chart '{chart}' from table '{tableName}'."
+            #         log_activity(
+            #             company_name=databaseName,
+            #             user_email=user_email,
+            #             action_type="View Chart",
+            #             table_name=tableName,
+            #             dashboard_name=chart,
+            #             description=description
+            #         )
+
+            #         # Return the filtered data for both series
+            #         return jsonify({
+            #             "message": "Chart details received successfully!",
+            #             "categories": filtered_categories,
+            #             "series1": filtered_values1,
+            #             "series2": filtered_values2,
+            #             "chart_type": chart_type,
+            #             "chart_heading": chart_heading,
+            #             "x_axis": x_axis,
+            #              "optimizeData": optimizeData, 
+            #         }), 200
+            #     if chart_type == "Butterfly":
+            #         print("Dual y-axis chart detected") 
+                    
+            #         df, x_axis, y_axis = apply_calculation_to_df(df, calculation_data, x_axis, y_axis)
+
+            #         grouped_df = df.groupby(x_axis)[y_axis].agg(aggregate_py).reset_index()
+            #         print("Grouped DataFrame (dual y-axis): ", grouped_df.head())
+
+            #         # categories = grouped_df[x_axis[0]].tolist()
+            #         # categories = [category.strftime('%Y-%m-%d') for category in grouped_df[x_axis[0]]]
+            #         categories = grouped_df[x_axis[0]].tolist()
+
+            #         # Check if the elements are datetime objects before formatting
+            #         if isinstance(categories[0], pd.Timestamp):  # Assumes at least one value is present
+            #             categories = [category.strftime('%Y-%m-%d') for category in categories]
+            #         else:
+            #             categories = [str(category) for category in categories]  
+
+
+                    
+            #         values1 = [float(value) for value in grouped_df[y_axis[0]]]  # Convert Decimal to float
+            #         values2 = [float(value) for value in grouped_df[y_axis[1]]]  # Convert Decimal to float
+            #         print("duel axis categories====================", categories)
+
+            #         # Filter categories and values based on filter_options
+            #         filtered_categories = []
+            #         filtered_values1 = []
+            #         filtered_values2 = []
+
+            #         # Extract the filter values dynamically (e.g., filter_options['region'])
+            #         filter_values = list(filter_options.values())[0]  # Extract the first filter list dynamically
+
+            #         for category, value1, value2 in zip(categories, values1, values2):
+            #             if category in filter_values:  # Dynamically check category
+            #                 filtered_categories.append(category)
+            #                 filtered_values1.append(value1)
+            #                 filtered_values2.append(value2)
+
+            #         print("filtered_categories====================", filtered_categories)
+            #         print("filtered_values1====================", filtered_values1)
+            #         print("filtered_values2====================", filtered_values2)
+
+
+            #         connection.close()
+            #         description = f"{user_name} viewed the chart '{chart}' from table '{tableName}'."
+            #         log_activity(
+            #             company_name=databaseName,
+            #             user_email=user_email,
+            #             action_type="View Chart",
+            #             table_name=tableName,
+            #             dashboard_name=chart,
+            #             description=description
+            #         )
+
+            #         # Return the filtered data for both series
+            #         return jsonify({
+            #             "message": "Chart details received successfully!",
+            #             "categories": filtered_categories,
+            #             "series1": filtered_values1,
+            #             "series2": filtered_values2,
+            #             "chart_type": chart_type,
+            #             "chart_heading": chart_heading,
+            #             "x_axis": x_axis,
+            #             "optimizeData": optimizeData, 
+            #             "optimizeData": optimizeData, 
+            #         }), 200
                 else:
                     
                   
 
-                    df, x_axis, y_axis = apply_calculation_to_df(df, calculation_data, x_axis, y_axis)
-                    grouped_df = df.groupby(x_axis[0])[y_axis].agg(aggregate_py).reset_index()
+                    # df, x_axis, y_axis = apply_calculation_to_df(df, calculation_data, x_axis, y_axis)
+                    # grouped_df = df.groupby(x_axis[0])[y_axis].agg(aggregate_py).reset_index()
 
-                    print("Grouped DataFrame: ", grouped_df.head())
+                    # print("Grouped DataFrame: ", grouped_df.head())
 
-                    categories = grouped_df[x_axis[0]].tolist()
-                    if isinstance(categories[0], pd.Timestamp):  # Assumes at least one value is present
-                        categories = [category.strftime('%Y-%m-%d') for category in categories]
-                    else:
-                        categories = [str(category) for category in categories]  
+                    # categories = grouped_df[x_axis[0]].tolist()
+                    # if isinstance(categories[0], pd.Timestamp):  # Assumes at least one value is present
+                    #     categories = [category.strftime('%Y-%m-%d') for category in categories]
+                    # else:
+                    #     categories = [str(category) for category in categories]  
 
-                    values = [float(value) for value in grouped_df[y_axis[0]]]  # Convert Decimal to float
+                    # values = [float(value) for value in grouped_df[y_axis[0]]]  # Convert Decimal to float
 
-                    print("categories====================22222", categories) 
-                    print("values====================22222", values)
-                    # allowed_categories = filter_options.get(x_axis[0], [])  # Get the list of valid categories
-                    allowed_categories = list(map(str, filter_options.get(x_axis[0], [])))
+                    # print("categories====================22222", categories) 
+                    # print("values====================22222", values)
+                    # # allowed_categories = filter_options.get(x_axis[0], [])  # Get the list of valid categories
+                    # allowed_categories = list(map(str, filter_options.get(x_axis[0], [])))
 
-                    filtered_categories = []
-                    filtered_values = []
+                    # filtered_categories = []
+                    # filtered_values = []
 
+                    # # for category, value in zip(categories, values):
+                    # #     # if category.strip() in allowed_categories:  # Ensure category matches the filter
+                    # #     if str(category).strip() in allowed_categories:
+
+                    # #         filtered_categories.append(category)
+                    # #         filtered_values.append(value)
+                    # #     else:
+                    # #         print(f"Category '{category}' not in filter_options[{x_axis[0]}]")
                     # for category, value in zip(categories, values):
-                    #     # if category.strip() in allowed_categories:  # Ensure category matches the filter
+                    #     print("Type of category:", type(category), "Value:", category)
                     #     if str(category).strip() in allowed_categories:
-
                     #         filtered_categories.append(category)
                     #         filtered_values.append(value)
                     #     else:
                     #         print(f"Category '{category}' not in filter_options[{x_axis[0]}]")
-                    for category, value in zip(categories, values):
-                        print("Type of category:", type(category), "Value:", category)
-                        if str(category).strip() in allowed_categories:
-                            filtered_categories.append(category)
-                            filtered_values.append(value)
-                        else:
-                            print(f"Category '{category}' not in filter_options[{x_axis[0]}]")
 
 
+                    # print("filtered_categories====================1111", filtered_categories)
+                    # print("filtered_values====================", filtered_values)
+
+                    # # Create a combined list of (category, value) pairs
+                    # category_value_pairs = list(zip(filtered_categories, filtered_values))
+
+                    # # Sort based on optimization strategy
+                    # optimized_categories = []
+                    # optimized_values = []
+
+                    # if optimizeData == "top10":
+                    #     # Sort by values in descending order and take top 10
+                    #     sorted_pairs = sorted(category_value_pairs, key=lambda x: x[1], reverse=True)
+                    #     optimized_pairs = sorted_pairs[:10]
+                        
+                    # elif optimizeData == "bottom10":
+                    #     # Sort by values in ascending order and take bottom 10
+                    #     sorted_pairs = sorted(category_value_pairs, key=lambda x: x[1])
+                    #     optimized_pairs = sorted_pairs[:10]
+                        
+                    # elif optimizeData == "both10":
+                    #     # Get bottom 5
+                    #     sorted_asc = sorted(category_value_pairs, key=lambda x: x[1])
+                    #     bottom5_pairs = sorted_asc[:5]
+                        
+                    #     # Get top 5
+                    #     sorted_desc = sorted(category_value_pairs, key=lambda x: x[1], reverse=True)
+                    #     top5_pairs = sorted_desc[:5]
+                        
+                    #     # Combine bottom 5 and top 5
+                    #     optimized_pairs = bottom5_pairs + top5_pairs
+                        
+                    # else:
+                    #     # Default: return all filtered data
+                    #     optimized_pairs = category_value_pairs
+
+                    # # Separate back into categories and values
+                    # optimized_categories = [pair[0] for pair in optimized_pairs]
+                    # optimized_values = [pair[1] for pair in optimized_pairs]
+
+                    # print(f"{optimizeData} optimized_categories====================", optimized_categories)
+                    # print(f"{optimizeData} optimized_values====================", optimized_values)
+
+                    # connection.close()
+                    # description = f"{user_name} viewed the chart '{chart}' from table '{tableName}'."
+                    # log_activity(
+                    #     company_name=databaseName,
+                    #     user_email=user_email,
+                    #     action_type="View Chart",
+                    #     table_name=tableName,
+                    #     dashboard_name=chart,
+                    #     description=description
+                    # )
+
+                    # # Return the optimized data
+                    # return jsonify({
+                    #     "message": "Chart details received successfully!",
+                    #     "categories": optimized_categories,
+                    #     "values": optimized_values,
+                    #     "chart_type": chart_type,
+                    #     "chart_heading": chart_heading,
+                    #     "tableName": tableName,
+                    #     "x_axis": x_axis,
+                    #     "optimizeData": optimizeData, 
+                    # }), 200
+                    # ----------------------------- START REPLACEMENT BLOCK -----------------------------
+
+                    # Convert selectedFrequency string → dict
+                    if isinstance(dateGranularity, str):
+                        try:
+                            dateGranularity = json.loads(dateGranularity)
+                        except Exception:
+                            dateGranularity = {}
+
+                    # Apply calculations (existing behavior)
+                    df, x_axis, y_axis = apply_calculation_to_df(df, calculation_data, x_axis, y_axis)
+
+                    # ---------- DATE GRANULARITY PROCESSING ----------
+                    if dateGranularity and isinstance(dateGranularity, dict):
+                        for date_col, granularity in dateGranularity.items():
+                            if date_col in df.columns and date_col in x_axis:
+
+                                df[date_col] = pd.to_datetime(df[date_col], errors='coerce')
+                                g = granularity.lower()
+                                granularity_col = f"{date_col}_{g}"
+
+                                # ---- Proper formatting for each granularity ----
+                                if g == "year":
+                                    df[granularity_col] = df[date_col].dt.year.astype(str)   # "2023"
+
+                                elif g == "quarter":
+                                    df[granularity_col] = "Q" + df[date_col].dt.quarter.astype(str)   # "Q1"
+
+                                elif g == "month":
+                                    df[granularity_col] = df[date_col].dt.month_name()   # "January"
+
+                                elif g == "week":
+                                    df[granularity_col] = (
+                                        "Week " + df[date_col].dt.isocalendar().week.astype(str)
+                                    )   # "Week 15"
+
+                                elif g == "day":
+                                    df[granularity_col] = df[date_col].dt.strftime("%Y-%m-%d")
+
+                                else:
+                                    raise ValueError(f"Unsupported granularity: {granularity}")
+
+                                # Replace x-axis with new granularity column
+                                x_axis = [granularity_col if c == date_col else c for c in x_axis]
+
+                                print(f"Created granularity column: {granularity_col}")
+                                print(df[[date_col, granularity_col]].head())
+                    # ========== APPLY FILTERS AFTER GRANULARITY ==========
+                    for col, values in filter_options.items():
+                        values = list(map(str, values))
+
+                        # If granularity column exists, filter on it
+                        gran_col = None
+                        if dateGranularity and col in dateGranularity:
+                            gran_col = f"{col}_{dateGranularity[col]}"
+
+                        if gran_col and gran_col in df.columns:
+                            df = df[df[gran_col].isin(values)]
+                        elif col in df.columns:
+                            df[col] = df[col].astype(str)
+                            df = df[df[col].isin(values)]
+
+
+                    # ---------- BUILD FILTER OPTIONS ----------
+                    options = []
+                    for col in x_axis:
+                        if col in filter_options:
+                            options.extend(filter_options[col])
+                    options = list(map(str, options))
+
+                    # Apply filter if options exist
+                    if options:
+                        filtered_df = df[df[x_axis[0]].astype(str).isin(options)]
+                    else:
+                        filtered_df = df
+
+                    # ---------- GROUP ----------
+                    grouped_df = filtered_df.groupby(x_axis[0])[y_axis].agg(aggregate_py).reset_index()
+                    print("Grouped DataFrame:", grouped_df.head())
+
+                    # ---------- NORMALIZE CATEGORY ----------
+                    def normalize_date(category):
+                        if isinstance(category, pd.Timestamp):
+                            return category.strftime("%Y-%m-%d")
+                        return str(category)
+
+                    categories = [normalize_date(c) for c in grouped_df[x_axis[0]].tolist()]
+                    values = [float(v) for v in grouped_df[y_axis[0]]]
+
+                    print("categories====================22222", categories)
+                    print("values====================22222", values)
+
+                    # ---------- CORRECT allowed_categories BASED ON GRANULARITY ----------
+                    original_date_col = None
+                    if isinstance(dateGranularity, dict) and len(dateGranularity) > 0:
+                        original_date_col = list(dateGranularity.keys())[0]
+
+                    allowed_categories = []
+
+                    if original_date_col:
+                        raw_dates = filter_options.get(original_date_col, [])
+                        gran = dateGranularity.get(original_date_col, "").lower()
+
+                        for d in raw_dates:
+                            dt = pd.to_datetime(d, errors='coerce')
+                            if pd.isna(dt):
+                                continue
+
+                            if gran == "year":
+                                key = dt.to_period("Y").to_timestamp().strftime("%Y-%m-%d")
+                            elif gran == "quarter":
+                                key = dt.to_period("Q").to_timestamp().strftime("%Y-%m-%d")
+                            elif gran == "month":
+                                key = dt.to_period("M").to_timestamp().strftime("%Y-%m-%d")
+                            elif gran == "week":
+                                key = dt.to_period("W").to_timestamp().strftime("%Y-%m-%d")
+                            else:
+                                key = dt.date().strftime("%Y-%m-%d")
+
+                            if key not in allowed_categories:
+                                allowed_categories.append(key)
+
+                    else:
+                        allowed_categories = list(map(str, filter_options.get(x_axis[0], [])))
+
+                    # ---------- FINAL FILTER ----------
+                    if not allowed_categories:
+                        filtered_categories = categories
+                        filtered_values = values
+                    else:
+                        filtered_categories = []
+                        filtered_values = []
+                        for c, v in zip(categories, values):
+                            if str(c).strip() in allowed_categories:
+                                filtered_categories.append(c)
+                                filtered_values.append(v)
+
+                    print("allowed_categories:", allowed_categories)
                     print("filtered_categories====================1111", filtered_categories)
                     print("filtered_values====================", filtered_values)
 
-                    # Create a combined list of (category, value) pairs
-                    category_value_pairs = list(zip(filtered_categories, filtered_values))
-
-                    # Sort based on optimization strategy
-                    optimized_categories = []
-                    optimized_values = []
+                    # ---------- OPTIMIZATION ----------
+                    pairs = list(zip(filtered_categories, filtered_values))
 
                     if optimizeData == "top10":
-                        # Sort by values in descending order and take top 10
-                        sorted_pairs = sorted(category_value_pairs, key=lambda x: x[1], reverse=True)
-                        optimized_pairs = sorted_pairs[:10]
-                        
+                        pairs = sorted(pairs, key=lambda x: x[1], reverse=True)[:10]
                     elif optimizeData == "bottom10":
-                        # Sort by values in ascending order and take bottom 10
-                        sorted_pairs = sorted(category_value_pairs, key=lambda x: x[1])
-                        optimized_pairs = sorted_pairs[:10]
-                        
+                        pairs = sorted(pairs, key=lambda x: x[1])[:10]
                     elif optimizeData == "both10":
-                        # Get bottom 5
-                        sorted_asc = sorted(category_value_pairs, key=lambda x: x[1])
-                        bottom5_pairs = sorted_asc[:5]
-                        
-                        # Get top 5
-                        sorted_desc = sorted(category_value_pairs, key=lambda x: x[1], reverse=True)
-                        top5_pairs = sorted_desc[:5]
-                        
-                        # Combine bottom 5 and top 5
-                        optimized_pairs = bottom5_pairs + top5_pairs
-                        
-                    else:
-                        # Default: return all filtered data
-                        optimized_pairs = category_value_pairs
+                        bot = sorted(pairs, key=lambda x: x[1])[:5]
+                        top = sorted(pairs, key=lambda x: x[1], reverse=True)[:5]
+                        pairs = bot + top
 
-                    # Separate back into categories and values
-                    optimized_categories = [pair[0] for pair in optimized_pairs]
-                    optimized_values = [pair[1] for pair in optimized_pairs]
+                    optimized_categories = [p[0] for p in pairs]
+                    optimized_values = [p[1] for p in pairs]
 
                     print(f"{optimizeData} optimized_categories====================", optimized_categories)
                     print(f"{optimizeData} optimized_values====================", optimized_values)
 
+                    # ---------- CLEANUP ----------
                     connection.close()
-                    description = f"{user_name} viewed the chart '{chart}' from table '{tableName}'."
+
                     log_activity(
                         company_name=databaseName,
                         user_email=user_email,
                         action_type="View Chart",
                         table_name=tableName,
                         dashboard_name=chart,
-                        description=description
+                        description=f"{user_name} viewed the chart '{chart}' from '{tableName}'."
                     )
 
-                    # Return the optimized data
                     return jsonify({
                         "message": "Chart details received successfully!",
                         "categories": optimized_categories,
@@ -5953,8 +6783,11 @@ def receive_chart_details():
                         "chart_heading": chart_heading,
                         "tableName": tableName,
                         "x_axis": x_axis,
-                        "optimizeData": optimizeData, 
+                        "optimizeData": optimizeData,
                     }), 200
+
+                    # ------------------------------ END REPLACEMENT BLOCK ------------------------------
+
         else:
             print("Tree hierarchy chart detected")
             print("tableName====================", tableName)
@@ -6001,8 +6834,8 @@ def receive_chart_details():
                     # Separate back into categories and values
             optimized_categories = [pair[0] for pair in optimized_pairs]
             optimized_values = [pair[1] for pair in optimized_pairs]
-            print("categories",categories)
-            print("values",values)
+            # print("categories",categories)
+            # print("values",values)
             # Return the filtered data
             description = f"{user_name} viewed the chart '{chart}' from table '{tableName}'."
             log_activity(
@@ -6140,10 +6973,10 @@ def dashboard_data(dashboard_name,company_name):
                     wallpaper_src = result[0]
                 cursor.close()
             conn.close()
-            print("fontStyleLocal",fontStyleLocal)
-            print("fontColor",fontColor)
-            print("fontSize",fontSize)
-            print("Chart Data=======>",data)
+            # print("fontStyleLocal",fontStyleLocal)
+            # print("fontColor",fontColor)
+            # print("fontSize",fontSize)
+            # print("Chart Data=======>",data)
         user_email = None
         user_name=None
         emp_conn = psycopg2.connect(
@@ -9932,83 +10765,90 @@ app.config['SCHEDULER_JOB_DEFAULTS'] = {
 scheduler = APScheduler()
 scheduler.init_app(app)
 scheduler.start()
-def update_last_transfer_status(source_table, dest_table, status, message):
-    try:
-        conn = psycopg2.connect(
-            dbname=DB_NAME,
-            user=USER_NAME,
-            password=PASSWORD,
-            host=HOST,
-            port=PORT
-        )
-        cur = conn.cursor()
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS last_transfer_status (
-                id SERIAL PRIMARY KEY,
-                source_table VARCHAR NOT NULL,
-                destination_table VARCHAR NOT NULL,
-                last_transfer_time TIMESTAMP,
-                status VARCHAR,
-                message TEXT,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                UNIQUE (source_table, destination_table)
-            );
-        """)
-        conn.commit()
+# def update_last_transfer_status(source_table, dest_table, status, message, destination_config):
+#     try:
+#         dbname = destination_config.get('dbName')
+#         conn = psycopg2.connect(
+#             dbname =dbname,
+#             user=USER_NAME,
+#             password=PASSWORD,
+#             host=HOST,
+#             port=PORT
+#         )
+#         cur = conn.cursor()
+#         cur.execute("""
+#             CREATE TABLE IF NOT EXISTS last_transfer_status (
+#                 id SERIAL PRIMARY KEY,
+#                 company_name VARCHAR NOT NULL,
+#                 source_table VARCHAR NOT NULL,
+#                 destination_table VARCHAR NOT NULL,
+#                 last_transfer_time TIMESTAMP,
+#                 status VARCHAR,
+#                 message TEXT,
+#                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+#                 UNIQUE (company_name,source_table, destination_table)
+#             );
+#         """)
+#         conn.commit()
+#         company_name = dbname 
+#         upsert_query = """
+#             INSERT INTO last_transfer_status (
+#                 company_name,source_table, destination_table, last_transfer_time, status, message,log_id INT REFERENCES data_transfer_logs(id) ON DELETE CASCADE,
+#                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+#                 UNIQUE (company_name, source_table, destination_table)
+#             )
+#             VALUES (%s,%s, %s, %s, %s, %s)
+#             ON CONFLICT (company_name,source_table, destination_table)
+#             DO UPDATE SET
+#                 last_transfer_time = EXCLUDED.last_transfer_time,
+#                 status = EXCLUDED.status,
+#                 message = EXCLUDED.message,
+#                 updated_at = CURRENT_TIMESTAMP;
+#         """
+#         cur.execute(upsert_query, (
+#             company_name,source_table, dest_table, datetime.utcnow(), status, message
+#         ))
+#         conn.commit()
+#         cur.close()
+#         conn.close()
+#     except Exception as e:
+#         print(f"❌ Failed to update last transfer status: {str(e)}")
 
-        upsert_query = """
-            INSERT INTO last_transfer_status (
-                source_table, destination_table, last_transfer_time, status, message
-            )
-            VALUES (%s, %s, %s, %s, %s)
-            ON CONFLICT (source_table, destination_table)
-            DO UPDATE SET
-                last_transfer_time = EXCLUDED.last_transfer_time,
-                status = EXCLUDED.status,
-                message = EXCLUDED.message,
-                updated_at = CURRENT_TIMESTAMP;
-        """
-        cur.execute(upsert_query, (
-            source_table, dest_table, datetime.utcnow(), status, message
-        ))
-        conn.commit()
-        cur.close()
-        conn.close()
-    except Exception as e:
-        print(f"❌ Failed to update last transfer status: {str(e)}")
 
-
-def create_log_table_if_not_exists():
-    try:
-        conn = get_db_connection()
-        # conn = psycopg2.connect(**LOG_DB_CONFIG)
-        cur = conn.cursor()
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS data_transfer_logs (
-                id SERIAL PRIMARY KEY,
-                source_table VARCHAR,
-                destination_table VARCHAR,
-                schedule_type VARCHAR,
-                run_time TIMESTAMP,
-                status VARCHAR,
-                message TEXT,
-                record_count INTEGER,
-                data_size_mb FLOAT,
-                user_email VARCHAR,
-                job_id VARCHAR,
-                time_taken_seconds FLOAT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                inserted_count INTEGER DEFAULT 0,
-                updated_count INTEGER DEFAULT 0,
-                skipped_count INTEGER DEFAULT 0
-            );
-        """)
-        conn.commit()
-        cur.close()
-        conn.close()
-        print("✅ 'data_transfer_logs' table ensured.")
-    except Exception as e:
-        print(f"❌ Failed to create table: {e}")
+# def create_log_table_if_not_exists(destination_config):
+#     try:
+#         db_name=destination_config.get("dbName")
+#         conn = get_company_db_connection(db_name)
+#         # conn = psycopg2.connect(**LOG_DB_CONFIG)
+#         cur = conn.cursor()
+#         cur.execute("""
+#             CREATE TABLE IF NOT EXISTS data_transfer_logs (
+#                 id SERIAL PRIMARY KEY,
+#                 company_name VARCHAR NOT NULL,
+#                 source_table VARCHAR,
+#                 destination_table VARCHAR,
+#                 schedule_type VARCHAR,
+#                 run_time TIMESTAMP,
+#                 status VARCHAR,
+#                 message TEXT,
+#                 record_count INTEGER,
+#                 data_size_mb FLOAT,
+#                 user_email VARCHAR,
+#                 user_id INTEGER REFERENCES employee_list(employee_id),
+#                 job_id VARCHAR,
+#                 time_taken_seconds FLOAT,
+#                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+#                 inserted_count INTEGER DEFAULT 0,
+#                 updated_count INTEGER DEFAULT 0,
+#                 skipped_count INTEGER DEFAULT 0
+#             );
+#         """)
+#         conn.commit()
+#         cur.close()
+#         conn.close()
+#         print("✅ 'data_transfer_logs' table ensured.")
+#     except Exception as e:
+#         print(f"❌ Failed to create table: {e}")
 def to_native(val):
     """Convert NumPy datatypes to Python-native types."""
     if isinstance(val, (np.integer,)):
@@ -10018,42 +10858,73 @@ def to_native(val):
     if isinstance(val, (np.bool_,)):
         return bool(val)
     return val
-def log_data_transfer(source_table, dest_table, schedule_type, run_time,
-                      status, message, record_count, data_size_mb, email, job_id,time_taken_seconds, inserted_count=0, updated_count=0, skipped_count=0):
-    try:
-        conn = psycopg2.connect(
-            dbname=DB_NAME,  # Update this
-            user=USER_NAME,
-            password=PASSWORD,
-            host=HOST,
-            port=PORT
-        )
-        cur = conn.cursor()
-        insert_query = """
-            INSERT INTO data_transfer_logs (
-                source_table, destination_table, schedule_type, run_time,
-                status, message, record_count, data_size_mb, user_email, job_id,time_taken_seconds, inserted_count, updated_count, skipped_count
-            )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s,%s,%s, %s, %s)
-        """
-        # cur.execute(insert_query, (
-        #     source_table, dest_table, schedule_type, run_time,
-        #     status, message, record_count, data_size_mb, email, job_id,time_taken_seconds, inserted_count, updated_count, skipped_count
-        # ))
-        values = (
-            source_table, dest_table, schedule_type, run_time,
-            status, message, record_count, data_size_mb,
-            email, job_id, time_taken_seconds,
-            inserted_count, updated_count, skipped_count
-        )
+# def log_data_transfer(source_table, dest_table, schedule_type, run_time,
+#                       status, message, record_count, data_size_mb, email, job_id,time_taken_seconds, inserted_count=0, updated_count=0, skipped_count=0):
+#     try:
+#         conn = psycopg2.connect(
+#             dbname=DB_NAME,  # Update this
+#             user=USER_NAME,
+#             password=PASSWORD,
+#             host=HOST,
+#             port=PORT
+#         )
+#         cur = conn.cursor()
+#         insert_query = """
+#             INSERT INTO data_transfer_logs (
+#                 source_table, destination_table, schedule_type, run_time,
+#                 status, message, record_count, data_size_mb, user_email, job_id,time_taken_seconds, inserted_count, updated_count, skipped_count
+#             )
+#             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s,%s,%s, %s, %s)
+#         """
+#         # cur.execute(insert_query, (
+#         #     source_table, dest_table, schedule_type, run_time,
+#         #     status, message, record_count, data_size_mb, email, job_id,time_taken_seconds, inserted_count, updated_count, skipped_count
+#         # ))
+#         values = (
+#             source_table, dest_table, schedule_type, run_time,
+#             status, message, record_count, data_size_mb,
+#             email, job_id, time_taken_seconds,
+#             inserted_count, updated_count, skipped_count
+#         )
 
-        cur.execute(insert_query, tuple(to_native(v) for v in values))
+#         cur.execute(insert_query, tuple(to_native(v) for v in values))
 
-        conn.commit()
-        cur.close()
-        conn.close()
-    except Exception as e:
-        print(f"❌ Failed to log data transfer: {str(e)}")
+#         conn.commit()
+#         cur.close()
+#         conn.close()
+#     except Exception as e:
+#         print(f"❌ Failed to log data transfer: {str(e)}")
+# def log_data_transfer(source_table, dest_table, schedule_type, run_time,
+#                       status, message, record_count, data_size_mb, email, job_id,
+#                       time_taken_seconds, destination_config, user_id=None,
+#                       inserted_count=0, updated_count=0, skipped_count=0):
+#     try:
+#         dbname=destination_config.get("dbName")
+#         conn = get_company_db_connection(dbname)
+       
+#         cur = conn.cursor()
+#         insert_query = """
+#             INSERT INTO data_transfer_logs (
+#                 company_name,source_table, destination_table, schedule_type, run_time,
+#                 status, message, record_count, data_size_mb,
+#                 user_email, user_id, job_id, time_taken_seconds,
+#                 inserted_count, updated_count, skipped_count
+#             )
+#             VALUES (%s,%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+#         """
+#         values = (
+#             dbname,source_table, dest_table, schedule_type, run_time,
+#             status, message, record_count, data_size_mb,
+#             email, user_id, job_id, time_taken_seconds,
+#             inserted_count, updated_count, skipped_count
+#         )
+#         cur.execute(insert_query, tuple(to_native(v) for v in values))
+#         conn.commit()
+#         cur.close()
+#         conn.close()
+#     except Exception as e:
+#         print(f"❌ Failed to log data transfer: {str(e)}")
+
 # def send_notification_email(recipient, subject, body):
 #     try:
 #         print("Using Hotmail SMTP to send email...")
@@ -10172,56 +11043,286 @@ def send_notification_email(recipient, subject, body):
 #         if email:
 #             send_notification_email(email, "Data Transfer Failed", error_msg)
 #         return {"success": False, "error": error_msg}
+# def job_logic(cols=None, source_config=None, destination_config=None,
+#               source_table_name=None, dest_table_name=None,
+#               update_existing_table=False, create_view_if_exists=False,
+#               email=None, schedule_type=None, job_id=None,user_id=None):
+#     start_time = datetime.utcnow()
+#     print(f"[{datetime.now()}] Job triggered for table: {source_table_name}")
+#     create_log_table_if_not_exists(destination_config)
+
+#     try:
+#         # Placeholder for your actual data fetch logic
+#         source_df, fetch_error = fetch_data_with_columns(source_config, source_table_name, cols)
+#         if fetch_error:
+#             msg = f"Failed to fetch data: {fetch_error}"
+#             print(msg)
+#             if email:
+#                 send_notification_email(email, "Data Transfer Failed", msg)
+#             return {"success": False, "error": msg}
+
+#         if source_df is None:
+#             msg = f"No data found in '{source_table_name}'"
+#             if email:
+#                 send_notification_email(email, "Data Transfer Skipped", msg)
+#             log_data_transfer(source_table_name, dest_table_name, schedule_type,
+#                               datetime.utcnow(), "Skipped", msg, 0, 0.0, email, job_id, 0.0,destination_config, user_id,inserted_count=0, updated_count=0, skipped_count=0)
+#             print("Data transfer logged successfully1.")
+#             update_last_transfer_status(source_table_name, dest_table_name, "Skipped", msg,destination_config)
+#             return {"success": True, "message": msg}
+
+#         # Placeholder for insert logic
+#         insert_success = True  # Replace with actual insert result
+#         insert_error = None
+#         view_name = None
+#         insert_success, insert_error, view_created, view_name ,inserted_count, updated_count = insert_dataframe_with_upsert(
+#             destination_config, dest_table_name, source_df,source_config, source_table_name, cols, create_view_if_exists
+#         )
+#         skipped_count = len(source_df) - inserted_count - updated_count
+#         if not insert_success:
+#             msg = f"Insert failed: {insert_error}"
+#             if email:
+#                 send_notification_email(email, "Data Transfer Failed", msg)
+#             log_data_transfer(source_table_name, dest_table_name, schedule_type,
+#                               datetime.utcnow(), "Failed", msg, 0, 0.0, email, job_id, 0.0,destination_config, user_id,inserted_count, updated_count, skipped_count)
+#             print("Data transfer logged successfully.2")
+#             update_last_transfer_status(source_table_name, dest_table_name, "Failed", msg,destination_config)
+#             return {"success": False, "error": msg}
+
+#         records_count = len(source_df)
+#         data_size = source_df.memory_usage(deep=True).sum() / (1024 * 1024)
+
+#         msg = f"Transferred {records_count} records from {source_table_name} to {dest_table_name}."
+
+#         email_body = f"""
+# Subject: 3A Vision Data Transfer Completed
+
+# Hello {email},
+
+# ✅ Data transfer from '{source_config.get('dbName')}' to '{destination_config.get('dbName')}' completed.
+
+# Details:
+# Table: {source_table_name}
+# Records: {records_count}
+# Size: {data_size:.2f} MB
+# Time: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')}
+
+# Regards,
+# 3A Vision Team
+# """
+#         if email:
+#             send_notification_email(email, "3A Vision Data Transfer Completed", email_body)
+#         end_time = datetime.utcnow()
+#         time_taken_seconds = (end_time - start_time).total_seconds()
+#         log_data_transfer(source_table_name, dest_table_name, schedule_type,
+#                           datetime.utcnow(), "Success", msg, records_count, data_size, email, job_id,time_taken_seconds,destination_config, user_id,inserted_count, updated_count, skipped_count)
+#         print("Data transfer logged successfully.")
+#         update_last_transfer_status(source_table_name, dest_table_name, "Success", msg,destination_config)
+#         return {"success": True, "message": msg}
+
+#     except Exception as e:
+#         error_msg = f"Unexpected error: {str(e)}"
+#         print(traceback.format_exc())
+#         if email:
+#             send_notification_email(email, "Data Transfer Failed", error_msg)
+#         log_data_transfer(source_table_name, dest_table_name, schedule_type,
+#                           datetime.utcnow(), "Failed", error_msg, 0, 0.0, email, job_id,0.0,destination_config, user_id,inserted_count=0, updated_count=0, skipped_count=0)
+#         print("Data transfer logged successfully.3")
+#         return {"success": False, "error": error_msg}
+
+
+
+# --- Create data_transfer_logs table if it doesn't exist ---
+def create_log_table_if_not_exists(destination_config):
+    try:
+        db_name = destination_config.get("dbName")
+        conn = get_company_db_connection(db_name)
+        cur = conn.cursor()
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS data_transfer_logs (
+                id SERIAL PRIMARY KEY,
+                company_name VARCHAR NOT NULL,
+                source_table VARCHAR,
+                destination_table VARCHAR,
+                schedule_type VARCHAR,
+                run_time TIMESTAMP,
+                status VARCHAR,
+                message TEXT,
+                record_count INTEGER,
+                data_size_mb FLOAT,
+                user_email VARCHAR,
+                user_id INTEGER REFERENCES employee_list(employee_id),
+                job_id VARCHAR,
+                time_taken_seconds FLOAT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                inserted_count INTEGER DEFAULT 0,
+                updated_count INTEGER DEFAULT 0,
+                skipped_count INTEGER DEFAULT 0
+            );
+        """)
+        conn.commit()
+        cur.close()
+        conn.close()
+        print("✅ 'data_transfer_logs' table ensured.")
+    except Exception as e:
+        print(f"❌ Failed to create table: {e}")
+
+
+# --- Log data transfer and return log_id ---
+def log_data_transfer(source_table, dest_table, schedule_type, run_time,
+                      status, message, record_count, data_size_mb, email, job_id,
+                      time_taken_seconds, destination_config, user_id=None,
+                      inserted_count=0, updated_count=0, skipped_count=0):
+    try:
+        dbname = destination_config.get("dbName")
+        conn = get_company_db_connection(dbname)
+        cur = conn.cursor()
+        insert_query = """
+            INSERT INTO data_transfer_logs (
+                company_name, source_table, destination_table, schedule_type, run_time,
+                status, message, record_count, data_size_mb,
+                user_email, user_id, job_id, time_taken_seconds,
+                inserted_count, updated_count, skipped_count
+            )
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+            RETURNING id;
+        """
+        values = (
+            dbname, source_table, dest_table, schedule_type, run_time,
+            status, message, record_count, data_size_mb,
+            email, user_id, job_id, time_taken_seconds,
+            inserted_count, updated_count, skipped_count
+        )
+        # cur.execute(insert_query, tuple(values))
+        cur.execute(insert_query, tuple(to_native(v) for v in values))
+        log_id = cur.fetchone()[0]  # get the inserted row ID
+        conn.commit()
+        cur.close()
+        conn.close()
+        print(f"✅ Data transfer logged successfully. Log ID: {log_id}")
+        return log_id
+    except Exception as e:
+        print(f"❌ Failed to log data transfer: {str(e)}")
+        return None
+
+
+# --- Update last transfer status linked to log_id ---
+def update_last_transfer_status(source_table, dest_table, status, message, destination_config, log_id=None):
+    try:
+        dbname = destination_config.get('dbName')
+        conn = psycopg2.connect(
+            dbname=dbname,
+            user=USER_NAME,
+            password=PASSWORD,
+            host=HOST,
+            port=PORT
+        )
+        cur = conn.cursor()
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS last_transfer_status (
+                id SERIAL PRIMARY KEY,
+                company_name VARCHAR NOT NULL,
+                source_table VARCHAR NOT NULL,
+                destination_table VARCHAR NOT NULL,
+                last_transfer_time TIMESTAMP,
+                status VARCHAR,
+                message TEXT,
+                log_id INT REFERENCES data_transfer_logs(id) ON DELETE CASCADE,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE (company_name, source_table, destination_table)
+            );
+        """)
+        conn.commit()
+
+        company_name = dbname
+        upsert_query = """
+            INSERT INTO last_transfer_status (
+                company_name, source_table, destination_table, last_transfer_time, status, message, log_id
+            )
+            VALUES (%s,%s,%s,%s,%s,%s,%s)
+            ON CONFLICT (company_name, source_table, destination_table)
+            DO UPDATE SET
+                last_transfer_time = EXCLUDED.last_transfer_time,
+                status = EXCLUDED.status,
+                message = EXCLUDED.message,
+                log_id = EXCLUDED.log_id,
+                updated_at = CURRENT_TIMESTAMP;
+        """
+        cur.execute(upsert_query, (
+            company_name, source_table, dest_table, datetime.utcnow(), status, message, log_id
+        ))
+        conn.commit()
+        cur.close()
+        conn.close()
+        print("✅ Last transfer status updated.")
+    except Exception as e:
+        print(f"❌ Failed to update last transfer status: {str(e)}")
+
+
+# --- Main job logic ---
 def job_logic(cols=None, source_config=None, destination_config=None,
               source_table_name=None, dest_table_name=None,
               update_existing_table=False, create_view_if_exists=False,
-              email=None, schedule_type=None, job_id=None):
+              email=None, schedule_type=None, job_id=None, user_id=None):
     start_time = datetime.utcnow()
     print(f"[{datetime.now()}] Job triggered for table: {source_table_name}")
-    create_log_table_if_not_exists()
+
+    create_log_table_if_not_exists(destination_config)
 
     try:
-        # Placeholder for your actual data fetch logic
+        # --- Fetch source data (replace with your logic) ---
         source_df, fetch_error = fetch_data_with_columns(source_config, source_table_name, cols)
         if fetch_error:
             msg = f"Failed to fetch data: {fetch_error}"
-            print(msg)
             if email:
                 send_notification_email(email, "Data Transfer Failed", msg)
             return {"success": False, "error": msg}
 
-        if source_df is None:
+        if source_df is None or source_df.empty:
             msg = f"No data found in '{source_table_name}'"
             if email:
                 send_notification_email(email, "Data Transfer Skipped", msg)
-            log_data_transfer(source_table_name, dest_table_name, schedule_type,
-                              datetime.utcnow(), "Skipped", msg, 0, 0.0, email, job_id, 0.0,inserted_count=0, updated_count=0, skipped_count=0)
-            update_last_transfer_status(source_table_name, dest_table_name, "Skipped", msg)
+            log_id = log_data_transfer(source_table_name, dest_table_name, schedule_type,
+                                       datetime.utcnow(), "Skipped", msg, 0, 0.0, email,
+                                       job_id, 0.0, destination_config, user_id)
+            update_last_transfer_status(source_table_name, dest_table_name, "Skipped", msg, destination_config, log_id)
             return {"success": True, "message": msg}
 
-        # Placeholder for insert logic
-        insert_success = True  # Replace with actual insert result
-        insert_error = None
-        view_name = None
-        insert_success, insert_error, view_created, view_name ,inserted_count, updated_count = insert_dataframe_with_upsert(
-            destination_config, dest_table_name, source_df,source_config, source_table_name, cols, create_view_if_exists
+        # --- Insert data into destination (replace with your logic) ---
+        insert_success, insert_error, view_created, view_name, inserted_count, updated_count = insert_dataframe_with_upsert(
+            destination_config, dest_table_name, source_df, source_config, source_table_name, cols, create_view_if_exists
         )
         skipped_count = len(source_df) - inserted_count - updated_count
+
         if not insert_success:
             msg = f"Insert failed: {insert_error}"
             if email:
                 send_notification_email(email, "Data Transfer Failed", msg)
-            log_data_transfer(source_table_name, dest_table_name, schedule_type,
-                              datetime.utcnow(), "Failed", msg, 0, 0.0, email, job_id, 0.0,inserted_count, updated_count, skipped_count)
-            update_last_transfer_status(source_table_name, dest_table_name, "Failed", msg)
+            log_id = log_data_transfer(source_table_name, dest_table_name, schedule_type,
+                                       datetime.utcnow(), "Failed", msg, 0, 0.0, email,
+                                       job_id, 0.0, destination_config, user_id,
+                                       inserted_count, updated_count, skipped_count)
+            update_last_transfer_status(source_table_name, dest_table_name, "Failed", msg, destination_config, log_id)
             return {"success": False, "error": msg}
 
+        # --- Success logging ---
         records_count = len(source_df)
         data_size = source_df.memory_usage(deep=True).sum() / (1024 * 1024)
-
         msg = f"Transferred {records_count} records from {source_table_name} to {dest_table_name}."
+        end_time = datetime.utcnow()
+        time_taken_seconds = (end_time - start_time).total_seconds()
 
-        email_body = f"""
+        # Log transfer
+        log_id = log_data_transfer(source_table_name, dest_table_name, schedule_type,
+                                   datetime.utcnow(), "Success", msg, records_count, data_size, email,
+                                   job_id, time_taken_seconds, destination_config, user_id,
+                                   inserted_count, updated_count, skipped_count)
+        # Update last status
+        update_last_transfer_status(source_table_name, dest_table_name, "Success", msg, destination_config, log_id)
+
+        # --- Optional email notification ---
+        if email:
+            email_body = f"""
 Subject: 3A Vision Data Transfer Completed
 
 Hello {email},
@@ -10237,13 +11338,8 @@ Time: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')}
 Regards,
 3A Vision Team
 """
-        if email:
             send_notification_email(email, "3A Vision Data Transfer Completed", email_body)
-        end_time = datetime.utcnow()
-        time_taken_seconds = (end_time - start_time).total_seconds()
-        log_data_transfer(source_table_name, dest_table_name, schedule_type,
-                          datetime.utcnow(), "Success", msg, records_count, data_size, email, job_id,time_taken_seconds,inserted_count, updated_count, skipped_count)
-        update_last_transfer_status(source_table_name, dest_table_name, "Success", msg)
+
         return {"success": True, "message": msg}
 
     except Exception as e:
@@ -10251,9 +11347,12 @@ Regards,
         print(traceback.format_exc())
         if email:
             send_notification_email(email, "Data Transfer Failed", error_msg)
-        log_data_transfer(source_table_name, dest_table_name, schedule_type,
-                          datetime.utcnow(), "Failed", error_msg, 0, 0.0, email, job_id,0.0,inserted_count=0, updated_count=0, skipped_count=0)
+        log_id = log_data_transfer(source_table_name, dest_table_name, schedule_type,
+                                   datetime.utcnow(), "Failed", error_msg, 0, 0.0, email,
+                                   job_id, 0.0, destination_config, user_id, 0, 0, 0)
+        update_last_transfer_status(source_table_name, dest_table_name, "Failed", error_msg, destination_config, log_id)
         return {"success": False, "error": error_msg}
+
 
 # @app.route('/api/transfer_data', methods=['POST'])
 # def transfer_and_verify_data():
@@ -10381,6 +11480,7 @@ def transfer_and_verify_data():
     company_name = destination_config.get("dbName")  # ⚡ assume company DB
     email = data.get('email')
     print("dest_table_name",dest_table_name)
+    user_id=data.get('user_id')
 
     # if not dest_table_name:
 
@@ -10467,7 +11567,8 @@ def transfer_and_verify_data():
         "create_view_if_exists": create_view_if_exists,
         "email": email,
         "schedule_type": schedule_type or "instant",
-        "job_id": job_id
+        "job_id": job_id,
+        "user_id":user_id
     }
     print("job_kwargs",job_kwargs)
     if not schedule_type or schedule_type == '':
@@ -10527,22 +11628,22 @@ def transfer_and_verify_data():
             print("-" * 50)
         if email:
             msg = f"""
-Subject: 3A Vision Data Transfer Scheduled
+                Subject: 3A Vision Data Transfer Scheduled
 
-Hello {email},
+                Hello {email},
 
-Your data transfer job has been successfully scheduled.
+                Your data transfer job has been successfully scheduled.
 
-Details:
-Source Table: {source_table_name}
-Destination Table: {dest_table_name}
-Schedule Type: {schedule_type}
-Scheduled Time: {schedule_time if schedule_time else 'N/A'}
-Job ID: {job_id}
+                Details:
+                Source Table: {source_table_name}
+                Destination Table: {dest_table_name}
+                Schedule Type: {schedule_type}
+                Scheduled Time: {schedule_time if schedule_time else 'N/A'}
+                Job ID: {job_id}
 
-Regards,
-3A Vision Team
-"""
+                Regards,
+                3A Vision Team
+                """
             send_notification_email(email, "3A Vision Data Transfer Scheduled", msg)
 
         return jsonify({"success": True, "message": "Job scheduled successfully", "job_id": job_id})
@@ -12603,7 +13704,7 @@ def save_api_data():
 #         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/system_summary', methods=['GET'])
-@token_required
+
 def system_summary():
     try:
         company_name = request.args.get('company_name')
@@ -12655,6 +13756,23 @@ def system_summary():
             latest_table_name, table_created_time = latest_table
         else:
             latest_table_name, table_created_time = "N/A", "N/A"
+        admin_cur.execute("""
+            SELECT dtl.destination_table, lts.last_transfer_time, lts.status
+            FROM last_transfer_status lts
+            JOIN data_transfer_logs dtl ON lts.log_id = dtl.id
+            WHERE dtl.company_name = %s
+            ORDER BY lts.last_transfer_time DESC
+            LIMIT 1;
+        """, (company_name,))
+
+        last_transfer = admin_cur.fetchone()
+
+        if last_transfer:
+            last_table_name, last_transfer_time, transfer_status = last_transfer
+        else:
+            last_table_name, last_transfer_time, transfer_status = "N/A", None, "Unknown"
+
+
 
         # ---- 4️⃣ Fetch total projects ----
         cur.execute("""
@@ -12696,6 +13814,7 @@ def system_summary():
         active_users = len(set(active_users_list))
         inactive_users = len(set(all_users) - set(active_users_list))
         total_users = len(set(all_users))
+        
 
 
         # ---- 7️⃣ Mock data growth (placeholder for now) ----
@@ -12721,7 +13840,10 @@ def system_summary():
             "most_used_chart": most_used_chart,
             "active_users": active_users,
             "inactive_users": inactive_users,
-            "data_growth_percentage": data_growth_percentage
+            "data_growth_percentage": data_growth_percentage,
+            "last_transfer_time": last_transfer_time,
+            "transfer_status": transfer_status,
+            "last_table_name": last_table_name,
         })
 
     except Exception as e:
@@ -13076,6 +14198,53 @@ def get_all_plans():
         return jsonify({'message': 'License plans fetched successfully ✅', 'data': plans}), 200
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+@app.route('/get_all_plans_company', methods=['GET'])
+def get_all_plans_company():
+    try:
+        company_id = request.args.get("company_id")
+        print("company_id",company_id)
+
+        conn = get_db_connection()
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+
+        # Check if FREE plan already used for this company
+        free_used = False
+        if company_id:
+            cur.execute("""
+                SELECT 1 
+                FROM organization_license ol
+                JOIN license_plan lp ON ol.plan_id = lp.id
+                WHERE ol.company_id = %s AND LOWER(lp.plan_name) = 'free'
+            """, (company_id,))
+            
+            free_used = cur.fetchone() is not None
+
+        # Get all plans
+        cur.execute("""
+            SELECT lp.id, lp.plan_name, lp.description, lp.storage_limit, lp.price, 
+                   lp.duration_days, lp.employee_limit,
+                   json_agg(json_build_object('feature_name', lf.feature_name, 'is_enabled', lf.is_enabled))
+                   AS features
+            FROM license_plan lp
+            LEFT JOIN license_features lf ON lp.id = lf.plan_id
+            GROUP BY lp.id
+            ORDER BY lp.id;
+        """)
+
+        plans = cur.fetchall()
+
+        cur.close()
+        conn.close()
+
+        # Filter out FREE plan if already used
+        if free_used:
+            plans = [p for p in plans if p['plan_name'].lower() != 'free']
+
+        return jsonify({'message': 'License plans fetched successfully ✅', 'data': plans}), 200
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 
 
 # ==========================================================
@@ -13328,6 +14497,52 @@ def update_license_plan(plan_id):
 
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+@app.route("/get_org_plan_activation_details", methods=["GET"])
+def get_org_plan_activation_details():
+    try:
+        company_id = request.args.get("company_id")
+        if not company_id:
+            return jsonify({"error": "company_id is required"}), 400
+
+        conn = get_db_connection()
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+
+        cur.execute("""
+            SELECT 
+                ol.id,
+                ol.company_id,
+                o.organizationname,
+                lp.plan_name,
+                lp.price,
+                lp.duration_days,
+                lp.employee_limit,
+                ol.start_date,
+                ol.end_date,
+                ol.is_active,
+                CASE 
+                    WHEN ol.end_date >= CURRENT_DATE THEN 'Active'
+                    ELSE 'Expired'
+                END AS status
+            FROM organization_license ol
+            JOIN license_plan lp ON ol.plan_id = lp.id
+            JOIN organizationdatatest o ON ol.company_id = o.id
+            WHERE ol.company_id = %s
+            ORDER BY ol.start_date DESC;
+        """, (company_id,))
+
+        plans = cur.fetchall()
+
+        cur.close()
+        conn.close()
+
+        return jsonify({
+            "message": "Organization plan activation history fetched successfully ✅",
+            "data": plans
+        }), 200
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 @app.route("/api/get_organization", methods=["GET"])
 
 def get_organization():
@@ -13445,6 +14660,61 @@ def check_login_status_route():
             cur.close()
         if conn:
             conn.close()
+
+
+@app.route('/column_types', methods=['GET'])
+def get_column_types():
+    try:
+        database = request.args.get("database")
+        table = request.args.get("table")
+        columns = request.args.get("columns", "")
+
+        if not database or not table or not columns:
+            return jsonify({
+                "status": "error",
+                "message": "Missing required parameters: database, table, columns"
+            }), 400
+
+        column_list = columns.split(",")
+
+        conn = psycopg2.connect(
+            host=HOST,
+            database=database,
+            user=USER_NAME,
+            password=PASSWORD,
+            port=PORT
+        )
+        cur = conn.cursor()
+
+        result = {}
+
+        for col in column_list:
+            cur.execute(f"""
+                SELECT data_type 
+                FROM information_schema.columns 
+                WHERE table_schema = 'public'
+                AND table_name = %s 
+                AND column_name = %s
+            """, (table, col))
+
+            row = cur.fetchone()
+            result[col] = row[0] if row else "unknown"
+
+        cur.close()
+        conn.close()
+
+        return jsonify({
+            "status": "success",
+            "data": result
+        })
+
+    except Exception as e:
+        print("Error in /column_types:", e)
+        return jsonify({
+            "status": "error",
+            "message": str(e)
+        }), 500
+
 
 # app.register_blueprint(license_bp)
 

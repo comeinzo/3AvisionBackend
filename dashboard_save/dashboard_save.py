@@ -1554,6 +1554,57 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                             print(df.head(3))
                             
                             # Group the filtered dataframe
+                            # =========================================================
+                            #                 DATE GRANULARITY FOR COUNT
+                            # =========================================================
+                            dateGranularity = selectedFrequency
+
+                            # Parse granularity JSON if string
+                            if isinstance(dateGranularity, str):
+                                try:
+                                    import json
+                                    dateGranularity = json.loads(dateGranularity)
+                                except:
+                                    dateGranularity = {}
+
+                            if dateGranularity and isinstance(dateGranularity, dict):
+                                for date_col, granularity in dateGranularity.items():
+                                    if date_col in df.columns and date_col in x_axis:
+                                        print(f"[COUNT] Applying granularity: {date_col} -> {granularity}")
+
+                                        df[date_col] = pd.to_datetime(df[date_col], errors='coerce')
+                                        g = granularity.lower()
+
+                                        granularity_col = f"{date_col}_{g}"
+
+                                        if g == "year":
+                                            df[granularity_col] = df[date_col].dt.year.astype(str)
+
+                                        elif g == "quarter":
+                                            df[granularity_col] = "Q" + df[date_col].dt.quarter.astype(str)
+
+                                        elif g == "month":
+                                            df[granularity_col] = df[date_col].dt.month_name()
+
+                                        elif g == "week":
+                                            df[granularity_col] = "Week " + df[date_col].dt.isocalendar().week.astype(str)
+
+                                        elif g == "day":
+                                            df[granularity_col] = df[date_col].dt.strftime("%Y-%m-%d")
+
+                                        else:
+                                            print(f"Unsupported granularity: {granularity}")
+                                            continue
+
+                                        # Replace x_axis column with granularity column
+                                        x_axis = [granularity_col if c == date_col else c for c in x_axis]
+
+                                        print(f"[COUNT] Created granularity column → {granularity_col}")
+                                        print(df[[date_col, granularity_col]].head())
+
+                            # =========================================================
+                            #                 GROUPING AFTER GRANULARITY
+                            # =========================================================
                             print(f"\nGrouping by: {x_axis[0]}")
                             grouped_df = df.groupby(x_axis[0]).size().reset_index(name="count")
                             
@@ -1963,6 +2014,55 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                     else:
                         # x axis 1 and y axis 1
                         # x axis 1 and y axis 1
+                       # =========================================================
+                        #     DATE GRANULARITY (NORMAL AGG) — SAME AS COUNT VERSION
+                        # =========================================================
+                        dateGranularity = selectedFrequency
+
+                        # Parse granularity JSON if string
+                        if isinstance(dateGranularity, str):
+                            try:
+                                import json
+                                dateGranularity = json.loads(dateGranularity)
+                            except:
+                                dateGranularity = {}
+
+                        if dateGranularity and isinstance(dateGranularity, dict):
+                            for date_col, granularity in dateGranularity.items():
+                                if date_col in dataframe.columns and date_col in x_axis:
+                                    print(f"[AGG] Applying granularity: {date_col} -> {granularity}")
+
+                                    dataframe[date_col] = pd.to_datetime(dataframe[date_col], errors='coerce')
+                                    g = granularity.lower()
+
+                                    granularity_col = f"{date_col}_{g}"
+
+                                    # Apply correct granularity
+                                    if g == "year":
+                                        dataframe[granularity_col] = dataframe[date_col].dt.year.astype(str)
+
+                                    elif g == "quarter":
+                                        dataframe[granularity_col] = "Q" + dataframe[date_col].dt.quarter.astype(str)
+
+                                    elif g == "month":
+                                        dataframe[granularity_col] = dataframe[date_col].dt.month_name()
+
+                                    elif g == "week":
+                                        dataframe[granularity_col] = "Week " + dataframe[date_col].dt.isocalendar().week.astype(str)
+
+                                    elif g == "day":
+                                        dataframe[granularity_col] = dataframe[date_col].dt.strftime("%Y-%m-%d")
+
+                                    else:
+                                        print(f"Unsupported granularity: {granularity}")
+                                        continue
+
+                                    # Replace the x-axis column with the new granularity column
+                                    x_axis = [granularity_col if c == date_col else c for c in x_axis]
+
+                                    print(f"[AGG] Created granularity column → {granularity_col}")
+                                    print(dataframe[[date_col, granularity_col]].head())
+                            
                         grouped_df = dataframe.groupby(x_axis[0])[y_axis].agg(aggregate_py).reset_index()
                         print("Grouped DataFrame:", grouped_df.head())
 
@@ -1987,18 +2087,32 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                             categories = [str(category) for category in categories]  
                         values = [float(value) for value in grouped_df[y_axis[0]]]
 
-                        print("categories--222", categories)
-                        print("values--222", values)
+                        # print("categories--222", categories)
+                        # print("values--222", values)
 
                         # Filter categories and values based on filter_options
                         filtered_categories = []
                         filtered_values = []
-                        for category, value in zip(categories, values):
-                            if category in filter_options:
-                                filtered_categories.append(category)
-                                filtered_values.append(value)
+                        # for category, value in zip(categories, values):
+                        #     if category in filter_options:
+                        #         filtered_categories.append(category)
+                        #         filtered_values.append(value)
+                        if selectedFrequency:
+                            filtered_categories = categories
+                            filtered_values = values
+                        else:
+                            filtered_categories = []
+                            filtered_values = []
+                            for category, value in zip(categories, values):
+                                if category in filter_options:
+                                    filtered_categories.append(category)
+                                    filtered_values.append(value)
                         print("Filtered Categories:", filtered_categories)
                         print("Filtered Values:", filtered_values)
+
+
+                        # print("Filtered Categories:", filtered_categories)
+                        # print("Filtered Values:", filtered_values)
 
                         chart_data_list.append({
                             "categories": filtered_categories,

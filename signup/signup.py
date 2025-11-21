@@ -241,13 +241,69 @@ def fetch_usersdata():
 #     }
 
 
+# def fetch_login_data(email, password):
+#     conn = get_db_connection()
+#     cursor = conn.cursor()
+#     create_table_if_not_exists()
+
+#     try:
+#         # ✅ Step 1: Fetch user by email only
+#         cursor.execute("SELECT * FROM organizationdatatest WHERE email = %s", (email,))
+#         user = cursor.fetchone()
+
+#         if not user:
+#             logging.warning(f"❌ No user found with email: {email}")
+#             return {"status": "error", "message": "User not found"}
+
+#         stored_hashed_password = user[4]  # 4th column is password (hashed)
+
+#         stored_hash_bytes = binascii.unhexlify(stored_hashed_password.replace('\\x', ''))
+#         print("------------------------------------",stored_hash_bytes)    
+#         # Check if the password matches the hashed password
+#         if bcrypt.checkpw(password.encode('utf-8'), stored_hash_bytes):
+
+#         # ✅ Step 2: Check password using bcrypt
+#         # if bcrypt.checkpw(plain_password.encode('utf-8'), stored_hashed_password.encode('utf-8')):
+#             logging.info(f"✅ Password match for {email}")
+
+#             logo_path = None
+#             company_name = None
+#             company_id = None
+
+#             # Assuming user[5] = logo, user[1] = organization name, user[0] = company id
+#             if user[5]:
+#                 logo_path = user[5].replace("\\", "/")
+#             if user[1]:
+#                 company_name = user[1]
+#                 company_id = user[0]
+
+#             return {
+#                 "status": "success",
+#                 "message": "Login successful",
+#                 "user": user,
+#                 "logo_url": f"http://localhost:5000/static/{logo_path}" if logo_path else None,
+#                 "company_name": company_name,
+#                 "company_id": company_id,
+#             }
+
+#         else:
+#             logging.warning(f"❌ Invalid password for {email}")
+#             return {"status": "error", "message": "Invalid password"}
+
+#     except Exception as e:
+#         logging.error(f"Error in fetch_login_data: {str(e)}")
+#         raise e
+
+#     finally:
+#         cursor.close()
+#         conn.close()
 def fetch_login_data(email, password):
     conn = get_db_connection()
     cursor = conn.cursor()
     create_table_if_not_exists()
 
     try:
-        # ✅ Step 1: Fetch user by email only
+        # Step 1: Fetch user by email
         cursor.execute("SELECT * FROM organizationdatatest WHERE email = %s", (email,))
         user = cursor.fetchone()
 
@@ -255,22 +311,37 @@ def fetch_login_data(email, password):
             logging.warning(f"❌ No user found with email: {email}")
             return {"status": "error", "message": "User not found"}
 
-        stored_hashed_password = user[4]  # 4th column is password (hashed)
+        stored_password = user[4]  # Password column
 
-        stored_hash_bytes = binascii.unhexlify(stored_hashed_password.replace('\\x', ''))
-        print("------------------------------------",stored_hash_bytes)    
-        # Check if the password matches the hashed password
-        if bcrypt.checkpw(password.encode('utf-8'), stored_hash_bytes):
+        password_matches = False
 
-        # ✅ Step 2: Check password using bcrypt
-        # if bcrypt.checkpw(plain_password.encode('utf-8'), stored_hashed_password.encode('utf-8')):
+        # ----------------------------------------------
+        # CHECK IF PASSWORD IN DB IS BCRYPT OR PLAIN TEXT
+        # ----------------------------------------------
+
+        try:
+            # Case 1 : try to decode as bcrypt hash
+            stored_hash_bytes = binascii.unhexlify(stored_password.replace('\\x', ''))
+            
+            # If decoding works, check bcrypt
+            if bcrypt.checkpw(password.encode('utf-8'), stored_hash_bytes):
+                password_matches = True
+
+        except Exception:
+            # Case 2 : stored password is probably plain text
+            if stored_password == password:
+                password_matches = True
+
+        # ----------------------------------------------
+        # FINAL PASSWORD CHECK
+        # ----------------------------------------------
+        if password_matches:
             logging.info(f"✅ Password match for {email}")
 
             logo_path = None
             company_name = None
             company_id = None
 
-            # Assuming user[5] = logo, user[1] = organization name, user[0] = company id
             if user[5]:
                 logo_path = user[5].replace("\\", "/")
             if user[1]:
@@ -297,6 +368,7 @@ def fetch_login_data(email, password):
     finally:
         cursor.close()
         conn.close()
+
 
 
 
