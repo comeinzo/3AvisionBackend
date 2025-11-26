@@ -5646,7 +5646,8 @@ def receive_chart_details():
 
                     # ------------------------------ END REPLACEMENT BLOCK ------------------------------
 
-        else:            
+        else:   
+            print("Treee")
             data = fetch_data_tree(tableName, x_axis, filter_options, y_axis, aggregate, databaseName,selectedUser,calculation_data)
             categories = data.get("categories", [])
             values = data.get("values", [])

@@ -1195,29 +1195,9 @@ def fetch_data_tree(table_name, x_axis_columns, filter_options, y_axis_column, a
 
         # Fetch data from database
         print("Fetching data from the database...")
-        # if not selectedUser or selectedUser.lower() == 'null':
-        #     print("Using default database connection...")
-        #     connection_string = f"dbname={db_name} user={USER_NAME} password={PASSWORD} host={HOST}"
-        #     connection = psycopg2.connect(connection_string)
-        # else:
-        #     connection_details = fetch_external_db_connection(db_name, selectedUser)
-        #     if not connection_details:
-        #         raise Exception("Unable to fetch external database connection details.")
-        #     db_details = {
-        #         "host": connection_details[3],
-        #         "database": connection_details[7],
-        #         "user": connection_details[4],
-        #         "password": connection_details[5],
-        #         "port": int(connection_details[6])
-        #     }
-        #     connection = psycopg2.connect(
-        #         dbname=db_details['database'],
-        #         user=db_details['user'],
-        #         password=db_details['password'],
-        #         host=db_details['host'],
-        #         port=db_details['port'],
-            # )
+        
         connection = get_db_connection_or_path(selectedUser, db_name)
+        print("connection..........")
 
         cur = connection.cursor()
         query = f'SELECT * FROM "{table_name}"'
@@ -1571,6 +1551,10 @@ def fetch_data_tree(table_name, x_axis_columns, filter_options, y_axis_column, a
         options = list(map(str, options))
 
         filtered_df = temp_df[temp_df[x_axis_columns[0]].isin(options)]
+        if options:
+            filtered_df = temp_df[temp_df[x_axis_columns[0]].isin(options)]
+        else:
+            filtered_df = temp_df
 
         if y_axis_column and aggregation and y_axis_column[0] in filtered_df.columns:
             if aggregation.lower() == "sum":
