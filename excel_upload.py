@@ -606,19 +606,46 @@ def determine_sql_data_type(value):
     else:
         return 'VARCHAR'
 
+# # Enhanced column type detection with proper date handling
+# def determine_column_type(df, col):
+#     """
+#     Enhanced column type detection with proper date handling
+#     """
+#     sample_values = df[col].dropna()
+    
+#     if len(sample_values) == 0:
+#         return 'VARCHAR'
+    
+#     # Check if column contains date objects (from our date processing)
+#     if sample_values.apply(lambda x: isinstance(x, date)).any():
+#         return 'DATE'
+#     elif sample_values.apply(lambda x: isinstance(x, str)).all():
+#         return 'VARCHAR'
+#     elif sample_values.apply(lambda x: isinstance(x, int)).all():
+#         return 'INTEGER'
+#     elif sample_values.apply(lambda x: isinstance(x, float)).all():
+#         return 'NUMERIC'
+#     else:
+#         return 'VARCHAR'
+
+
 # Enhanced column type detection with proper date handling
 def determine_column_type(df, col):
     """
-    Enhanced column type detection with proper date handling
+    Enhanced column type detection with proper date and boolean handling
     """
     sample_values = df[col].dropna()
     
     if len(sample_values) == 0:
         return 'VARCHAR'
     
-    # Check if column contains date objects (from our date processing)
+    # Check if column contains date objects
     if sample_values.apply(lambda x: isinstance(x, date)).any():
         return 'DATE'
+    # --- FIX START: Check for Boolean specifically BEFORE checking for Integer ---
+    elif sample_values.apply(lambda x: isinstance(x, bool)).all():
+        return 'VARCHAR'
+    # --- FIX END ---
     elif sample_values.apply(lambda x: isinstance(x, str)).all():
         return 'VARCHAR'
     elif sample_values.apply(lambda x: isinstance(x, int)).all():

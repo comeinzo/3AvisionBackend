@@ -2807,6 +2807,8 @@ def get_edit_chart_route():
             dateGranularity
         )
 
+        print("Fetched data:---------------------------", data)
+
         # -----------------------------------------------------------
         # 3. SIMPLE AGGREGATION TYPES (count, average, variance)
         # -----------------------------------------------------------
@@ -2836,7 +2838,8 @@ def get_edit_chart_route():
             return jsonify({
                 "categories": array1,
                 "values": array2,
-                "aggregation": aggregation
+                "aggregation": aggregation,
+                "hello": "hi"
             })
 
         # -----------------------------------------------------------
@@ -2920,7 +2923,8 @@ def get_edit_chart_route():
         return jsonify({
             "categories": labels,
             "values": values,
-            "aggregation": aggregation
+            "aggregation": aggregation,
+            "hello": "x1&y1"
         })
 
     elif len(y_axis_columns) == 0 and chartType == "wordCloud":
