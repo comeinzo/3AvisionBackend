@@ -1221,7 +1221,7 @@ def listen_to_db(sid, table_name, x_axis_columns, checked_option, y_axis_columns
             while connection.notifies:
                 notify = connection.notifies.pop(0)
                 if notify.payload == table_name:
-                    updated_data = fetch_data(table_name, x_axis_columns, checked_option, y_axis_columns, aggregation, db_name, None,calculationData,dateGranularity)
+                    updated_data = fetch_data(table_name, x_axis_columns, checked_option, y_axis_columns, aggregation, db_name, None,calculationData,dateGranularity=None)
                    
                     # Create data package
                     data_package = {
