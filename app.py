@@ -5646,7 +5646,8 @@ def receive_chart_details():
 
                     # ------------------------------ END REPLACEMENT BLOCK ------------------------------
 
-        else:            
+        else:   
+            print("Treee")
             data = fetch_data_tree(tableName, x_axis, filter_options, y_axis, aggregate, databaseName,selectedUser,calculation_data)
             categories = data.get("categories", [])
             values = data.get("values", [])
@@ -8123,7 +8124,7 @@ def check_filename(fileName, company_name):
     try:
         conn = get_db_connection()
         cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-        create_dashboard_table(conn)
+        # create_dashboard_table(conn)
         
         # Query to check if the file name exists for the given company name
         query = """
@@ -8980,6 +8981,30 @@ def job_logic(cols=None, source_config=None, destination_config=None,
                                    inserted_count, updated_count, skipped_count)
         # Update last status
         update_last_transfer_status(source_table_name, dest_table_name, "Success", msg, destination_config, log_id)
+        if schedule_type and schedule_type != "instant":
+            try:
+                source_db = source_config.get("dbName") if source_config else "Unknown"
+                dest_db = destination_config.get("dbName") if destination_config else "Unknown"
+                log_activity(
+                    user_email=email,
+                    action_type="Scheduled Data Transfer Completed",
+                    # description=(
+                    #     f"Scheduled data transfer job completed successfully "
+                    #     f"from source table '{source_table_name}' to destination table '{dest_table_name}'. "
+                    #     f"Inserted: {inserted_count}, Updated: {updated_count}, Skipped: {skipped_count}."
+                    # ),
+                    description=(
+                        f"Scheduled data transfer job completed successfully "
+                        f"from source table '{source_table_name}' (DB: '{source_db}') "
+                        f"to destination table '{dest_table_name}' (DB: '{dest_db}'). "
+                        f"Inserted: {inserted_count}, Updated: {updated_count}, Skipped: {skipped_count}."
+                    ),
+                    table_name=source_table_name,
+                    company_name=destination_config.get("dbName"),
+                    dashboard_name=None
+                )
+            except Exception as e:
+                print("⚠️ Failed to log scheduled activity:", e)
 
         # --- Optional email notification ---
         if email:
@@ -9001,7 +9026,15 @@ Regards,
 """
             send_notification_email(email, "3A Vision Data Transfer Completed", email_body)
 
-        return {"success": True, "message": msg}
+        
+        return {
+                "success": True,
+                "message": msg,
+                "inserted": inserted_count,
+                "updated": updated_count,
+                "skipped": skipped_count
+            }
+
 
     except Exception as e:
         error_msg = f"Unexpected error: {str(e)}"
@@ -9012,7 +9045,7 @@ Regards,
                                    datetime.utcnow(), "Failed", error_msg, 0, 0.0, email,
                                    job_id, 0.0, destination_config, user_id, 0, 0, 0)
         update_last_transfer_status(source_table_name, dest_table_name, "Failed", error_msg, destination_config, log_id)
-        return {"success": False, "error": error_msg}
+        return {"success": False, "error": error_msg, "inserted": 0, "updated": 0, "skipped": 0}
 
 @app.route('/api/transfer_data', methods=['POST'])
 @token_required
@@ -9105,13 +9138,25 @@ def transfer_and_verify_data():
     print("job_kwargs",job_kwargs)
     if not schedule_type or schedule_type == '':
         result = job_logic(**job_kwargs)
+        inserted_count = result.get("inserted", 0)
+        updated_count = result.get("updated", 0)
+        skipped_count = result.get("skipped", 0)
+        source_db = source_config.get("dbName") if source_config else "Unknown"
+        dest_db = destination_config.get("dbName") if destination_config else "Unknown"
         log_activity(
             user_email=user_email,
             action_type="Data Transfer",
+            # description=(
+            #     f"User {user_name} ({user_email}) transferred data "
+            #     f"from '{source_table_name}' to '{dest_table_name}'."
+            # ),
             description=(
                 f"User {user_name} ({user_email}) transferred data "
-                f"from '{source_table_name}' to '{dest_table_name}'."
+                f"from source table '{source_table_name}' (DB: '{source_db}') "
+                f"to destination table '{dest_table_name}' (DB: '{dest_db}'). "
+                f"Inserted: {inserted_count}, Updated: {updated_count}, Skipped: {skipped_count}."
             ),
+
             table_name=source_table_name,
             company_name=company_name,
             dashboard_name=None
@@ -10210,9 +10255,7 @@ def save_api_data():
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-
 @app.route('/api/system_summary', methods=['GET'])
-# @token_required
 def system_summary():
     try:
         company_name = request.args.get('company_name')
@@ -10228,114 +10271,367 @@ def system_summary():
         conn = get_db_connection()
         cur = conn.cursor()
 
+        # ================================
+        # 🔵 Helper: Check if table exists
+        # ================================
+        def table_exists(cursor, table_name):
+            cursor.execute("""
+                SELECT EXISTS (
+                    SELECT 1 FROM information_schema.tables
+                    WHERE table_schema='public' AND table_name=%s
+                );
+            """, (table_name,))
+            return cursor.fetchone()[0]
+
+        # ================================
+        # 2️⃣ TOTAL TABLE COUNT (Exclude internal tables)
+        # ================================
         admin_cur.execute("""
             SELECT COUNT(*)
             FROM information_schema.tables
             WHERE table_schema = 'public'
-            AND table_name NOT IN ('category', 'role', 'role_permission', 'user', 'employee_list', 'datasource');
+            AND table_name NOT IN (
+                'category', 'role', 'role_permission', 
+                'user', 'employee_list', 'datasource',
+                'activity_log','data_transfer_logs',
+                'last_transfer_status','user_management_logs'
+            );
         """)
         num_tables = admin_cur.fetchone()[0]
-        admin_cur.execute("""
-            SELECT data_source_name, created_at
-            FROM datasource
-            ORDER BY created_at DESC
-            LIMIT 1;
-        """)
-        latest_table = admin_cur.fetchone()
-        if latest_table:
-            latest_table_name, table_created_time = latest_table
+
+        # ================================
+        # 3️⃣ LATEST DATASOURCE TABLE
+        # ================================
+        if table_exists(admin_cur, "datasource"):
+            admin_cur.execute("""
+                SELECT data_source_name, created_at
+                FROM datasource
+                ORDER BY created_at DESC
+                LIMIT 1;
+            """)
+            lt = admin_cur.fetchone()
+            if lt:
+                latest_table_name, table_created_time = lt
+            else:
+                latest_table_name, table_created_time = "N/A", "N/A"
         else:
             latest_table_name, table_created_time = "N/A", "N/A"
-        admin_cur.execute("""
-            SELECT dtl.destination_table, lts.last_transfer_time, lts.status
-            FROM last_transfer_status lts
-            JOIN data_transfer_logs dtl ON lts.log_id = dtl.id
-            WHERE dtl.company_name = %s
-            ORDER BY lts.last_transfer_time DESC
-            LIMIT 1;
-        """, (company_name,))
 
-        last_transfer = admin_cur.fetchone()
+        # ================================
+        # 4️⃣ LAST TRANSFER STATUS
+        # ================================
+        if table_exists(admin_cur, "last_transfer_status") and table_exists(admin_cur, "data_transfer_logs"):
+            admin_cur.execute("""
+                SELECT dtl.destination_table, lts.last_transfer_time, lts.status
+                FROM last_transfer_status lts
+                JOIN data_transfer_logs dtl ON lts.log_id = dtl.id
+                WHERE dtl.company_name = %s
+                ORDER BY lts.last_transfer_time DESC
+                LIMIT 1;
+            """, (company_name,))
+            last = admin_cur.fetchone()
 
-        if last_transfer:
-            last_table_name, last_transfer_time, transfer_status = last_transfer
+            if last:
+                last_table_name, last_transfer_time, transfer_status = last
+            else:
+                last_table_name, last_transfer_time, transfer_status = "N/A", None, "Unknown"
         else:
             last_table_name, last_transfer_time, transfer_status = "N/A", None, "Unknown"
-        # ---- 4️⃣ Fetch total projects ----
-        cur.execute("""
-            SELECT COUNT(DISTINCT project_name)
-            FROM table_dashboard
-            WHERE company_name = %s AND user_id = %s;
-        """, (company_name, user_id))
-        total_projects = cur.fetchone()[0] or 0
 
-        # ---- 5️⃣ Most used chart type ----
-        cur.execute("""
-            SELECT chart_type, COUNT(*) AS usage_count
-            FROM table_chart_save
-            WHERE company_name = %s
-            GROUP BY chart_type
-            ORDER BY usage_count DESC
-            LIMIT 1;
-        """, (company_name,))
-        most_used_chart = cur.fetchone()
-        most_used_chart = most_used_chart[0] if most_used_chart else "N/A"
-
-        # ---- 6️⃣ Active vs Inactive users ----
-        # Get all users from company DB
-        admin_cur.execute("""
-            SELECT DISTINCT employee_id
-            FROM employee_list;
-        """)
-        all_users = [row[0] for row in admin_cur.fetchall()]
-
-        # Get active users (those who created charts)
-        cur.execute("""
-            SELECT DISTINCT user_id
-            FROM table_chart_save
-            WHERE company_name = %s;
-        """, (company_name,))
-        active_users_list = [row[0] for row in cur.fetchall()]
-
-        # Calculate counts
-        active_users = len(set(active_users_list))
-        inactive_users = len(set(all_users) - set(active_users_list))
-        total_users = len(set(all_users))
-        
-
-
-        # ---- 7️⃣ Mock data growth (placeholder for now) ----
-        # data_growth_percentage = 25.3
-        if total_users > 0:
-            data_growth_percentage = round((active_users / total_users) * 100, 2)
+        # ================================
+        # 5️⃣ TOTAL PROJECTS
+        # ================================
+        if table_exists(cur, "table_dashboard"):
+            cur.execute("""
+                SELECT COUNT(DISTINCT project_name)
+                FROM table_dashboard
+                WHERE company_name = %s AND user_id = %s;
+            """, (company_name, user_id))
+            total_projects = cur.fetchone()[0] or 0
         else:
-            data_growth_percentage = 0.0
+            total_projects = 0
 
-        # ---- ✅ Close all connections ----
+        # ================================
+        # 6️⃣ MOST USED CHART TYPE
+        # ================================
+        if table_exists(cur, "table_chart_save"):
+            cur.execute("""
+                SELECT chart_type, COUNT(*) AS usage_count
+                FROM table_chart_save
+                WHERE company_name = %s
+                GROUP BY chart_type
+                ORDER BY usage_count DESC
+                LIMIT 1;
+            """, (company_name,))
+            most_used_chart_data = cur.fetchone()
+            most_used_chart = most_used_chart_data[0] if most_used_chart_data else "N/A"
+        else:
+            most_used_chart = "N/A"
+
+        # ================================
+        # 7️⃣ ACTIVE USERS VS INACTIVE USERS
+        # ================================
+
+        # Get all employees
+        if table_exists(admin_cur, "employee_list"):
+            admin_cur.execute("SELECT DISTINCT employee_id FROM employee_list;")
+            all_users = [row[0] for row in admin_cur.fetchall()]
+        else:
+            all_users = []
+
+        # Active users (who created charts)
+        if table_exists(cur, "table_chart_save"):
+            cur.execute("""
+                SELECT DISTINCT user_id
+                FROM table_chart_save
+                WHERE company_name = %s;
+            """, (company_name,))
+            active_user_list = [row[0] for row in cur.fetchall()]
+        else:
+            active_user_list = []
+
+        active_users = len(set(active_user_list))
+        inactive_users = len(set(all_users) - set(active_user_list))
+        total_users = len(set(all_users))
+
+        data_growth_percentage = (
+            round((active_users / total_users) * 100, 2)
+            if total_users > 0 else 0.0
+        )
+
+        # ================================
+        # CLOSE CONNECTIONS
+        # ================================
         cur.close()
         conn.close()
         admin_cur.close()
         admin_conn.close()
 
-        # ---- ✅ Return summary ----
+        # ================================
+        # RETURN SUMMARY
+        # ================================
         return jsonify({
             "num_tables": num_tables,
             "latest_table": latest_table_name,
             "table_created_time": table_created_time,
-            # "latest_table": latest_table_name,
+
             "total_projects": total_projects,
             "most_used_chart": most_used_chart,
+
             "active_users": active_users,
             "inactive_users": inactive_users,
+            "total_users": total_users,
             "data_growth_percentage": data_growth_percentage,
+
             "last_transfer_time": last_transfer_time,
             "transfer_status": transfer_status,
-            "last_table_name": last_table_name,
+            "last_table_name": last_table_name
         })
 
     except Exception as e:
         print("Error:", e)
         return jsonify({"error": str(e)}), 500
+
+
+
+
+
+
+@app.route('/api/company_summary', methods=['GET'])
+@token_required
+def company_summary():
+    try:
+        company_name = request.args.get('company_name')
+        if not company_name:
+            return jsonify({"error": "Company name is required"}), 400
+
+        # ---- 1️⃣ Connect to company DB and main DB ----
+        admin_conn = get_company_db_connection(company_name)
+        admin_cur = admin_conn.cursor()
+
+        conn = get_db_connection()
+        cur = conn.cursor()
+        create_user_table(admin_conn)
+        create_activity_log_table(company_name)
+
+        # ---- 2️⃣ Fetch Company ID ----
+        cur.execute("SELECT id FROM organizationdatatest WHERE organizationname = %s", (company_name,))
+        result = cur.fetchone()
+        if not result:
+            return jsonify({"error": "Company not found"}), 404
+        company_id = result[0]
+
+        # ================================
+        # 🔵 FETCH LICENSE PLAN DETAILS
+        # ================================
+        today = datetime.now().date()
+
+        # deactivate expired plans
+        cur.execute("""
+            UPDATE organization_license
+            SET is_active = FALSE
+            WHERE company_id = %s AND end_date < %s AND is_active = TRUE
+        """, (company_id, today))
+        conn.commit()
+
+        # fetch active plan
+        cur.execute("""
+            SELECT p.plan_name, p.employee_limit, cl.start_date, cl.end_date
+            FROM organization_license cl
+            JOIN license_plan p ON cl.plan_id = p.id
+            WHERE cl.company_id = %s AND cl.is_active = TRUE
+        """, (company_id,))
+        plan = cur.fetchone()
+
+        if plan:
+            plan_name, employee_limit, plan_start_date, plan_end_date = plan
+        else:
+            plan_name = "No Active Plan"
+            employee_limit = 0
+            plan_start_date = None
+            plan_end_date = None
+
+        # ================================
+        # 🔵 Helper: Check if table exists
+        # ================================
+        def table_exists(cursor, table_name):
+            cursor.execute("""
+                SELECT EXISTS (
+                    SELECT 1 FROM information_schema.tables
+                    WHERE table_schema='public' AND table_name=%s
+                );
+            """, (table_name,))
+            return cursor.fetchone()[0]
+
+        # ---- 3️⃣ Count total tables ----
+        admin_cur.execute("""
+            SELECT COUNT(*)
+            FROM information_schema.tables
+            WHERE table_schema = 'public'
+            AND table_name NOT IN (
+                'category', 'role', 'role_permission', 
+                'user', 'employee_list', 'datasource',
+                'activity_log','data_transfer_logs',
+                'last_transfer_status','user_management_logs'
+            );
+        """)
+        num_tables = admin_cur.fetchone()[0]
+
+        # ---- 4️⃣ Latest created datasource ----
+        if table_exists(admin_cur, "datasource"):
+            admin_cur.execute("""
+                SELECT data_source_name, created_at
+                FROM datasource
+                ORDER BY created_at DESC
+                LIMIT 1;
+            """)
+            lt = admin_cur.fetchone()
+            latest_table_name, table_created_time = lt if lt else ("N/A", "N/A")
+        else:
+            latest_table_name, table_created_time = "N/A", "N/A"
+
+        # ---- 5️⃣ Last Data Transfer ----
+        lts_exists = table_exists(admin_cur, "last_transfer_status")
+        dtl_exists = table_exists(admin_cur, "data_transfer_logs")
+
+        if lts_exists and dtl_exists:
+            admin_cur.execute("""
+                SELECT dtl.source_table, dtl.destination_table, 
+                       lts.last_transfer_time, lts.status,
+                       dtl.inserted_count, dtl.updated_count, dtl.skipped_count
+                FROM last_transfer_status lts
+                JOIN data_transfer_logs dtl ON lts.log_id = dtl.id
+                WHERE dtl.company_name = %s
+                ORDER BY lts.last_transfer_time DESC
+                LIMIT 1;
+            """, (company_name,))
+
+            last = admin_cur.fetchone()
+            if last:
+                (last_source_table, last_table_name, last_transfer_time,
+                 transfer_status, inserted_count, updated_count, skipped_count) = last
+            else:
+                last_source_table = last_table_name = last_transfer_time = None
+                transfer_status = "No transfers"
+                inserted_count = updated_count = skipped_count = 0
+        else:
+            last_source_table = last_table_name = last_transfer_time = None
+            transfer_status = "No transfers"
+            inserted_count = updated_count = skipped_count = 0
+
+        # ---- 8️⃣ Total Employees (employee_list) ----
+        if table_exists(admin_cur, "employee_list"):
+            admin_cur.execute("SELECT COUNT(*) FROM employee_list;")
+            total_employees = admin_cur.fetchone()[0]
+        else:
+            total_employees = 0
+
+        # ---- 9️⃣ Employees Count Grouped by Role ----
+        if table_exists(admin_cur, "employee_list") and table_exists(admin_cur, "role"):
+            admin_cur.execute("""
+                SELECT r.role_name, COUNT(e.employee_id)
+                FROM employee_list e
+                LEFT JOIN role r ON CAST(e.role_id AS INTEGER) = r.role_id
+                GROUP BY r.role_name
+                ORDER BY r.role_name;
+            """)
+            role_wise_count = [
+                {"role_name": row[0] if row[0] else "Unknown", "count": row[1]}
+                for row in admin_cur.fetchall()
+            ]
+        else:
+            role_wise_count = []
+
+        # ---- 🔟 Active & Inactive Users ----
+        cur.execute("""
+            SELECT DISTINCT user_id FROM table_chart_save WHERE company_name = %s;
+        """, (company_name,))
+        active_users = len(cur.fetchall())
+
+        inactive_users = total_employees - active_users if total_employees > 0 else 0
+
+        data_growth_percentage = (
+            round((active_users / total_employees) * 100, 2)
+            if total_employees > 0 else 0.0
+        )
+
+        # ---- CLOSE CONNECTIONS ----
+        cur.close()
+        conn.close()
+        admin_cur.close()
+        admin_conn.close()
+
+        # ---- RETURN SUMMARY ----
+        return jsonify({
+            "num_tables": num_tables,
+            "latest_table": latest_table_name,
+            "table_created_time": table_created_time,
+
+            "plan_name": plan_name,
+            "plan_employee_limit": employee_limit,
+            "plan_start_date": plan_start_date,
+            "plan_end_date": plan_end_date,
+
+            "active_users": active_users,
+            "inactive_users": inactive_users,
+            "total_employees": total_employees,
+            "data_growth_percentage": data_growth_percentage,
+
+            "last_transfer_time": last_transfer_time,
+            "transfer_status": transfer_status,
+            "last_table_name": last_table_name,
+            "last_source_table": last_source_table,
+            "inserted_count": inserted_count,
+            "updated_count": updated_count,
+            "skipped_count": skipped_count,
+
+            "role_wise_count": role_wise_count
+        })
+
+    except Exception as e:
+        print("Error:", e)
+        return jsonify({"error": str(e)}), 500
+
 
 
 
