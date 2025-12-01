@@ -729,7 +729,12 @@ def get_chart_columns():
         cur.close()
         conn.close()
 
-        return jsonify({"x_axis": chart["x_axis"], "y_axis": chart["y_axis"]}), 200
+        # return jsonify({"x_axis": chart["x_axis"], "y_axis": chart["y_axis"]}), 200
+        return jsonify({
+            "x_axis": chart["x_axis"] or [],
+            "y_axis": chart["y_axis"] or []
+        }), 200
+
     except Exception as e:
         print("Error while fetching chart details:", e)
         return jsonify({"error": "Failed to fetch chart details"}), 500
@@ -6308,7 +6313,7 @@ def handle_hierarchical_bar_click():
         clicked_category = data.get('category')
         x_axis_columns = data.get('xAxis')
         y_axis_column = data.get('yAxis')
-        table_name = data.get('tableName')
+        table_name = data.get('selectedTable')
         db_name = data.get('databaseName')
         current_depth = data.get('currentLevel', 0)
         selectedUser=data.get("selectedUser")
@@ -10804,27 +10809,87 @@ def add_license_plan():
 # ==========================================================
 # ➕ Add Feature to Plan
 # ==========================================================
+# @app.route('/add_license_feature', methods=['POST'])
+# # @token_required
+# def add_license_feature():
+#     data = request.json
+#     plan_id = data.get('plan_id')
+#     feature_name = data.get('feature_name')
+#     is_enabled = data.get('is_enabled', True)
+
+#     try:
+#         conn = get_db_connection()
+#         cur = conn.cursor()
+#         cur.execute("""
+#             INSERT INTO license_features (plan_id, feature_name, is_enabled)
+#             VALUES (%s, %s, %s)
+#         """, (plan_id, feature_name, is_enabled))
+#         conn.commit()
+#         cur.close()
+#         conn.close()
+#         return jsonify({'message': 'Feature added successfully ✅'}), 200
+#     except Exception as e:
+#         return jsonify({'error': str(e)}), 500
+# --- MODIFIED BACKEND LOGIC ---
 @app.route('/add_license_feature', methods=['POST'])
-# @token_required
 def add_license_feature():
     data = request.json
     plan_id = data.get('plan_id')
     feature_name = data.get('feature_name')
-    is_enabled = data.get('is_enabled', True)
+    is_enabled = data.get('is_enabled', True) # Default to True
 
     try:
         conn = get_db_connection()
         cur = conn.cursor()
+
+        # ---------------------------------------------
+        # 🔍 CHECK IF FEATURE ALREADY EXISTS
+        # ---------------------------------------------
         cur.execute("""
-            INSERT INTO license_features (plan_id, feature_name, is_enabled)
-            VALUES (%s, %s, %s)
-        """, (plan_id, feature_name, is_enabled))
+            SELECT id FROM license_features
+            WHERE plan_id = %s AND LOWER(feature_name) = LOWER(%s)
+        """, (plan_id, feature_name))
+
+        existing_id = cur.fetchone()
+
+        if existing_id:
+            # ---------------------------------------------
+            # ✅ UPDATE EXISTING FEATURE (The missing piece!)
+            # ---------------------------------------------
+            feature_id = existing_id[0]
+            cur.execute("""
+                UPDATE license_features
+                SET is_enabled = %s
+                WHERE id = %s
+            """, (is_enabled, feature_id))
+            
+            message = 'Feature status updated successfully.'
+
+        else:
+            # ---------------------------------------------
+            # 🆕 INSERT NEW FEATURE
+            # ---------------------------------------------
+            cur.execute("""
+                INSERT INTO license_features (plan_id, feature_name, is_enabled)
+                VALUES (%s, %s, %s)
+            """, (plan_id, feature_name, is_enabled))
+            
+            message = 'Feature added successfully.'
+
         conn.commit()
         cur.close()
         conn.close()
-        return jsonify({'message': 'Feature added successfully ✅'}), 200
+
+        return jsonify({'message': message}), 200
+
     except Exception as e:
+        # Note: You should handle closing connection on failure here too
+        # Example: if 'conn' is defined, 'conn.close()'
         return jsonify({'error': str(e)}), 500
+
+# ---------------------------------------------
+# You do NOT need to change your React component. 
+# The issue is purely in the backend's handling of existing records.
 @app.route('/update_license_feature', methods=['PUT'])
 def update_license_feature():
     data = request.get_json()
