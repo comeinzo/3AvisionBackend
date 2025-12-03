@@ -5755,6 +5755,7 @@ def get_dashboard_data(dashboard_name, company_name,user_id):
 @token_required
 def dashboard_data(dashboard_name,company_name):
     user_id, dashboard_name = dashboard_name.split(",", 1)  # Split only once
+    view_mode = request.args.get('view_mode') 
     # user_id = request.args.get('user_id')
     data = get_dashboard_data(dashboard_name,company_name,user_id)
     # print("chart datas------------------------------------------------------------------------------------------------------------------",data) 
@@ -5771,11 +5772,13 @@ def dashboard_data(dashboard_name,company_name):
         fontColor =data[22]
         fontSize =data[21]
         wallpaper_id=data[23]
+        dashboard_Filter=data[26]
         
         print("chart_ids====================",chart_ids)    
         print("chart_areacolour====================",areacolour)   
         print("image_ids",image_ids)
-        chart_datas=get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,droppableBgColor,opacity,image_ids,chart_type)
+        print("dashboard_Filter",dashboard_Filter)
+        chart_datas=get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,droppableBgColor,opacity,image_ids,chart_type,dashboard_Filter,view_mode)
         # print("dashboarddata",data)
         # print("chart_datas====================",chart_datas)
         image_data_list = []
@@ -11557,67 +11560,117 @@ def get_tableFilter_columns():
 #         print("Error fetching dashboard tables:", e)
 #         return jsonify({"error": "Failed to fetch tables"}), 500
 
+# @app.route('/api/dashboard-tables', methods=['GET'])
+# @token_required
+# def get_dashboard_tables():
+#     dashboard_names = request.args.get('dashboard')
+#     if not dashboard_names:
+#         return jsonify({"error": "Dashboard name is required"}), 400
+
+#     dashboard_names = dashboard_names.split(',')  # list of dashboard names
+#     company_name = request.args.get('company_name')  # optional
+#     user_id = request.args.get('user_id')
+
+#     conn = get_db_connection()
+#     if conn is None:
+#         return jsonify({"error": "Failed to connect to the database"}), 500
+
+#     try:
+#         cur = conn.cursor(cursor_factory=RealDictCursor)
+
+#         # Fetch chart_ids for all dashboards
+#         cur.execute("""
+#             SELECT chart_ids 
+#             FROM table_dashboard
+#             WHERE file_name = ANY(%s)
+#               AND user_id = %s
+#               AND (%s IS NULL OR company_name = %s)
+#         """, (dashboard_names, user_id, company_name, company_name))
+        
+#         dashboard_rows = cur.fetchall()
+
+
+#         if not dashboard_rows:
+#             return jsonify({"tables": []}), 200
+
+#         # Collect all chart_ids
+#         chart_ids = []
+#         for row in dashboard_rows:
+#             if row.get('chart_ids'):
+#                 ids = row['chart_ids'].strip('{}').split(',')
+#                 chart_ids.extend([int(cid) for cid in ids if cid.strip().isdigit()])
+
+#         if not chart_ids:
+#             return jsonify({"tables": []}), 200
+#         print("chart_ids",chart_ids)
+
+#         # Fetch tables from chart_ids
+#         cur.execute("""
+#             SELECT DISTINCT selected_table
+#             FROM table_chart_save
+#             WHERE id = ANY(%s)
+#         """, (chart_ids,))
+
+#         tables = [row['selected_table'] for row in cur.fetchall() if row['selected_table']]
+
+#         cur.close()
+#         conn.close()
+
+#         return jsonify({"tables": tables}), 200
+
+#     except Exception as e:
+#         print("Error fetching dashboard tables:", e)
+#         return jsonify({"error": "Failed to fetch tables"}), 500
 @app.route('/api/dashboard-tables', methods=['GET'])
 @token_required
 def get_dashboard_tables():
-    dashboard_names = request.args.get('dashboard')
-    if not dashboard_names:
+    dashboards = request.args.get("dashboard")
+    company_name = request.args.get("company_name")
+    user_id = request.args.get("user_id")
+
+    if not dashboards:
         return jsonify({"error": "Dashboard name is required"}), 400
 
-    dashboard_names = dashboard_names.split(',')  # list of dashboard names
-    company_name = request.args.get('company_name')  # optional
-    user_id = request.args.get('user_id')
+    dashboards = dashboards.split(",")
 
     conn = get_db_connection()
     if conn is None:
-        return jsonify({"error": "Failed to connect to the database"}), 500
+        return jsonify({"error": "DB connection error"}), 500
 
     try:
-        cur = conn.cursor(cursor_factory=RealDictCursor)
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
 
-        # Fetch chart_ids for all dashboards
-        cur.execute("""
-            SELECT chart_ids 
-            FROM table_dashboard
-            WHERE file_name = ANY(%s)
-              AND user_id = %s
-              AND (%s IS NULL OR company_name = %s)
-        """, (dashboard_names, user_id, company_name, company_name))
-        
-        dashboard_rows = cur.fetchall()
+            # 🚀 Single query fetches all chart_ids together
+            cur.execute("""
+                SELECT DISTINCT unnest(chart_ids::int[]) AS cid
+                FROM table_dashboard
+                WHERE file_name = ANY(%s)
+                  AND user_id = %s
+                  AND (%s IS NULL OR company_name = %s)
+            """, (dashboards, user_id, company_name, company_name))
 
+            chart_ids = [row["cid"] for row in cur.fetchall()]
+            if not chart_ids:
+                return jsonify({"tables": []}), 200
 
-        if not dashboard_rows:
-            return jsonify({"tables": []}), 200
+            # 🚀 Fetch tables in ONE query
+            cur.execute("""
+                SELECT DISTINCT selected_table
+                FROM table_chart_save
+                WHERE id = ANY(%s)
+            """, (chart_ids,))
 
-        # Collect all chart_ids
-        chart_ids = []
-        for row in dashboard_rows:
-            if row.get('chart_ids'):
-                ids = row['chart_ids'].strip('{}').split(',')
-                chart_ids.extend([int(cid) for cid in ids if cid.strip().isdigit()])
-
-        if not chart_ids:
-            return jsonify({"tables": []}), 200
-        print("chart_ids",chart_ids)
-
-        # Fetch tables from chart_ids
-        cur.execute("""
-            SELECT DISTINCT selected_table
-            FROM table_chart_save
-            WHERE id = ANY(%s)
-        """, (chart_ids,))
-
-        tables = [row['selected_table'] for row in cur.fetchall() if row['selected_table']]
-
-        cur.close()
-        conn.close()
+            tables = [r["selected_table"] for r in cur.fetchall()]
 
         return jsonify({"tables": tables}), 200
 
     except Exception as e:
-        print("Error fetching dashboard tables:", e)
+        print("Dashboard tables error:", e)
         return jsonify({"error": "Failed to fetch tables"}), 500
+
+    finally:
+        conn.close()
+
 @app.route('/save_dashboard_filters', methods=['POST'])
 @token_required
 def save_dashboard_filters_dashboard():
@@ -11691,6 +11744,43 @@ def save_dashboard_filters_dashboard():
     except Exception as e:
         print("Error saving dashboard filters:", e)
         return jsonify({"error": "Failed to save dashboard filters"}), 500
+# @app.route('/api/get-dashboard-filters', methods=['GET'])
+# @token_required
+# def get_dashboard_filters():
+#     dashboard_name = request.args.get("dashboard_name")
+#     company_name = request.args.get("company_name")
+#     user_id = request.args.get("user_id")
+
+#     if not (dashboard_name and company_name and user_id):
+#         return jsonify({"error": "Required fields missing"}), 400
+
+#     conn = get_db_connection()
+#     if conn is None:
+#         return jsonify({"error": "Database connection error"}), 500
+
+#     try:
+#         cur = conn.cursor()
+#         cur.execute("""
+#             SELECT dashboard_filter
+#             FROM table_dashboard
+#             WHERE file_name = %s
+#               AND company_name = %s
+#               AND user_id = %s
+#         """, (dashboard_name, company_name, user_id))
+
+#         row = cur.fetchone()
+#         cur.close()
+#         conn.close()
+
+#         if row and row[0]:
+#             return jsonify({"filters": row[0]}), 200
+#         else:
+#             return jsonify({"filters": None}), 200
+
+#     except Exception as e:
+#         print("Error fetching dashboard filters:", e)
+#         return jsonify({"error": "Failed to fetch filters"}), 500
+
 @app.route('/api/get-dashboard-filters', methods=['GET'])
 @token_required
 def get_dashboard_filters():
@@ -11706,62 +11796,154 @@ def get_dashboard_filters():
         return jsonify({"error": "Database connection error"}), 500
 
     try:
-        cur = conn.cursor()
-        cur.execute("""
-            SELECT dashboard_filter
-            FROM table_dashboard
-            WHERE file_name = %s
-              AND company_name = %s
-              AND user_id = %s
-        """, (dashboard_name, company_name, user_id))
+        with conn.cursor() as cur:
+            # Only fetch dashboard_filter, limit 1
+            cur.execute("""
+                SELECT dashboard_filter
+                FROM table_dashboard
+                WHERE file_name = %s
+                  AND company_name = %s
+                  AND user_id = %s
+                LIMIT 1
+            """, (dashboard_name, company_name, user_id))
 
-        row = cur.fetchone()
-        cur.close()
-        conn.close()
+            row = cur.fetchone()
 
-        if row and row[0]:
-            return jsonify({"filters": row[0]}), 200
-        else:
-            return jsonify({"filters": None}), 200
+        filters = row[0] if row and row[0] else None
+        return jsonify({"filters": filters}), 200
 
     except Exception as e:
         print("Error fetching dashboard filters:", e)
         return jsonify({"error": "Failed to fetch filters"}), 500
+
+  
+# @app.route('/api/column-values', methods=['GET'])
+# @token_required
+# def get_columnFilter_values():
+#     table_name = request.args.get('table')
+#     column_name = request.args.get('column')
+#     company_db =  request.args.get('company_name')  # Company-specific DB
+    
+#     if not table_name or not column_name or not company_db:
+#         return jsonify({"error": "Table, column, and company_db are required"}), 400
+
+#     conn = get_company_db_connection(company_db)
+#     if conn is None:
+#         return jsonify({"error": "Failed to connect to the company database"}), 500
+
+#     try:
+#         cur = conn.cursor(cursor_factory=RealDictCursor)
+
+#         # Fetch distinct values
+#         cur.execute(f"""
+#             SELECT DISTINCT "{column_name}" AS value
+#             FROM "{table_name}"
+#             WHERE "{column_name}" IS NOT NULL
+#             ORDER BY "{column_name}" ASC
+#         """)
+#         values = [row['value'] for row in cur.fetchall()]
+
+#         cur.close()
+#         conn.close()
+
+#         return jsonify({"values": values}), 200
+
+#     except Exception as e:
+#         print("Error fetching column values:", e)
+#         return jsonify({"error": "Failed to fetch column values"}), 500
+# @app.route('/api/column-values', methods=['GET'])
+# @token_required
+# def get_columnFilter_values():
+#     table_name = request.args.get('table')
+#     column_name = request.args.get('column')
+#     company_db = request.args.get('company_name')
+
+#     if not table_name or not column_name or not company_db:
+#         return jsonify({"error": "Table, column, and company_db are required"}), 400
+
+#     conn = get_company_db_connection(company_db)
+#     if conn is None:
+#         return jsonify({"error": "Database connection error"}), 500
+
+#     try:
+#         with conn.cursor(cursor_factory=RealDictCursor) as cur:
+#             cur.execute("""
+#                 SELECT DISTINCT "{column}" AS value
+#                 FROM "{table}"
+#                 WHERE "{column}" IS NOT NULL
+#                 ORDR BY "{column}" 
+#                 LIMIT 5000
+#             """.format(column=column_name, table=table_name))
+
+#             values = [r["value"] for r in cur.fetchall()]
+
+#         return jsonify({"values": values}), 200
+
+#     except Exception as e:
+#         print("Column values error:", e)
+#         return jsonify({"error": "Failed to fetch column values"}), 500
+
+#     finally:
+#         conn.close()
 
 @app.route('/api/column-values', methods=['GET'])
 @token_required
 def get_columnFilter_values():
     table_name = request.args.get('table')
     column_name = request.args.get('column')
-    company_db =  request.args.get('company_name')  # Company-specific DB
-    
+    company_db = request.args.get('company_name')
+    search = request.args.get('search', "")  # <-- wildcard search text
+
     if not table_name or not column_name or not company_db:
         return jsonify({"error": "Table, column, and company_db are required"}), 400
 
     conn = get_company_db_connection(company_db)
     if conn is None:
-        return jsonify({"error": "Failed to connect to the company database"}), 500
+        return jsonify({"error": "Database connection error"}), 500
 
     try:
-        cur = conn.cursor(cursor_factory=RealDictCursor)
+        with conn.cursor() as cur:
 
-        # Fetch distinct values
-        cur.execute(f"""
-            SELECT DISTINCT "{column_name}" AS value
-            FROM "{table_name}"
-            WHERE "{column_name}" IS NOT NULL
-            ORDER BY "{column_name}" ASC
-        """)
-        values = [row['value'] for row in cur.fetchall()]
+            # Step 1: Count distinct rows in column
+            count_query = f'SELECT COUNT(DISTINCT "{column_name}") FROM "{table_name}"'
+            cur.execute(count_query)
+            total_count = cur.fetchone()[0]
 
-        cur.close()
-        conn.close()
+            # Step 2: If more than 1000, apply wildcard filtering
+            if total_count > 1000:
 
-        return jsonify({"values": values}), 200
+                query = f'''
+                    SELECT DISTINCT "{column_name}" AS value
+                    FROM "{table_name}"
+                    WHERE "{column_name}"::text ILIKE %s
+                    ORDER BY "{column_name}"
+                    LIMIT 200
+                '''
+                wildcard = f"%{search}%"
+                cur.execute(query, (wildcard,))
+
+            else:
+                # Fetch full list (small column)
+                query = f'''
+                    SELECT DISTINCT "{column_name}" AS value
+                    FROM "{table_name}"
+                    WHERE "{column_name}" IS NOT NULL
+                    ORDER BY "{column_name}"
+                    LIMIT 5000
+                '''
+                cur.execute(query)
+
+            values = [row[0] for row in cur.fetchall()]
+
+        return jsonify({"values": values, "total": total_count}), 200
 
     except Exception as e:
-        print("Error fetching column values:", e)
+        print("Column values error:", e)
         return jsonify({"error": "Failed to fetch column values"}), 500
+
+    finally:
+        conn.close()
+
 # app.register_blueprint(license_bp)
 
 @app.route('/static/<path:filename>')
