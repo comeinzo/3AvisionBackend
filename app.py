@@ -11683,8 +11683,17 @@ def save_dashboard_filters_dashboard():
     table_name = data.get("table_name")  # table name
     print("data",data)
 
-    if not (project and dashboard_name and company_name and user_id and filters_list and table_name):
+    # if not (project and dashboard_name and company_name and user_id and filters_list and table_name):
+    #     return jsonify({"error": "Required fields missing"}), 400
+    # Basic required fields
+    if not (project and dashboard_name and company_name and user_id):
         return jsonify({"error": "Required fields missing"}), 400
+    
+
+    # If filters exist, table_name must be present
+    if filters_list and not table_name:
+        return jsonify({"error": "table_name is required when filters are provided"}), 400
+
 
     conn = get_db_connection()
     if conn is None:

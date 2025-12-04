@@ -326,16 +326,36 @@ def get_dashboard_names(user_id, database_name, project_name=None):
         try:
             with conn_datasource.cursor() as cursor:
                 placeholders = ', '.join(['%s'] * len(all_employee_ids))
-                query = f"""
-                    SELECT user_id, file_name FROM table_dashboard
-                    WHERE user_id IN ({placeholders}) AND company_name = %s AND project_name = %s
-                """
-                params = tuple(map(str, all_employee_ids)) + (database_name, project_name)
+                # query = f"""
+                #     SELECT user_id, file_name FROM table_dashboard
+                #     WHERE user_id IN ({placeholders}) AND company_name = %s AND project_name = %s 
+                # """
+                # params = tuple(map(str, all_employee_ids)) + (database_name, project_name)
+                
+                # if project_name: # Add project_name filter if provided
+                #     query += " AND project_name = %s"
+                #     params += (project_name,)
 
-                if project_name: # Add project_name filter if provided
-                    query += " AND project_name = %s"
-                    params += (project_name,)
+                if project_name:
+                    query = f"""
+                        SELECT user_id, file_name
+                        FROM table_dashboard
+                        WHERE user_id IN ({placeholders})
+                        AND company_name = %s
+                        AND project_name = %s
+                        ORDER BY updated_at DESC;
+                    """
+                    params = tuple(map(str, all_employee_ids)) + (database_name, project_name)
 
+                else:
+                    query = f"""
+                        SELECT user_id, file_name
+                        FROM table_dashboard
+                        WHERE user_id IN ({placeholders})
+                        AND company_name = %s
+                        ORDER BY updated_at DESC;
+                    """
+                    params = tuple(map(str, all_employee_ids)) + (database_name,)
                 cursor.execute(query, params)
                 dashboards = cursor.fetchall()
                 print("dashboards",dashboards)
