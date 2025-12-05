@@ -404,7 +404,8 @@ class LicenseManager:
         font_color VARCHAR(255),
         wallpaper_id TEXT,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        dashboard_filter TEXT
         
 
     );
@@ -537,8 +538,9 @@ class LicenseManager:
             },
             "table_dashboard": {
                 "created_at": "TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
-                "updated_at": "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
-            }
+                "updated_at": "TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
+                "dashboard_filter": "TEXT"
+            },
 
         }
 

@@ -326,16 +326,36 @@ def get_dashboard_names(user_id, database_name, project_name=None):
         try:
             with conn_datasource.cursor() as cursor:
                 placeholders = ', '.join(['%s'] * len(all_employee_ids))
-                query = f"""
-                    SELECT user_id, file_name FROM table_dashboard
-                    WHERE user_id IN ({placeholders}) AND company_name = %s AND project_name = %s
-                """
-                params = tuple(map(str, all_employee_ids)) + (database_name, project_name)
+                # query = f"""
+                #     SELECT user_id, file_name FROM table_dashboard
+                #     WHERE user_id IN ({placeholders}) AND company_name = %s AND project_name = %s 
+                # """
+                # params = tuple(map(str, all_employee_ids)) + (database_name, project_name)
+                
+                # if project_name: # Add project_name filter if provided
+                #     query += " AND project_name = %s"
+                #     params += (project_name,)
 
-                if project_name: # Add project_name filter if provided
-                    query += " AND project_name = %s"
-                    params += (project_name,)
+                if project_name:
+                    query = f"""
+                        SELECT user_id, file_name
+                        FROM table_dashboard
+                        WHERE user_id IN ({placeholders})
+                        AND company_name = %s
+                        AND project_name = %s
+                        ORDER BY updated_at DESC;
+                    """
+                    params = tuple(map(str, all_employee_ids)) + (database_name, project_name)
 
+                else:
+                    query = f"""
+                        SELECT user_id, file_name
+                        FROM table_dashboard
+                        WHERE user_id IN ({placeholders})
+                        AND company_name = %s
+                        ORDER BY updated_at DESC;
+                    """
+                    params = tuple(map(str, all_employee_ids)) + (database_name,)
                 cursor.execute(query, params)
                 dashboards = cursor.fetchall()
                 print("dashboards",dashboards)
@@ -620,7 +640,7 @@ def apply_calculations(dataframe, calculationData, x_axis, y_axis):
 
 
 
-def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,droppableBgColor,opacity,image_ids,chart_type):
+def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,droppableBgColor,opacity,image_ids,chart_type,dashboard_Filter,view_mode):
     conn = create_connection()  # Initial connection to your main database
     print("Chart areacolour:", areacolour)
     print("Chart opacity received:", opacity)
@@ -794,7 +814,82 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                     
                     print("Chart OptimizationData:", OptimizationData)
                     print("final_opacity",final_opacity)
-                    
+                    # -----------------------------------------------
+                    # 🟦 APPLY DASHBOARD FILTER IF TABLE NAME MATCHES
+                    # -----------------------------------------------
+                    if view_mode == "edit":
+                        print("View mode is 'edit' → Skipping dashboard filters.")
+                    else:
+                        print("dashboard_Filter",dashboard_Filter)
+                        # Normalize dashboard_Filter into dict
+                        if dashboard_Filter is None:
+                            dashboard_Filter = {} # Initialize to an empty dictionary
+                        if isinstance(dashboard_Filter, str):
+                            try:
+                                dashboard_Filter = json.loads(dashboard_Filter.replace("'", '"'))
+                            except Exception:
+                                dashboard_Filter = ast.literal_eval(dashboard_Filter)
+
+                        print("Normalized Dashboard Filter:", dashboard_Filter)
+
+                        dashboard_table = dashboard_Filter.get("table_name")
+                        dashboard_filters_list = dashboard_Filter.get("filters", [])
+
+                        # Normalize dashboard filters into dict {column: values}
+                        dashboard_filters = {}
+                        for item in dashboard_filters_list:
+                            if isinstance(item, dict):
+                                dashboard_filters.update(item)
+
+                        print("Dashboard Filters:", dashboard_filters)
+
+                        # Only apply dashboard filters when table name matches
+                        if dashboard_table and dashboard_table == table_name:
+
+                            print(f"Applying dashboard filters to chart {chart_id} (table matched: {table_name})")
+
+                            # Parse chart filter_options (string → dict)
+                            chart_filters_clean = {}
+                            if isinstance(filter_options, str):
+                                try:
+                                    chart_filters_clean = json.loads(filter_options)
+                                except:
+                                    chart_filters_clean = ast.literal_eval(filter_options)
+                            elif isinstance(filter_options, dict):
+                                chart_filters_clean = filter_options
+
+                            # Merge dashboard filters into chart filters
+                            # for col, val_list in dashboard_filters.items():
+                            #     if col not in chart_filters_clean:
+                            #         chart_filters_clean[col] = val_list   # Add new filter
+                            #     else:
+                            #         # Merge without duplicates
+                            #         existing = set(chart_filters_clean[col])
+                            #         new_vals = set(val_list)
+                            #         chart_filters_clean[col] = list(existing | new_vals)
+                            # Suggested Override Logic (Replacing the 'else' block)
+                            for col, val_list in dashboard_filters.items():
+                                # If the column is not in the chart filters, add it (same as before)
+                                if col not in chart_filters_clean:
+                                    chart_filters_clean[col] = val_list
+                                else:
+                                    # === CHANGE THIS SECTION ===
+                                    # If the column IS in the chart filters, OVERRIDE it with the dashboard's filter values.
+                                    chart_filters_clean[col] = val_list
+                                    # The previous 'existing = set(chart_filters_clean[col]) | new_vals' logic is removed.
+                                    # ===========================
+
+                            # Replace old filter options
+                            filter_options = chart_filters_clean
+
+                            print("Merged filter_options (with override):", filter_options)
+
+                        #]
+
+
+                    # END Dashboard Filter Merge
+                    # ------------------------------------------------
+                                        
                     # Determine the aggregation function
                     aggregate_py = {
                         'count': 'count',
@@ -2030,28 +2125,52 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                             categories = [str(category) for category in categories]  
                         values = [float(value) for value in grouped_df[y_axis[0]]]
 
-                        # print("categories--222", categories)
-                        # print("values--222", values)
+                        print("categories--222", categories)
+                        print("values--222", values)
 
-                        # Filter categories and values based on filter_options
-                        filtered_categories = []
-                        filtered_values = []
+                        # # Filter categories and values based on filter_options
+                        # filtered_categories = []
+                        # filtered_values = []
                         # for category, value in zip(categories, values):
                         #     if category in filter_options:
                         #         filtered_categories.append(category)
                         #         filtered_values.append(value)
+                        if isinstance(filter_options, str):
+                                try:
+                                    filter_options = json.loads(filter_options)  # Convert JSON string to dict
+                                except json.JSONDecodeError:
+                                    raise ValueError("Invalid JSON format for filter_options")
+                           
+                        print("selectedFrequency",selectedFrequency)
+                        # if selectedFrequency:
+                        #     filtered_categories = categories
+                        #     filtered_values = values
+                        # else:
+                        #     filtered_categories = []
+                        #     filtered_values = []
+                        #     for category, value in zip(categories, values):
+                        #         if category in filter_options:
+                        #             print("category",category,filter_options)
+                        #             filtered_categories.append(category)
+                        #             filtered_values.append(value)
+                        axis_col = x_axis[0]  # e.g., 'brand'
                         if selectedFrequency:
                             filtered_categories = categories
                             filtered_values = values
+                            print("Filtered Categories1:", filtered_categories)
+                            print("Filtered Values1:", filtered_values)
                         else:
                             filtered_categories = []
                             filtered_values = []
                             for category, value in zip(categories, values):
-                                if category in filter_options:
+                                print("filter_options",filter_options,axis_col)
+
+                                if axis_col in filter_options and category in filter_options[axis_col]:
+                                    
                                     filtered_categories.append(category)
                                     filtered_values.append(value)
-                        print("Filtered Categories:", filtered_categories)
-                        print("Filtered Values:", filtered_values)
+                            print("Filtered Categories:", filtered_categories)
+                            print("Filtered Values:", filtered_values)
 
 
                         # print("Filtered Categories:", filtered_categories)
