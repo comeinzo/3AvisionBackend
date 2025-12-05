@@ -538,11 +538,9 @@ class LicenseManager:
             },
             "table_dashboard": {
                 "created_at": "TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
-                "updated_at": "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
-            },
-             "table_dashboard": {
+                "updated_at": "TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
                 "dashboard_filter": "TEXT"
-            }
+            },
 
         }
 

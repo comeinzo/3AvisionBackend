@@ -14763,7 +14763,7 @@ def execute_custom_sql():
 
 
 @app.route('/api/dashboard/<table_name>', methods=['GET'])
-def get_dashboard_data(table_name):
+def get_dashboard_datass(table_name):
     """Get comprehensive dashboard data for a specific table."""
     try:
         # Get table schema first
