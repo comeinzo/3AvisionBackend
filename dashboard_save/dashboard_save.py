@@ -782,6 +782,7 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                 chart_data = cursor.fetchone()
                 cursor.close()
                 print("chart_data",chart_data)
+                
                 if chart_data:
                     # Extract chart data
                     database_name = chart_data[1]  # Assuming `database_name` is the second field
@@ -789,6 +790,7 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                     x_axis = chart_data[3]
                     y_axis = chart_data[4]  # Assuming y_axis is a list
                     aggregate = chart_data[5]
+                    aggregation = chart_data[5]
                     chart_type = chart_data[6]
                     # chart_type = chart_type_value .get(chart_id)
                     chart_heading = chart_data[8]
@@ -811,6 +813,50 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                     user_id=chart_data[23]
                     xAxisTitle=chart_data[24]
                     yAxisTitle =chart_data[25]
+                    agg_value = chart_data[5]  # aggregate from DB
+                    print("agg_value0", agg_value)
+
+                    # Ensure y_axis is list
+                    current_y_axis = None
+                    if isinstance(y_axis, str):
+                        try:
+                            y_axis = json.loads(y_axis)
+                        except:
+                            y_axis = []
+                    if isinstance(y_axis, list) and y_axis:
+                        current_y_axis = y_axis[0]
+
+                    aggregate = None
+
+                    # CASE 1: Simple direct aggregation string
+                    if isinstance(agg_value, str) and agg_value.lower() in ["sum", "count", "avg", "mean", "min", "max"]:
+                        aggregate = agg_value.lower()
+                        print("✔ Using direct string aggregate:", aggregate)
+
+                    else:
+                        # CASE 2: JSON list or incorrect stored string
+                        if isinstance(agg_value, str):
+                            try:
+                                agg_value = json.loads(agg_value)
+                            except:
+                                agg_value = []
+
+                        # CASE 3: Find match based on yAxis
+                        if isinstance(agg_value, list):
+                            aggregate = next(
+                                (item.get('aggregation') for item in agg_value if item.get('yAxis') == current_y_axis),
+                                None
+                            )
+
+                    # Fallback to first aggregation in list if still none
+                    if not aggregate and isinstance(agg_value, list) and agg_value:
+                        aggregate = agg_value[0].get('aggregation')
+
+                    # Absolute final fallback → default to SUM
+                    if not aggregate:
+                        aggregate = "sum"
+
+                    print("✔ Final Aggregate Used:", aggregate)
                     
                     print("Chart OptimizationData:", OptimizationData)
                     print("final_opacity",final_opacity)
@@ -1178,7 +1224,7 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                                 "chart_color": chart_color,
                                 "x_axis": x_axis,
                                 "y_axis": y_axis,
-                                "aggregate": aggregate,
+                                "aggregate": aggregation,
                                 "positions": chart_positions.get(chart_id),
                                 "xfontsize": xfontsize,
                                 "fontstyle": fontstyle,
@@ -1695,7 +1741,7 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                             "chart_color": chart_color,
                             "x_axis": x_axis,
                             "y_axis": y_axis,
-                            "aggregate": aggregate,
+                            "aggregate": aggregation,
                             "positions": chart_positions.get(chart_id),
                             "xfontsize": xfontsize,
                             "fontstyle": fontstyle,
@@ -1749,7 +1795,7 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                                 "chart_color": chart_color,
                                 "x_axis": x_axis,
                                 "y_axis": y_axis,
-                                "aggregate": aggregate,
+                                "aggregate": aggregation,
                                 "positions": chart_positions.get(chart_id),
                                 "xfontsize": xfontsize,
                                 "fontstyle" :fontstyle,
@@ -1817,7 +1863,7 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                                 "chart_color": chart_color,
                                 "x_axis": x_axis,
                                 "y_axis": y_axis,
-                                "aggregate": aggregate,
+                                "aggregate": aggregation,
                                 "positions": chart_positions.get(chart_id),
                                 "xfontsize": xfontsize,
                                 "fontstyle" :fontstyle,
@@ -1856,7 +1902,7 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
 
                             print("Fetching data...")
                             # data = fetch_data_for_duel(table_name, x_axis, filter_options, y_axis, aggregate, database_name, selected_user,calculationData)
-                            data = fetch_data_for_duel(table_name, x_axis, filter_options, y_axis, aggregate, database_name, selected_user,calculationData,dateGranularity=selectedFrequency)
+                            data = fetch_data_for_duel(table_name, x_axis, filter_options, y_axis, agg_value, database_name, selected_user,calculationData,dateGranularity=selectedFrequency)
                             print(f"Data fetched for dual chart: {data}")
                             # --- Optimization Filtering ---
                             if 'OptimizationData' in locals() or 'OptimizationData' in globals():
@@ -1883,7 +1929,7 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                                     "chart_color": chart_color,
                                     "x_axis": x_axis,
                                     "y_axis": y_axis,
-                                    "aggregate": aggregate,
+                                    "aggregate": aggregation,
                                     "positions": chart_positions.get(chart_id),
                                     "xfontsize": xfontsize,
                                     "fontstyle" :fontstyle,
@@ -1935,7 +1981,7 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                                     "chart_color": chart_color,
                                     "x_axis": x_axis,
                                     "y_axis": y_axis,
-                                    "aggregate": aggregate,
+                                    "aggregate": aggregation,
                                     "positions": chart_positions.get(chart_id),
                                     "xfontsize": xfontsize,
                                     "fontstyle" :fontstyle,
@@ -1992,7 +2038,7 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                                 "chart_color": chart_color,
                                 "x_axis": x_axis,
                                 "y_axis": y_axis,
-                                "aggregate": aggregate,
+                                "aggregate": aggregation,
                                 "positions": chart_positions.get(chart_id),
                                 "xfontsize": xfontsize,
                                 "fontstyle" :fontstyle,
@@ -2184,7 +2230,7 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                             "chart_color": chart_color,
                             "x_axis": x_axis,
                             "y_axis": y_axis,
-                            "aggregate": aggregate,
+                            "aggregate": aggregation,
                             "positions": chart_positions.get(chart_id),
                             "xfontsize": xfontsize,
                             "fontstyle": fontstyle,

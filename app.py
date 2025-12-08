@@ -1307,6 +1307,7 @@ def fetch_data_for_ts_decomposition(table_name, x_axis_columns, filter_options, 
     query = f"SELECT * FROM {table_name}"
     cur.execute(query)
     data = cur.fetchall()
+    # print("data",data)
     colnames = [desc[0] for desc in cur.description]
     cur.close()
     connection.close()
@@ -1314,6 +1315,9 @@ def fetch_data_for_ts_decomposition(table_name, x_axis_columns, filter_options, 
        
 
     temp_df = global_df.copy()
+    print("📌 INITIAL GLOBAL DF SHAPE:", global_df.shape)
+    print("📌 INITIAL GLOBAL DF COLUMNS:", list(global_df.columns))
+
 
     # Apply calculations if any
     if calculationData and isinstance(calculationData, list):
@@ -1593,27 +1597,109 @@ def fetch_data_for_ts_decomposition(table_name, x_axis_columns, filter_options, 
                     temp_df[new_col_name] = eval(calc_formula_python)
                 except Exception as e:
                     raise ValueError(f"Error evaluating math formula '{calc_formula}': {e}") from e
+    print("📌 AFTER CALCULATIONS SHAPE:", temp_df.shape)
+    print("📌 AFTER CALCULATIONS COLUMNS:", list(temp_df.columns))
+
 
     # Apply filters
     if isinstance(filter_options, str):
         filter_options = json.loads(filter_options)
 
+    # for col, filters in filter_options.items():
+    #     # if col in temp_df.columns:
+    #     if col in date_columns:
+    #         temp_df[col] = pd.to_datetime(temp_df[col]).dt.date
+    #         filters = [pd.to_datetime(f).date() for f in filters]
+    #         temp_df = temp_df[temp_df[col].isin(filters)]
+
+    #     if col not in temp_df.columns:
+    #         print(f"❌ FILTER ERROR: Column '{col}' not found. Skipping filter.")
+    #         continue
+    #     print("   Before filter:", temp_df.shape)
+        
+    #     try:
+    #         if pd.api.types.is_numeric_dtype(temp_df[col]):
+    #             filters_converted = [pd.to_numeric(f, errors='coerce') for f in filters]
+    #             filters_converted = [f for f in filters_converted if pd.notna(f)]
+    #             temp_df = temp_df[temp_df[col].isin(filters_converted)]
+    #         else:
+    #             temp_df[col] = temp_df[col].astype(str)
+    #             filters = list(map(str, filters))
+    #             temp_df = temp_df[temp_df[col].isin(filters)]
+    #     except Exception as e:
+    #         print(f"Warning: Could not apply filter on column '{col}' during TS fetch due to type mismatch or error: {e}. Falling back to string comparison.")
+    #         temp_df[col] = temp_df[col].astype(str)
+    #         filters = list(map(str, filters))
+    #         temp_df = temp_df[temp_df[col].isin(filters)]
+    date_columns = [
+        col for col in temp_df.columns
+        if "date" in col.lower()
+    ]
+
+    print("\n📌 DETECTED DATE COLUMNS:", date_columns)
+
+    # Apply filters
     for col, filters in filter_options.items():
-        if col in temp_df.columns:
-            try:
-                if pd.api.types.is_numeric_dtype(temp_df[col]):
-                    filters_converted = [pd.to_numeric(f, errors='coerce') for f in filters]
-                    filters_converted = [f for f in filters_converted if pd.notna(f)]
-                    temp_df = temp_df[temp_df[col].isin(filters_converted)]
-                else:
-                    temp_df[col] = temp_df[col].astype(str)
-                    filters = list(map(str, filters))
-                    temp_df = temp_df[temp_df[col].isin(filters)]
-            except Exception as e:
-                print(f"Warning: Could not apply filter on column '{col}' during TS fetch due to type mismatch or error: {e}. Falling back to string comparison.")
+
+        print(f"\n🔍 APPLYING FILTER ON COLUMN: {col}")
+        print(f"   ➜ Filter requested: {filters}")
+
+        if col not in temp_df.columns:
+            print(f"❌ FILTER ERROR: Column '{col}' not found. Skipping...")
+            continue
+
+        # Show unique values for debugging
+        try:
+            print("   ➜ Sample unique DF values:", temp_df[col].astype(str).unique()[:10])
+        except Exception:
+            pass
+
+        before_rows = temp_df.shape[0]
+        print("   ➜ Rows before filter:", before_rows)
+
+        try:
+            # DATE FILTER HANDLING
+            if col in date_columns:
+                print("   📅 Date column detected → Converting to date")
+
+                temp_df[col] = pd.to_datetime(temp_df[col], errors='coerce').dt.date
+                filters = [pd.to_datetime(f, errors='coerce').date() for f in filters]
+
+                temp_df = temp_df[temp_df[col].isin(filters)]
+
+            # NUMERIC FILTER HANDLING
+            elif pd.api.types.is_numeric_dtype(temp_df[col]):
+                filters_converted = [pd.to_numeric(f, errors='coerce') for f in filters]
+                filters_converted = [f for f in filters_converted if pd.notna(f)]
+                temp_df = temp_df[temp_df[col].isin(filters_converted)]
+
+            # STRING FILTER HANDLING
+            else:
                 temp_df[col] = temp_df[col].astype(str)
                 filters = list(map(str, filters))
                 temp_df = temp_df[temp_df[col].isin(filters)]
+
+        except Exception as e:
+            print(f"⚠ FILTER ERROR: {e}. Falling back to string comparison.")
+
+            temp_df[col] = temp_df[col].astype(str)
+            filters = list(map(str, filters))
+            temp_df = temp_df[temp_df[col].isin(filters)]
+
+        after_rows = temp_df.shape[0]
+
+        print(f"   ➜ Rows after filter: {after_rows}")
+
+        if after_rows == 0:
+            print("   ❌ FILTER REMOVED ALL ROWS!")
+            print("   ⚠ Returning original data to prevent crash.\n")
+            temp_df = global_df.copy()
+            break
+
+    print("\n📌 FINAL temp_df SHAPE:", temp_df.shape)
+    print(temp_df.head())
+                
+    print("temp_df",temp_df)
 
     return temp_df[[x_axis_columns[0], y_axis_column[0]]] if x_axis_columns and y_axis_column else temp_df
 
@@ -1634,17 +1720,31 @@ def get_bar_chart_route():
 
     table_name = data['selectedTable']
     y_axis_columns = data['yAxis']  # Assuming yAxis can be multiple columns as well
-    aggregation = data['aggregate']
+    # aggregation = data['aggregate']
     filter_options = data['filterOptions']
     checked_option = data['filterOptions']
     db_nameeee = data['databaseName']
     selectedUser = data['selectedUser']
     chart_data = data['chartType']
+     
+    # agg_value = data['aggregate']
+    # aggregation = agg_value.get('aggregation', None)
+    agg_value = data['aggregate']  # list of objects
+    clicked_index = data.get("clickedIndex", 0)  # default 0
+
+    aggregation = next(
+        (item['aggregation'] for item in agg_value if item['index'] == clicked_index),
+        None
+    )
+
+    print("Selected aggregation:", aggregation)
+    print("agg_value",agg_value)
 
     dateGranularity= data.get('dateGranularity', None)
 
     print("filter_options-----",filter_options)
     print("dateGranularity-----",dateGranularity)
+    print("aggregation",aggregation)
 
 
     # print("chart_data",data)
@@ -1910,7 +2010,10 @@ def get_bar_chart_route():
         print("Single treeHierarchy chart")
 
         try:
-            temp_df = new_df.copy()
+           
+            df = fetch_chart_data(database_con, table_name)
+            temp_df = df.copy()
+            
             # ============== DATE GRANULARITY PROCESSING ==============
             # Handle date granularity - convert date columns to specified granularity
             if dateGranularity and isinstance(dateGranularity, dict):
@@ -1919,7 +2022,8 @@ def get_bar_chart_route():
                         print(f"Applying date granularity: {date_col} -> {granularity}")
                         
                         # Ensure the column is datetime
-                        temp_df[date_col] = pd.to_datetime(temp_df[date_col], errors='coerce')
+                        # temp_df[date_col] = pd.to_datetime(temp_df[date_col], errors='coerce')
+                        temp_df[date_col] = pd.to_datetime(temp_df[date_col], errors='coerce', dayfirst=True)
                         
                         # Create new column name for the granularity
                         granularity_col = f"{date_col}_{granularity}"
@@ -2215,7 +2319,7 @@ def get_bar_chart_route():
         try:
 
             print("calculationData",calculationData)
-            data = fetch_data_for_duel(table_name, x_axis_columns, filter_options, y_axis_columns, aggregation, db_nameeee, selectedUser,calculationData= data.get('calculationData'),dateGranularity=dateGranularity)
+            data = fetch_data_for_duel(table_name, x_axis_columns, filter_options, y_axis_columns, agg_value, db_nameeee, selectedUser,calculationData= data.get('calculationData'),dateGranularity=dateGranularity)
             
             # Debug: Print the structure of fetched data
             print(f"🔍 Dual Y-axis Chart - Original data length: {len(data)}")
@@ -2333,7 +2437,37 @@ def get_edit_chart_route():
     table_name = data['selectedTable']
     x_axis_columns = data['xAxis'].split(', ')  # Split multiple columns into a list
     y_axis_columns = data['yAxis'] # Assuming yAxis can be multiple columns as well
-    aggregation = data['aggregate']
+    # aggregation = data['aggregate']
+    agg_value = data.get("aggregate")
+    current_y_axis = y_axis_columns[0] if y_axis_columns else None
+    aggregation = None
+
+    # CASE 1 → Direct aggregate string
+    if isinstance(agg_value, str) and agg_value.lower() in ["sum", "count", "avg", "mean", "min", "max"]:
+        aggregation = agg_value.lower()
+        print("✔ Using direct string aggregate:", aggregation)
+
+    # CASE 2 → JSON string or list
+    else:
+        import json
+        # Convert JSON string to list
+        if isinstance(agg_value, str):
+            try:
+                agg_value = json.loads(agg_value)
+            except json.JSONDecodeError:
+                agg_value = []
+
+        # Extract matching yAxis aggregation from list
+        if isinstance(agg_value, list):
+            aggregation = next(
+                (item.get('aggregation') for item in agg_value if item.get('yAxis') == current_y_axis),
+                None
+            )
+            if not aggregation and agg_value:
+                aggregation = agg_value[0].get('aggregation')
+
+    print("Final selected aggregate:", aggregation)
+
     checked_option = data['filterOptions'] 
     db_nameeee = data['databaseName']
     chartType = data['chartType']
@@ -2969,7 +3103,7 @@ def get_edit_chart_route():
                 return jsonify({"error": str(e)}), 500
         
     elif len(y_axis_columns) == 2:
-        datass = fetch_data_for_duel(table_name, x_axis_columns, checked_option, y_axis_columns, aggregation, db_nameeee,selectedUser,calculationData,dateGranularity=dateGranularity)
+        datass = fetch_data_for_duel(table_name, x_axis_columns, checked_option, y_axis_columns, agg_value, db_nameeee,selectedUser,calculationData,dateGranularity=dateGranularity)
         data = {
              "categories": [row[0] for row in datass],
             "series1": [row[1] for row in datass],
@@ -3187,7 +3321,7 @@ def save_data():
             data.get('selectedTable'),
             data.get('xAxis'),
             data.get('yAxis'),
-            data.get('aggregate'),
+            json.dumps(data.get('aggregate')),
             data.get('chartType'),
             # data.get('chartColor'),
             chart_color_json,
@@ -3312,7 +3446,7 @@ def update_data():
             data.get('selectedTable'),
             data.get('xAxis'),
             data.get('yAxis'),
-            data.get('aggregate'),
+            json.dumps(data.get('aggregate')),
             data.get('chartType'),
             chart_color_json,
             chart_heading_json,
@@ -4803,7 +4937,48 @@ def receive_chart_details():
     tableName = data.get('tableName')
     x_axis = data.get('x_axis')  # Assuming this is a list of columns to group by
     y_axis = data.get('y_axis')  # Assuming this is a list of columns to aggregate
-    aggregate = data.get('aggregate')  # Aggregation method, e.g., 'sum', 'mean', etc.
+    # aggregate = data.get('aggregate')  # Aggregation method, e.g., 'sum', 'mean', etc.
+    agg_value = data.get('aggregate') # list of objects
+    print("agg_value0",agg_value)
+    
+
+    current_y_axis = y_axis[0] if isinstance(y_axis, list) and y_axis else None
+    aggregate = None
+
+    # CASE 1: agg_value is direct string like sum, count, avg
+    if isinstance(agg_value, str) and agg_value.lower() in ["sum", "count", "avg", "mean", "min", "max"]:
+        aggregate = agg_value
+        print("✔ Using direct string aggregate:", aggregate)
+
+    else:
+        # CASE 2: JSON String or list of objects
+        if isinstance(agg_value, str):
+            try:
+                agg_value = json.loads(agg_value)
+            except:
+                agg_value = []
+
+        # Filter list by yAxis matching
+        if isinstance(agg_value, list):
+            aggregate = next(
+                (item.get('aggregation') for item in agg_value if item.get('yAxis') == current_y_axis),
+                None
+            )
+
+        # Fallback to first available aggregation
+        if not aggregate and isinstance(agg_value, list) and agg_value:
+            aggregate = agg_value[0].get('aggregation')
+
+    print("Final selected aggregate:", aggregate)
+
+    # # Find aggregation based on y-axis column
+    # aggregate = next(
+    #     (item.get('aggregation') for item in agg_value if item.get('yAxis') == current_y_axis),
+    #     None
+    # )
+    # print("agg_value0",agg_value)
+    # print("aggregate",aggregate)
+
     chart_type = data.get('chart_type')
     chart_heading = data.get('chart_heading')
     optimizeData= data.get('optimizeData')
@@ -5087,7 +5262,7 @@ def receive_chart_details():
                     })
             if chart_type == "duealChart"  :
                     print("Dual y-axis chart detected")
-                    data = fetch_data_for_duel(tableName, x_axis, filter_options, y_axis, aggregate, databaseName, selectedUser,calculation_data,dateGranularity)
+                    data = fetch_data_for_duel(tableName, x_axis, filter_options, y_axis, agg_value, databaseName, selectedUser,calculation_data,dateGranularity)
                     description = f"{user_name} viewed the chart '{chart}' from table '{tableName}'."
                     log_activity(
                             company_name=databaseName,
@@ -8486,8 +8661,8 @@ def save_dashboard():
             positions = json.dumps([{'x': p['x'], 'y': p['y']} for p in position])
             # Extract width and height from the new position structure
             chart_sizes = json.dumps([{'width': p['width'], 'height': p['height']} for p in position])
-
-            aggregations = json.dumps([chart.get('aggregation', None) for chart in chart_details]) # Handle optional aggregation
+            aggregations = [chart.get('aggregation', None) for chart in chart_details]
+            # aggregations = json.dumps([chart.get('aggregation', None) for chart in chart_details]) # Handle optional aggregation
             xaxes = json.dumps([chart.get('x_axis', []) for chart in chart_details])  # Correct key name
             yaxes = json.dumps([chart.get('y_axis', []) for chart in chart_details])  # Correct key name
             opacities = json.dumps([chart.get('opacity', 1) for chart in chart_details])  # default to 1 if missing
@@ -8523,7 +8698,7 @@ def save_dashboard():
                 SET chart_ids = %s, heading = %s, position = %s::jsonb, chart_size = %s::jsonb, chart_aggregate = %s::jsonb, chart_xaxis = %s::jsonb, chart_yaxis = %s::jsonb,chart_type = %s::jsonb,filterdata = %s,droppableBgColor=%s, opacity = %s::jsonb,chartcolor = %s::jsonb,font_style_state = %s,
                 font_size = %s,font_color = %s,wallpaper_id = %s WHERE user_id = %s AND file_name = %s;
             """
-            cur.execute(update_chart_query, (chart_ids_str, DashboardHeading, positions, chart_sizes, aggregations, xaxes, yaxes, chart_type, filter_options,droppableBgColor,opacities,bgcolors,fontStyleState, fontSize, fontColor,wallpaper_id, user_id, dashboard_name))
+            cur.execute(update_chart_query, (chart_ids_str, DashboardHeading, positions, chart_sizes,json.dumps(aggregations), xaxes, yaxes, chart_type, filter_options,droppableBgColor,opacities,bgcolors,fontStyleState, fontSize, fontColor,wallpaper_id, user_id, dashboard_name))
             conn.commit()
             
             for chart in chart_details:
@@ -9820,7 +9995,8 @@ def share_dashboard():
                         old_chart["selected_table"],
                         old_chart["x_axis"],
                         old_chart["y_axis"],
-                        old_chart["aggregate"],
+                        # old_chart["aggregate"],
+                        json.dumps(old_chart["aggregate"]) if isinstance(old_chart.get("aggregate"), dict) else old_chart.get("aggregate"),
                         old_chart["chart_type"],
                         old_chart["chart_color"],
                         old_chart["chart_heading"],
