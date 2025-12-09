@@ -366,125 +366,225 @@ def test_db():
 # UPLOAD SECTION START
 # ===================================================================
 
+# @app.route('/uploadexcel', methods=['POST'])
+# @employee_required
+# @token_required
+
+# def upload_file_excel():
+#     try:
+#         # create_table()
+        
+#         # Validate required form data
+#         database_name = request.form.get('company_database')
+#         primary_key_column = request.form.get('primaryKeyColumnName')
+#         user_email = request.form.get('email', 'Unknown User')
+        
+#         if not database_name:
+#             return jsonify({'message': 'Company database name is required', 'status': False}), 400
+        
+#         if not primary_key_column:
+#             return jsonify({'message': 'Primary key column name is required', 'status': False}), 400
+        
+#         # Validate file upload
+#         if 'file' not in request.files:
+#             return jsonify({'message': 'No file uploaded', 'status': False}), 400
+        
+#         excel_file = request.files['file']
+        
+#         if excel_file.filename == '':
+#             return jsonify({'message': 'No file selected', 'status': False}), 400
+        
+#         # Validate file extension
+#         allowed_extensions = {'.xlsx', '.xls'}
+#         file_extension = os.path.splitext(excel_file.filename)[1].lower()
+#         if file_extension not in allowed_extensions:
+#             return jsonify({'message': 'Only Excel files (.xlsx, .xls) are allowed', 'status': False}), 400
+        
+#         # Parse selected sheets
+#         selected_sheets = request.form.getlist('selectedSheets')
+#         if not selected_sheets:
+#             # Try parsing as JSON string if not sent as list
+#             selected_sheets_json = request.form.get('selectedSheets')
+#             if selected_sheets_json:
+#                 try:
+#                     import json
+#                     selected_sheets = json.loads(selected_sheets_json)
+#                 except json.JSONDecodeError:
+#                     return jsonify({'message': 'Invalid selectedSheets format', 'status': False}), 400
+        
+#         print(f"Database name: {database_name}")
+#         print(f"Primary key column: {primary_key_column}")
+#         print(f"Selected sheets: {selected_sheets}")
+#         print(f"User: {request.current_user.get('user_id', 'Unknown')}")
+        
+#         # Save file temporarily
+#         excel_file_name = secure_filename(excel_file.filename)
+#         os.makedirs('tmp', exist_ok=True)
+#         temp_file_path = f'tmp/{excel_file_name}'
+#         excel_file.save(temp_file_path)
+        
+#         try:
+#             # Upload to PostgreSQL
+#             result = upload_excel_to_postgresql(
+#                 database_name, 
+#                 username, 
+#                 password, 
+#                 temp_file_path, 
+#                 primary_key_column, 
+#                 host, 
+#                 port, 
+#                 selected_sheets
+#             )
+            
+#             # if result == "Upload successful":
+#             if isinstance(result, dict) and result.get("message") == "Upload successful":
+#                 sheet_list = ', '.join(selected_sheets)
+#                 log_activity(
+#                     user_email=user_email,
+#                     action_type="Upload Excel",
+#                     description=(
+#                         f"Uploaded Excel file '{excel_file_name}' to database '{database_name}' "
+#                         f"with {result.get('rows_inserted', 0)} inserted, "
+#                         f"{result.get('rows_updated', 0)} updated, "
+#                         f"{result.get('rows_deleted', 0)} deleted, and "
+#                         f"{result.get('rows_skipped', 0)} skipped rows."
+#                     ),
+#                     company_name=database_name,
+#                     table_name=sheet_list
+#                 )
+
+#             # if isinstance(result, dict) and result.get("message") == "Upload successful":
+#                 return jsonify({
+#                     'message': 'File uploaded successfully',
+#                     'status': True,
+#                     'uploaded_by': request.current_user.get('user_id'),
+#                     'file_name': excel_file_name,
+#                     'rows_added': result["rows_added"],
+#                     'rows_deleted': result["rows_deleted"],
+#                     'rows_skipped': result["rows_skipped"],
+#                     'rows_updated': result["rows_updated"]
+#                 }), 200
+#             else:
+#                 log_activity(
+#                     user_email=user_email,
+#                     action_type="Upload Failed",
+#                     description=f"Failed to upload Excel file '{excel_file_name}' to database '{database_name}'. Error: {result}",
+#                     company_name=database_name
+#                 )
+
+#                 return jsonify({'message': result, 'status': False}), 500
+                
+#         finally:
+#             # Clean up temporary file
+#             try:
+#                 if os.path.exists(temp_file_path):
+#                     os.remove(temp_file_path)
+#             except Exception as cleanup_error:
+#                 print(f"Warning: Could not delete temporary file {temp_file_path}: {cleanup_error}")
+        
+#     except Exception as e:
+#         print(f"Upload error: {str(e)}")
+#         return jsonify({'message': 'Internal server error occurred', 'status': False}), 500
 @app.route('/uploadexcel', methods=['POST'])
 @employee_required
 @token_required
-
 def upload_file_excel():
+    temp_file_path = None
     try:
-        # create_table()
-        
-        # Validate required form data
         database_name = request.form.get('company_database')
         primary_key_column = request.form.get('primaryKeyColumnName')
+        print("pcolo",primary_key_column)
         user_email = request.form.get('email', 'Unknown User')
-        
-        if not database_name:
-            return jsonify({'message': 'Company database name is required', 'status': False}), 400
-        
-        if not primary_key_column:
-            return jsonify({'message': 'Primary key column name is required', 'status': False}), 400
-        
-        # Validate file upload
+
+        if not database_name or not primary_key_column:
+            return jsonify({'message': 'Database and primary key are required', 'status': False}), 400
+
         if 'file' not in request.files:
             return jsonify({'message': 'No file uploaded', 'status': False}), 400
-        
+
         excel_file = request.files['file']
-        
         if excel_file.filename == '':
             return jsonify({'message': 'No file selected', 'status': False}), 400
-        
-        # Validate file extension
-        allowed_extensions = {'.xlsx', '.xls'}
+
         file_extension = os.path.splitext(excel_file.filename)[1].lower()
-        if file_extension not in allowed_extensions:
+        if file_extension not in ('.xlsx', '.xls'):
             return jsonify({'message': 'Only Excel files (.xlsx, .xls) are allowed', 'status': False}), 400
-        
-        # Parse selected sheets
+
         selected_sheets = request.form.getlist('selectedSheets')
         if not selected_sheets:
-            # Try parsing as JSON string if not sent as list
             selected_sheets_json = request.form.get('selectedSheets')
             if selected_sheets_json:
+                import json
                 try:
-                    import json
                     selected_sheets = json.loads(selected_sheets_json)
                 except json.JSONDecodeError:
                     return jsonify({'message': 'Invalid selectedSheets format', 'status': False}), 400
-        
-        print(f"Database name: {database_name}")
-        print(f"Primary key column: {primary_key_column}")
-        print(f"Selected sheets: {selected_sheets}")
-        print(f"User: {request.current_user.get('user_id', 'Unknown')}")
-        
-        # Save file temporarily
+
         excel_file_name = secure_filename(excel_file.filename)
         os.makedirs('tmp', exist_ok=True)
-        temp_file_path = f'tmp/{excel_file_name}'
+        temp_file_path = os.path.join('tmp', excel_file_name)
         excel_file.save(temp_file_path)
-        
-        try:
-            # Upload to PostgreSQL
-            result = upload_excel_to_postgresql(
-                database_name, 
-                username, 
-                password, 
-                temp_file_path, 
-                primary_key_column, 
-                host, 
-                port, 
-                selected_sheets
+
+        # Call the safe upload function
+        result = upload_excel_to_postgresql(
+            database_name,
+            username,
+            password,
+            temp_file_path,
+            primary_key_column,
+            host,
+            port,
+            selected_sheets
+        )
+        print("result",result)
+        if isinstance(result, dict) and result.get("message") == "Upload successful":
+            sheet_list = ', '.join(selected_sheets)
+            log_activity(
+                user_email=user_email,
+                action_type="Upload Excel",
+                description=(
+                    f"Uploaded Excel file '{excel_file_name}' to database '{database_name}' "
+                    f"with {result.get('rows_added', 0)} inserted, "
+                    f"{result.get('rows_updated', 0)} updated, "
+                    f"{result.get('rows_deleted', 0)} deleted, "
+                    f"{result.get('rows_skipped', 0)} skipped."
+                ),
+                company_name=database_name,
+                table_name=sheet_list
             )
-            
-            # if result == "Upload successful":
-            if isinstance(result, dict) and result.get("message") == "Upload successful":
-                sheet_list = ', '.join(selected_sheets)
-                log_activity(
-                    user_email=user_email,
-                    action_type="Upload Excel",
-                    description=(
-                        f"Uploaded Excel file '{excel_file_name}' to database '{database_name}' "
-                        f"with {result.get('rows_inserted', 0)} inserted, "
-                        f"{result.get('rows_updated', 0)} updated, "
-                        f"{result.get('rows_deleted', 0)} deleted, and "
-                        f"{result.get('rows_skipped', 0)} skipped rows."
-                    ),
-                    company_name=database_name,
-                    table_name=sheet_list
-                )
 
-            # if isinstance(result, dict) and result.get("message") == "Upload successful":
-                return jsonify({
-                    'message': 'File uploaded successfully',
-                    'status': True,
-                    'uploaded_by': request.current_user.get('user_id'),
-                    'file_name': excel_file_name,
-                    'rows_added': result["rows_added"],
-                    'rows_deleted': result["rows_deleted"],
-                    'rows_skipped': result["rows_skipped"],
-                    'rows_updated': result["rows_updated"]
-                }), 200
-            else:
-                log_activity(
-                    user_email=user_email,
-                    action_type="Upload Failed",
-                    description=f"Failed to upload Excel file '{excel_file_name}' to database '{database_name}'. Error: {result}",
-                    company_name=database_name
-                )
+            return jsonify({
+                'message': 'File uploaded successfully',
+                'status': True,
+                'uploaded_by': request.current_user.get('user_id'),
+                'file_name': excel_file_name,
+                'rows_added': result["rows_added"],
+                'rows_deleted': result["rows_deleted"],
+                'rows_skipped': result["rows_skipped"],
+                'rows_updated': result["rows_updated"]
+            }), 200
+        else:
+            log_activity(
+                user_email=user_email,
+                action_type="Upload Failed",
+                description=f"Failed to upload Excel file '{excel_file_name}' to database '{database_name}'. Error: {result}",
+                company_name=database_name
+            )
+            return jsonify({'message': result, 'status': False}), 500
 
-                return jsonify({'message': result, 'status': False}), 500
-                
-        finally:
-            # Clean up temporary file
-            try:
-                if os.path.exists(temp_file_path):
-                    os.remove(temp_file_path)
-            except Exception as cleanup_error:
-                print(f"Warning: Could not delete temporary file {temp_file_path}: {cleanup_error}")
-        
     except Exception as e:
         print(f"Upload error: {str(e)}")
+        traceback.print_exc()
         return jsonify({'message': 'Internal server error occurred', 'status': False}), 500
+
+    finally:
+        # Delete temp file safely
+        if temp_file_path and os.path.exists(temp_file_path):
+            try:
+                os.remove(temp_file_path)
+            except Exception as cleanup_error:
+                print(f"Warning: Could not delete temporary file {temp_file_path}: {cleanup_error}")
+
 
 @app.route('/uploadcsv', methods=['POST'])
 @employee_required
@@ -3580,7 +3680,7 @@ def get_chart_names(user_id, database_name):
                     SELECT user_id, chart_name 
                     FROM table_chart_save
                     WHERE user_id IN ({placeholders}) AND company_name = %s
-                    ORDER BY timestamp ASC
+                    ORDER BY updated_at DESC;
                 """
 
                 cursor.execute(query, tuple(all_employee_ids)+ (database_name,))
