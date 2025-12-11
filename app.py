@@ -73,6 +73,7 @@ from dashboard_save.dashboard_save import (
 from excel_upload import upload_excel_to_postgresql
 from histogram_utils import generate_histogram_details, handle_column_data_types
 from json_upload import upload_json_to_postgresql
+from xml_upload import upload_xml_to_postgresql
 from signup.signup import (
     connect_db,
     create_user_table,
@@ -585,6 +586,96 @@ def upload_file_excel():
             except Exception as cleanup_error:
                 print(f"Warning: Could not delete temporary file {temp_file_path}: {cleanup_error}")
 
+@app.route('/fetch-xml-from-url', methods=['POST'])
+@employee_required
+@token_required
+def fetch_xml_from_url():
+    """
+    Fetch XML from a URL and upload it to PostgreSQL.
+    
+    Request body:
+    {
+        "xml_url": "https://example.com/data.xml",
+        "primaryKeyColumnName": "id" or "region,unit_sold",
+        "company_database": "hdfc"
+    }
+    """
+    try:
+        data = request.get_json()
+        
+        if not data:
+            return jsonify({'message': 'No JSON data provided'}), 400
+        
+        xml_url = data.get('xml_url')
+        primary_key_column = data.get('primaryKeyColumnName')
+        database_name = data.get('company_database')
+        user_email = data.get('email', 'Unknown User')
+        
+        # Validate required parameters
+        if not xml_url:
+            return jsonify({'message': 'Missing required parameter: xml_url'}), 400
+        if not database_name:
+            return jsonify({'message': 'Missing required parameter: company_database'}), 400
+        
+        print(f"Fetching XML from URL: {xml_url}")
+        print(f"Primary key columns: {primary_key_column}")
+        print(f"Database: {database_name}")
+        
+        # Download XML from URL
+        try:
+            response = requests.get(xml_url, timeout=30, verify=False)
+            response.raise_for_status()
+        except requests.exceptions.RequestException as e:
+            return jsonify({'message': f'Failed to fetch XML from URL: {str(e)}'}), 400
+        
+        # Save XML to temporary file
+        os.makedirs('tmp', exist_ok=True)
+        xml_file_name = f"downloaded_{int(__import__('time').time())}.xml"
+        temp_file_path = f'tmp/{xml_file_name}'
+        
+        with open(temp_file_path, 'w', encoding='utf-8') as f:
+            f.write(response.text)
+        
+        print(f"XML saved to: {temp_file_path}")
+        
+        # Call the upload_xml_to_postgresql function
+        result = upload_xml_to_postgresql(
+            database_name, 
+            username, 
+            password, 
+            temp_file_path, 
+            primary_key_column, 
+            host, 
+            port
+        )
+        
+        # Check if upload was successful
+        if isinstance(result, dict) and result.get("message") == "Upload successful":
+            log_activity(
+                user_email=request.current_user.get("email", "Unknown"),
+                action_type=", ".join(result.get("actions_performed", [])),
+                table_name=result.get("table_name"),
+                company_name=database_name,
+                description=f"XML fetch from URL performed with {result['rows_inserted']} inserted, {result['rows_updated']} updated, {result['rows_skipped']} skipped rows."
+            )
+            return jsonify({
+                'message': 'XML fetched and uploaded successfully',
+                'status': True,
+                'uploaded_by': request.current_user.get('user_id'),
+                'file_name': xml_file_name,
+                'rows_added': result["rows_inserted"],
+                'rows_deleted': result["rows_deleted"],
+                'rows_skipped': result["rows_skipped"],
+                'rows_updated': result["rows_updated"],
+                'table_name': result.get("table_name")
+            }), 200
+        else:
+            return jsonify({'message': result, 'status': False}), 500
+            
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'message': f"Internal Server Error: {str(e)}"}), 500
+
 
 @app.route('/uploadcsv', methods=['POST'])
 @employee_required
@@ -640,7 +731,8 @@ def upload_file_csv():
         
         try:
             # Upload to PostgreSQL
-            result = upload_csv_to_postgresql(database_name, username, password, temp_file_path, host, port)
+            result = upload_csv_to_postgresql(database_name=database_name,primary_key_column=primary_key_column, username=username, password=password, csv_file_name=temp_file_path, host=host, port=port)
+            print("result",result)
             if isinstance(result, dict) and result.get("message") == "Upload successful":
                 log_activity(
                     user_email=request.current_user.get("email", "Unknown"),
@@ -673,6 +765,232 @@ def upload_file_csv():
     except Exception as e:
         print(f"CSV Upload error: {str(e)}")
         return jsonify({'message': 'Internal server error occurred', 'status': False}), 500
+
+# ----------------------------------------------------------------------
+# XML → List of Records Parser
+# ----------------------------------------------------------------------
+def parse_xml_to_list(xml_text):
+    """
+    Converts XML like:
+    <root>
+        <item>
+            <name>John</name>
+            <age>30</age>
+        </item>
+        <item>...</item>
+    </root>
+
+    Into:
+    [
+        { "name": "John", "age": "30" },
+        ...
+    ]
+    """
+
+    root = ET.fromstring(xml_text)
+
+    records = []
+    for element in root:
+
+        row = {}
+        for child in element:
+            # tag → key, text → value
+            row[child.tag] = child.text.strip() if child.text else None
+
+        if row:
+            records.append(row)
+
+    return records
+
+
+# ----------------------------------------------------------------------
+# MAIN ROUTE → FRONTEND CALLS THIS
+# # ----------------------------------------------------------------------
+# @app.route('/api/remote-xml-fetch', methods=['POST', 'OPTIONS'])
+
+# def remote_xml_fetch():
+#     try:
+#         payload = request.get_json()
+
+#         url = payload.get("url")
+#         user_id = payload.get("user_id")
+#         company_database = payload.get("company_database")
+#         print("url",url)
+
+#         if not url:
+#             return jsonify({"success": False, "message": "URL is required"}), 400
+
+#         print(f"[XML FETCH] User {user_id} requested URL: {url}")
+
+#         # -------------------------------------------------------------
+#         # Step 1: Fetch XML via server (bypass CORS)
+#         # -------------------------------------------------------------
+#         try:
+#             response = requests.get(url, timeout=15)
+#         except Exception as e:
+#             return jsonify({
+#                 "success": False,
+#                 "message": f"Unable to reach URL: {str(e)}"
+#             }), 400
+
+#         if response.status_code != 200:
+#             return jsonify({
+#                 "success": False,
+#                 "message": f"HTTP {response.status_code}: Failed to fetch URL"
+#             }), 400
+
+#         xml_text = response.text
+
+#         if not xml_text or not xml_text.strip().startswith("<"):
+#             return jsonify({
+#                 "success": False,
+#                 "message": "Fetched content is not valid XML."
+#             }), 400
+
+#         # -------------------------------------------------------------
+#         # Step 2: Try parsing XML
+#         # -------------------------------------------------------------
+#         parsed_data = None
+#         print("xml_text",xml_text)
+#         try:
+#             parsed_data = parse_xml_to_list(xml_text)
+#         except Exception as e:
+#             print("[XML PARSE ERROR]", e)
+
+#         file_name = os.path.basename(url) or "remote.xml"
+
+#         # -------------------------------------------------------------
+#         # OPTION A: Parsed successfully → return JSON records
+#         # -------------------------------------------------------------
+#         if parsed_data and len(parsed_data) > 0:
+#             columns = list(parsed_data[0].keys())
+#             return jsonify({
+#                 "success": True,
+#                 "data": parsed_data,
+#                 "columns": columns,
+#                 "fileName": file_name
+#             }), 200
+
+#         # -------------------------------------------------------------
+#         # OPTION B: XML parsed but empty
+#         # -------------------------------------------------------------
+#         if parsed_data == []:
+#             return jsonify({
+#                 "success": False,
+#                 "message": "XML parsed successfully but contains no data."
+#             }), 400
+
+#         # -------------------------------------------------------------
+#         # OPTION C: Parsing failed → return raw XML text
+#         # Frontend will parse manually
+#         # -------------------------------------------------------------
+#         return jsonify({
+#             "success": True,
+#             "text": xml_text,
+#             "fileName": file_name
+#         }), 200
+
+#     except Exception as e:
+#         print("[SERVER ERROR]", e)
+#         return jsonify({"success": False, "message": str(e)}), 500
+
+
+@app.route('/api/remote-xml-fetch', methods=['POST', 'OPTIONS'])
+def remote_xml_fetch():
+    # -------------------------------------------------------------
+    # ✅ Handle OPTIONS (CORS preflight)
+    # -------------------------------------------------------------
+    if request.method == "OPTIONS":
+        response = jsonify({"message": "CORS preflight OK"})
+        response.headers.add("Access-Control-Allow-Origin", "*")
+        response.headers.add("Access-Control-Allow-Headers", "Content-Type, Authorization")
+        response.headers.add("Access-Control-Allow-Methods", "POST, OPTIONS")
+        return response, 200
+
+    try:
+        # ---------------------------------------------------------
+        # ✅ Ensure JSON Content-Type
+        # ---------------------------------------------------------
+        if not request.is_json:
+            return jsonify({
+                "success": False,
+                "message": "Content-Type must be application/json"
+            }), 415
+
+        payload = request.get_json()
+
+        url = payload.get("url")
+        user_id = payload.get("user_id")
+        company_database = payload.get("company_database")
+
+        if not url:
+            return jsonify({"success": False, "message": "URL is required"}), 400
+
+        print(f"[XML FETCH] User={user_id}, URL={url}")
+
+        # ---------------------------------------------------------
+        # Step 1: Fetch XML
+        # ---------------------------------------------------------
+        try:
+            response = requests.get(url, timeout=20)
+        except Exception as e:
+            return jsonify({
+                "success": False,
+                "message": f"Unable to reach URL: {str(e)}"
+            }), 400
+
+        if response.status_code != 200:
+            return jsonify({
+                "success": False,
+                "message": f"HTTP {response.status_code}: Failed to fetch URL"
+            }), 400
+
+        xml_text = response.text
+
+        if not xml_text.strip().startswith("<"):
+            return jsonify({
+                "success": False,
+                "message": "Fetched content is not valid XML"
+            }), 400
+
+        # ---------------------------------------------------------
+        # Step 2: Try parsing XML
+        # ---------------------------------------------------------
+        try:
+            parsed_data = parse_xml_to_list(xml_text)
+        except Exception as e:
+            print("[XML PARSE ERROR]", e)
+            parsed_data = None
+
+        file_name = os.path.basename(url) or "remote.xml"
+
+        # Return parsed JSON
+        if parsed_data and len(parsed_data) > 0:
+            return jsonify({
+                "success": True,
+                "data": parsed_data,
+                "columns": list(parsed_data[0].keys()),
+                "fileName": file_name
+            }), 200
+
+        # Empty XML case
+        if parsed_data == []:
+            return jsonify({
+                "success": False,
+                "message": "XML parsed successfully but contains no data."
+            }), 400
+
+        # If parse failed → send raw XML text
+        return jsonify({
+            "success": True,
+            "text": xml_text,
+            "fileName": file_name
+        }), 200
+
+    except Exception as e:
+        print("[SERVER ERROR]", e)
+        return jsonify({"success": False, "message": str(e)}), 500
+
 
 @app.route('/upload-json', methods=['POST'])
 @employee_required
@@ -721,6 +1039,69 @@ def upload_file_json():
                     'status': True,
                     'uploaded_by': request.current_user.get('user_id'),
                     'file_name': json_file_name,
+                    'rows_added': result["rows_inserted"],
+                    'rows_deleted': result["rows_deleted"],
+                    'rows_skipped': result["rows_skipped"],
+                    'rows_updated': result["rows_updated"]
+            }), 200
+        else:
+            return jsonify({'message': result, 'status': False}), 500
+        #     return jsonify({'message': 'File uploaded successfully'}), 200
+        # else:
+        #     return jsonify({'message': result}), 500
+
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'message': f"Internal Server Error: {str(e)}"}), 500
+
+
+@app.route('/upload-xml', methods=['POST'])
+@employee_required
+@token_required
+def upload_file_xml():
+    try:
+        database_name = request.form.get('company_database')
+        primary_key_column = request.form.get('primaryKeyColumnName')
+        user_email = request.form.get('email', 'Unknown User')
+        
+        
+        # Check if file is present in the request
+        if 'file' not in request.files:
+            return jsonify({'message': 'No file part in the request'}), 400
+
+        xml_file = request.files['file']
+        
+        # Check if a file is selected
+        if xml_file.filename == '':
+            return jsonify({'message': 'No file selected for uploading'}), 400
+
+        print("primary_key_column:", primary_key_column)
+        print("xml_file:", xml_file.filename)
+        print("database_name:", database_name)
+        
+        # Save the file to a temporary directory
+        xml_file_name = secure_filename(xml_file.filename)
+        os.makedirs('tmp', exist_ok=True)
+        temp_file_path = f'tmp/{xml_file_name}'
+        xml_file.save(temp_file_path)
+
+        # Call the upload_xml_to_postgresql function
+        result = upload_xml_to_postgresql(database_name, username, password, temp_file_path, primary_key_column, host, port)
+        
+        # if result == "Upload successful":
+        if isinstance(result, dict) and result.get("message") == "Upload successful":
+            log_activity(
+                    user_email=request.current_user.get("email", "Unknown"),
+                    action_type=", ".join(result.get("actions_performed", [])),
+                    table_name=result.get("table_name"),
+                    company_name=database_name,
+                    description=f"XML upload performed with {result['rows_inserted']} inserted, {result['rows_updated']} updated, {result['rows_skipped']} skipped rows."
+            )
+            return jsonify({
+                    'message': 'File uploaded successfully',
+                    'status': True,
+                    'uploaded_by': request.current_user.get('user_id'),
+                    'file_name': xml_file_name,
                     'rows_added': result["rows_inserted"],
                     'rows_deleted': result["rows_deleted"],
                     'rows_skipped': result["rows_skipped"],
