@@ -429,6 +429,7 @@ import psycopg2
 import re
 from psycopg2 import sql
 from psycopg2.extras import execute_values
+from psycopg2 import extras
 import traceback
 from tqdm import tqdm
 from user_upload import get_db_connection
@@ -437,6 +438,8 @@ import io
 from datetime import datetime, date
 import dateutil.parser as date_parser
 from config import DB_NAME
+import gc
+
 def is_table_used_in_charts(table_name):
     conn = get_db_connection(dbname=DB_NAME)
     cur = conn.cursor()
@@ -466,11 +469,20 @@ def check_table_usage(cur, table_name):
     return is_in_use
 
 # Function to sanitize column names (replace spaces and special characters with underscores)
-def sanitize_column_name(col_name):
-    if isinstance(col_name, str):
-        return re.sub(r'\W+', '_', col_name).lower()
-    else:
-        return col_name
+# def sanitize_column_name(col_name):
+#     if isinstance(col_name, str):
+#         return re.sub(r'\W+', '_', col_name).lower()
+#     else:
+#         return col_name
+def sanitize_column_name(col):
+    if not isinstance(col, str):
+        col = str(col)
+    # Replace '/' with '_' once and remove extra spaces
+    col = col.strip().replace('/', '/')
+    # Optionally remove any other problematic chars
+    col = re.sub(r'[^\w\d_]', '_', col)
+    return col
+
 
 # Enhanced function to parse and standardize date formats for PostgreSQL DATE type
 def parse_and_standardize_date(date_value):
@@ -760,267 +772,799 @@ def process_dataframe_in_chunks(df, chunk_size=10000):
         yield df.iloc[start:start + chunk_size]
 
 UPLOAD_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'uploads', 'excel')
+def get_table_primary_key(cur, table_name):
+    """
+    Returns (constraint_name, [pk_column1, pk_column2, ...]) or (None, []) if no PK.
+    """
+    cur.execute("""
+        SELECT tc.constraint_name,
+               kcu.column_name
+        FROM information_schema.table_constraints AS tc
+        JOIN information_schema.key_column_usage AS kcu
+          ON tc.constraint_name = kcu.constraint_name
+         AND tc.table_schema = kcu.table_schema
+        WHERE tc.table_name = %s
+          AND tc.constraint_type = 'PRIMARY KEY'
+        ORDER BY kcu.ordinal_position;
+    """, (table_name,))
+    rows = cur.fetchall()
+    if not rows:
+        return None, []
+    constraint = rows[0][0]
+    cols = [r[1] for r in rows]
+    return constraint, cols
 
-def upload_excel_to_postgresql(database_name, username, password, excel_file_name, primary_key_column, host, port='5432', selected_sheets=None):
+# def upload_excel_to_postgresql(database_name, username, password, excel_file_name, primary_key_column, host, port='5432', selected_sheets=None):
+#     try:
+#         current_dir = os.getcwd()
+#         excel_file_path = os.path.join(current_dir, excel_file_name)
+
+#         # PERFORMANCE OPTIMIZATION: Use connection pooling settings
+#         conn = psycopg2.connect(
+#             dbname=database_name, 
+#             user=username, 
+#             password=password, 
+#             host=host, 
+#             port=port,
+#             # Performance optimizations
+#             connect_timeout=30,
+#             application_name="excel_upload_optimized"
+#         )
+        
+#         # PERFORMANCE OPTIMIZATION: Set session parameters for better performance
+#         cur = conn.cursor()
+#         cur.execute("SET synchronous_commit = OFF")  # Faster commits
+#         cur.execute("SET commit_delay = 0")          # Reduce commit delays
+#         cur.execute("SET work_mem = '256MB'")        # Increase work memory for sorting/hashing
+        
+#         if not excel_file_path.lower().endswith('.xlsx'):
+#             return "Error: Only Excel files with .xlsx extension are supported."
+
+#         xls = pd.ExcelFile(excel_file_path)
+
+#         directory_name = os.path.splitext(os.path.basename(excel_file_name))[0]
+#         directory_path = os.path.join(UPLOAD_FOLDER, directory_name)
+#         os.makedirs(directory_path, exist_ok=True)
+#         rows_inserted = 0
+#         rows_deleted = 0
+#         rows_updated = 0
+#         rows_skipped = 0
+        
+
+#         for sheet_name in selected_sheets:
+#             sheet_name_cleaned = sheet_name.strip('"').strip()
+#             if sheet_name_cleaned not in xls.sheet_names:
+#                 print(f"Sheet '{sheet_name_cleaned}' not found in the Excel file. Skipping...")
+#                 continue
+                
+#             # PERFORMANCE OPTIMIZATION: Read Excel with optimized parameters
+#             df = pd.read_excel(
+#                 excel_file_name, 
+#                 sheet_name=sheet_name_cleaned,
+#                 engine='openpyxl',  # Generally faster for .xlsx files
+#                 # Use dtype inference for better performance
+#                 dtype_backend='numpy_nullable'
+#             )
+            
+#             table_name = sanitize_column_name(sheet_name_cleaned)
+#             df.columns = [sanitize_column_name(col) for col in df.columns]
+#             print(f"Columns in {sheet_name}: {df.columns}")
+#             print(f"DataFrame shape: {df.shape}")
+            
+#             # NEW: Process date columns and standardize formats to date objects
+#             df = detect_and_process_date_columns(df)
+    
+#             table_exists = validate_table_structure(cur, table_name, df)
+#             print(f"Table exists for {table_name}: {table_exists}")
+#             is_table_in_use = check_table_usage(cur, table_name)
+#             print(f"Table '{table_name}' is in use: {is_table_in_use}")
+
+#             if table_exists and is_table_in_use == False:
+#                 # If table exists and is NOT in use, handle missing columns
+#                 cur.execute(f"SELECT column_name FROM information_schema.columns WHERE table_name = '{table_name}';")
+#                 existing_columns = [row[0] for row in cur.fetchall()]
+#                 print(f"Existing columns in table '{table_name}': {existing_columns}")
+
+#                 # Find columns to delete (existing in table but missing in uploaded file)
+#                 columns_to_delete = [col for col in existing_columns if col not in df.columns]
+
+#                 for col in columns_to_delete:
+#                     alter_query = sql.SQL('ALTER TABLE {} DROP COLUMN {}').format(
+#                         sql.Identifier(table_name),
+#                         sql.Identifier(col)
+#                     )
+#                     try:
+#                         cur.execute(alter_query)
+#                         print(f"Deleted column '{col}' from table '{table_name}'.")
+#                     except Exception as e:
+#                         print(f"Error deleting column '{col}' from table '{table_name}': {str(e)}")
+#                         continue
+
+#             if table_exists:
+#                 print(f"Validating and adding missing columns to table '{table_name}'.")
+                
+#                 # Detect and add missing columns
+#                 cur.execute(f"SELECT column_name FROM information_schema.columns WHERE table_name = '{table_name}';")
+#                 existing_columns = [row[0] for row in cur.fetchall()]
+
+#                 missing_columns = [col for col in df.columns if col not in existing_columns]
+
+#                 for col in missing_columns:
+#                     # Use the new determine_column_type function
+#                     col_type = determine_column_type(df, col)
+
+#                     alter_query = sql.SQL('ALTER TABLE {} ADD COLUMN {} {}').format(
+#                         sql.Identifier(table_name),
+#                         sql.Identifier(col),
+#                         sql.SQL(col_type)
+#                     )
+
+#                     try:
+#                         cur.execute(alter_query)
+#                         print(f"Added column '{col}' with type '{col_type}' to table '{table_name}'.")
+#                     except Exception as e:
+#                         print(f"Error adding column '{col}' to table '{table_name}': {str(e)}")
+#                         continue
+
+#             else:
+#                 print(f"Creating table '{table_name}'.")
+                
+#                 # Use the new determine_column_type function for table creation
+#                 column_types = []
+#                 for col in df.columns:
+#                     col_type = determine_column_type(df, col)
+#                     column_types.append((col, col_type))
+
+#                 columns = ', '.join(f'"{col}" {col_type}' for col, col_type in column_types)
+#                 create_table_query = sql.SQL('CREATE TABLE {} ({})').format(sql.Identifier(table_name),
+#                                                                               sql.SQL(columns))
+#                 try:
+#                     print(f"Create Table Query: {create_table_query.as_string(cur)}")
+#                     cur.execute(create_table_query)
+#                 except Exception as e:
+#                     print(f"Error creating table {table_name}: {str(e)}")
+#                     continue
+
+#                 if primary_key_column in df.columns:
+#                     alter_table_query = sql.SQL('ALTER TABLE {} ADD PRIMARY KEY ({})').format(
+#                         sql.Identifier(table_name), sql.Identifier(primary_key_column))
+#                     try:
+#                         cur.execute(alter_table_query)
+#                     except Exception as e:
+#                         print(f"Error adding primary key to {table_name}: {str(e)}")
+#                         continue
+
+#             # Check for duplicate primary keys
+#             df.columns = df.columns.str.strip().str.lower().str.replace('.', '_')
+#             primary_key_column = primary_key_column.strip().lower().replace('.', '_')
+#             duplicate_primary_keys = df[df.duplicated(subset=[primary_key_column], keep=False)][primary_key_column].tolist()
+#             if duplicate_primary_keys:
+#                 return f"Error: Duplicate primary key values found: {', '.join(map(str, duplicate_primary_keys))}"
+
+#             # PERFORMANCE OPTIMIZATION: Bulk delete using IN clause with batching
+#             primary_key_values = df[primary_key_column].tolist()
+            
+#             # Process deletions in batches to avoid query size limits
+#             delete_batch_size = 1000
+#             total_deleted = 0
+            
+#             for i in range(0, len(primary_key_values), delete_batch_size):
+#                 batch_values = primary_key_values[i:i + delete_batch_size]
+                
+#                 delete_query = sql.SQL("DELETE FROM {} WHERE {} = ANY(%s)").format(
+#                     sql.Identifier(table_name),
+#                     sql.Identifier(primary_key_column)
+#                 )
+                
+#                 cur.execute(delete_query, (batch_values,))
+#                 total_deleted += cur.rowcount
+#             rows_deleted += total_deleted
+#             if total_deleted > 0:
+#                 print(f"Deleted {total_deleted} rows with matching primary key values in table '{table_name}'.")
+#             else:
+#                 print("No rows were deleted.")
+
+#             # PERFORMANCE OPTIMIZATION: Choose best insertion method based on data size
+#             print(f"Starting data insertion for {len(df)} rows...")
+            
+#             if len(df) > 50000:
+#                 # For very large datasets, try COPY FROM first
+#                 print("Using COPY FROM for large dataset...")
+#                 copy_success = bulk_insert_with_copy(cur, conn, table_name, df)
+#                 rows_inserted += len(df)
+                
+                
+#                 if not copy_success:
+#                     print("COPY FROM failed, using optimized batch insert...")
+#                     optimized_batch_insert(cur, conn, table_name, df, batch_size=5000)
+#                     rows_inserted += len(df)
+#             else:
+#                 # For smaller datasets, use optimized batch insert
+#                 print("Using optimized batch insert...")
+#                 optimized_batch_insert(cur, conn, table_name, df, batch_size=2000)
+#                 rows_inserted += len(df)
+
+#             # Save Excel file
+#             file_name = f"{table_name}.xlsx"
+#             file_path = os.path.join(directory_path, file_name)
+#             df.to_excel(file_path, index=False)
+
+#         # Handle datasource table creation and insertion
+#         cur.execute("""
+#             SELECT EXISTS (
+#                 SELECT FROM pg_tables 
+#                 WHERE schemaname = 'public' 
+#                 AND tablename = 'datasource'
+#             );
+#         """)
+#         table_exists = cur.fetchone()[0]
+
+#         if not table_exists:
+#             cur.execute("""
+#                 CREATE TABLE datasource (
+#                     id SERIAL PRIMARY KEY,
+#                     data_source_name VARCHAR(255),
+#                     data_source_path VARCHAR(255),
+#                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+#                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        
+#                 );
+#             """)
+#             print("Created 'datasource' table.")
+
+#         insert_query = sql.SQL("""
+#                     INSERT INTO datasource (data_source_name, data_source_path)
+#                     VALUES (%s, %s)
+#                 """)
+#         cur.execute(insert_query, (directory_name, directory_path))
+        
+#         # Final commit
+#         conn.commit()
+        
+#         # Reset session parameters
+#         cur.execute("RESET synchronous_commit")
+#         cur.execute("RESET commit_delay")
+#         cur.execute("RESET work_mem")
+
+#         cur.close()
+#         conn.close()
+#         operation_summary = []
+
+#         if rows_inserted > 0:
+#             operation_summary.append("insert")
+#         if rows_updated > 0:
+#             operation_summary.append("update")
+#         if rows_deleted > 0:
+#             operation_summary.append("delete")
+#         if rows_skipped > 0:
+#             operation_summary.append("skip")
+
+#         # Default action type if none performed
+#         if not operation_summary:
+#             operation_summary.append("no_change")
+#         rows_added = rows_inserted
+#         # return "Upload successful"
+#         return {
+#             "message": "Upload successful",
+#             "table_name": table_name,
+#             "actions_performed": operation_summary,
+#             "rows_added": rows_added,
+#             "rows_deleted": rows_deleted,
+#             "rows_updated": rows_updated,
+#             "rows_skipped": rows_skipped
+#         }
+        
+#     except Exception as e:
+#         print("An error occurred:", e)
+#         traceback.print_exc()
+#         return f"Error: {str(e)}"
+
+# def upload_excel_to_postgresql(
+#     database_name,
+#     username,
+#     password,
+#     excel_file_name,
+#     primary_key_column,
+#     host,
+#     port='5432',
+#     selected_sheets=None
+# ):
+#     try:
+#         # Split composite keys
+#         if isinstance(primary_key_column, str):
+#             primary_key_column = [col.strip() for col in primary_key_column.split(',')]
+
+#         print("Primary Key Column Input:", primary_key_column)
+
+#         current_dir = os.getcwd()
+#         excel_file_path = os.path.join(current_dir, excel_file_name)
+
+#         if not excel_file_path.lower().endswith('.xlsx'):
+#             return "Error: Only Excel files with .xlsx extension are supported."
+
+#         xls = pd.ExcelFile(excel_file_path)
+#         directory_name = os.path.splitext(os.path.basename(excel_file_name))[0]
+#         directory_path = os.path.join(UPLOAD_FOLDER, directory_name)
+#         os.makedirs(directory_path, exist_ok=True)
+
+#         conn = psycopg2.connect(
+#             dbname=database_name, user=username, password=password, host=host, port=port,
+#             connect_timeout=30, application_name="excel_upload_optimized"
+#         )
+#         cur = conn.cursor()
+#         cur.execute("SET synchronous_commit = OFF")
+#         cur.execute("SET commit_delay = 0")
+#         cur.execute("SET work_mem = '256MB'")
+
+#         rows_inserted = rows_deleted = rows_updated = rows_skipped = 0
+
+#         for sheet_name in selected_sheets:
+#             sheet_name_cleaned = sheet_name.strip('"').strip()
+#             if sheet_name_cleaned not in xls.sheet_names:
+#                 print(f"Sheet '{sheet_name_cleaned}' not found. Skipping...")
+#                 continue
+
+#             # df = pd.read_excel(excel_file_name, sheet_name=sheet_name_cleaned, engine='openpyxl', dtype_backend='numpy_nullable')
+#             # Instead of this:
+            
+#             df = pd.read_excel(excel_file_name, sheet_name=sheet_name_cleaned, engine='openpyxl', dtype_backend='numpy_nullable')
+
+#             # Do this:
+#             with pd.ExcelFile(excel_file_path, engine='openpyxl') as xls:
+#                 if sheet_name_cleaned not in xls.sheet_names:
+#                     print(f"Sheet '{sheet_name_cleaned}' not found. Skipping...")
+#                     continue
+#                 df = pd.read_excel(xls, sheet_name=sheet_name_cleaned, dtype_backend='numpy_nullable')
+
+#             # Sanitize DataFrame columns
+#             df.columns = [sanitize_column_name(col) for col in df.columns]
+
+#             # Sanitize primary keys to match DataFrame
+#             primary_key_columns = [sanitize_column_name(col) for col in primary_key_column]
+
+#             # Check missing primary keys in DataFrame
+#             missing_keys = [col for col in primary_key_columns if col not in df.columns]
+#             if missing_keys:
+#                 return f"Error: Primary key columns not found in sheet '{sheet_name_cleaned}': {', '.join(missing_keys)}"
+
+#             # Detect and process date columns if you have a function for that
+#             df = detect_and_process_date_columns(df)  # make sure this function exists
+
+#             table_name = sanitize_column_name(sheet_name_cleaned)
+
+#             # Table existence
+#             table_exists = validate_table_structure(cur, table_name, df)  # implement this
+#             is_table_in_use = check_table_usage(cur, table_name)  # implement this
+
+#             # Create table if not exists
+#             if not table_exists:
+#                 column_types = [f'"{col}" {determine_column_type(df, col)}' for col in df.columns]  # implement determine_column_type
+#                 primary_key_sql = ""
+#                 if primary_key_columns:
+#                     primary_key_sql = ", PRIMARY KEY (" + ", ".join(f'"{col}"' for col in primary_key_columns) + ")"
+
+#                 create_table_query = sql.SQL('CREATE TABLE {} ({})').format(
+#                     sql.Identifier(table_name),
+#                     sql.SQL(', '.join(column_types) + primary_key_sql)
+#                 )
+#                 try:
+#                     cur.execute(create_table_query)
+#                     print(f"Table '{table_name}' created with primary key(s): {', '.join(primary_key_columns)}")
+#                 except Exception as e:
+#                     print(f"Error creating table {table_name}: {str(e)}")
+#                     continue
+
+#             else:
+#                 # Existing table: add missing columns
+#                 cur.execute(f"SELECT column_name FROM information_schema.columns WHERE table_name = '{table_name}';")
+#                 existing_columns = [row[0] for row in cur.fetchall()]
+#                 missing_columns = [col for col in df.columns if col not in existing_columns]
+#                 for col in missing_columns:
+#                     col_type = determine_column_type(df, col)
+#                     alter_query = sql.SQL('ALTER TABLE {} ADD COLUMN {} {}').format(
+#                         sql.Identifier(table_name),
+#                         sql.Identifier(col),
+#                         sql.SQL(col_type)
+#                     )
+#                     try:
+#                         cur.execute(alter_query)
+#                         print(f"Added column '{col}' with type '{col_type}' to table '{table_name}'")
+#                     except Exception as e:
+#                         print(f"Error adding column '{col}' to table '{table_name}': {str(e)}")
+#                         continue
+
+#             # Check for duplicates in primary keys
+#             duplicated_rows = df[df.duplicated(subset=primary_key_columns, keep=False)]
+#             if not duplicated_rows.empty:
+#                 return f"Error: Duplicate primary key values found in columns {', '.join(primary_key_columns)}: {duplicated_rows[primary_key_columns].to_dict(orient='records')}"
+
+#             # Bulk delete existing rows based on primary keys
+#             batch_size = 1000
+#             total_deleted = 0
+#             for i in range(0, len(df), batch_size):
+#                 batch_df = df.iloc[i:i + batch_size]
+#                 if len(primary_key_columns) == 1:
+#                     delete_query = sql.SQL("DELETE FROM {} WHERE {} = ANY(%s)").format(
+#                         sql.Identifier(table_name),
+#                         sql.Identifier(primary_key_columns[0])
+#                     )
+#                     cur.execute(delete_query, (batch_df[primary_key_columns[0]].tolist(),))
+#                 else:
+#                     keys_list = [tuple(row) for row in batch_df[primary_key_columns].values]
+#                     delete_query = sql.SQL(
+#                         "DELETE FROM {} WHERE ({}) IN %s"
+#                     ).format(
+#                         sql.Identifier(table_name),
+#                         sql.SQL(', '.join([f'"{col}"' for col in primary_key_columns]))
+#                     )
+#                     extras.execute_values(cur, delete_query.as_string(cur), keys_list, template=None, page_size=batch_size)
+#                 total_deleted += cur.rowcount
+#             rows_deleted += total_deleted
+#             print(f"Deleted {total_deleted} rows with matching primary key values in table '{table_name}'")
+
+#             # Insert new rows
+#             print(f"Inserting {len(df)} rows into table '{table_name}'...")
+#             if len(df) > 50000:
+#                 copy_success = bulk_insert_with_copy(cur, conn, table_name, df)  # implement this
+#                 if not copy_success:
+#                     optimized_batch_insert(cur, conn, table_name, df, batch_size=5000)  # implement this
+#             else:
+#                 optimized_batch_insert(cur, conn, table_name, df, batch_size=2000)
+
+#             rows_inserted += len(df)
+
+#             # Save Excel file
+#             file_path = os.path.join(directory_path, f"{table_name}.xlsx")
+#             df.to_excel(file_path, index=False)
+
+#         # Commit and close
+#         conn.commit()
+#         cur.execute("RESET synchronous_commit")
+#         cur.execute("RESET commit_delay")
+#         cur.execute("RESET work_mem")
+#         cur.close()
+#         conn.close()
+
+#         operation_summary = []
+#         if rows_inserted > 0: operation_summary.append("insert")
+#         if rows_updated > 0: operation_summary.append("update")
+#         if rows_deleted > 0: operation_summary.append("delete")
+#         if rows_skipped > 0: operation_summary.append("skip")
+#         if not operation_summary: operation_summary.append("no_change")
+
+#         return {
+#             "message": "Upload successful",
+#             "actions_performed": operation_summary,
+#             "rows_added": rows_inserted,
+#             "rows_deleted": rows_deleted,
+#             "rows_updated": rows_updated,
+#             "rows_skipped": rows_skipped
+#         }
+
+#     except Exception as e:
+#         print("An error occurred:", e)
+#         traceback.print_exc()
+#         return f"Error: {str(e)}"
+    
+def sanitize_column_name(header):
+    """Sanitize column names to lowercase, replace non-alphanumeric with _, collapse multiple _"""
+    sanitized = str(header).lower().strip()
+    sanitized = re.sub(r'[^a-z0-9]+', '_', sanitized)  # replace non-alphanumeric with _
+    sanitized = re.sub(r'_+', '_', sanitized)           # collapse multiple underscores
+    sanitized = sanitized.strip('_')                    # remove leading/trailing _
+    return sanitized
+
+def upload_excel_to_postgresql(
+    database_name,
+    username,
+    password,
+    excel_file_path,
+    primary_key_column,
+    host,
+    port='5432',
+    selected_sheets=None
+):
     try:
-        current_dir = os.getcwd()
-        excel_file_path = os.path.join(current_dir, excel_file_name)
-
-        # PERFORMANCE OPTIMIZATION: Use connection pooling settings
-        conn = psycopg2.connect(
-            dbname=database_name, 
-            user=username, 
-            password=password, 
-            host=host, 
-            port=port,
-            # Performance optimizations
-            connect_timeout=30,
-            application_name="excel_upload_optimized"
-        )
+        # Split composite keys if passed as comma-separated string
+        print("Primary Key Column Input:", primary_key_column)
+        if isinstance(primary_key_column, str):
+            primary_key_column = [col.strip() for col in primary_key_column.split(',')]
+           
         
-        # PERFORMANCE OPTIMIZATION: Set session parameters for better performance
-        cur = conn.cursor()
-        cur.execute("SET synchronous_commit = OFF")  # Faster commits
-        cur.execute("SET commit_delay = 0")          # Reduce commit delays
-        cur.execute("SET work_mem = '256MB'")        # Increase work memory for sorting/hashing
-        
-        if not excel_file_path.lower().endswith('.xlsx'):
-            return "Error: Only Excel files with .xlsx extension are supported."
 
-        xls = pd.ExcelFile(excel_file_path)
+        if not excel_file_path.lower().endswith(('.xlsx', '.xls')):
+            return "Error: Only Excel files with .xlsx or .xls extension are supported."
 
-        directory_name = os.path.splitext(os.path.basename(excel_file_name))[0]
+        # Directory to save uploaded files
+        directory_name = os.path.splitext(os.path.basename(excel_file_path))[0]
         directory_path = os.path.join(UPLOAD_FOLDER, directory_name)
         os.makedirs(directory_path, exist_ok=True)
-        rows_inserted = 0
-        rows_deleted = 0
-        rows_updated = 0
-        rows_skipped = 0
-        
 
-        for sheet_name in selected_sheets:
-            sheet_name_cleaned = sheet_name.strip('"').strip()
-            if sheet_name_cleaned not in xls.sheet_names:
-                print(f"Sheet '{sheet_name_cleaned}' not found in the Excel file. Skipping...")
-                continue
-                
-            # PERFORMANCE OPTIMIZATION: Read Excel with optimized parameters
-            df = pd.read_excel(
-                excel_file_name, 
-                sheet_name=sheet_name_cleaned,
-                engine='openpyxl',  # Generally faster for .xlsx files
-                # Use dtype inference for better performance
-                dtype_backend='numpy_nullable'
-            )
-            
-            table_name = sanitize_column_name(sheet_name_cleaned)
-            df.columns = [sanitize_column_name(col) for col in df.columns]
-            print(f"Columns in {sheet_name}: {df.columns}")
-            print(f"DataFrame shape: {df.shape}")
-            
-            # NEW: Process date columns and standardize formats to date objects
-            df = detect_and_process_date_columns(df)
-    
-            table_exists = validate_table_structure(cur, table_name, df)
-            print(f"Table exists for {table_name}: {table_exists}")
-            is_table_in_use = check_table_usage(cur, table_name)
-            print(f"Table '{table_name}' is in use: {is_table_in_use}")
+        # Connect to PostgreSQL
+        conn = psycopg2.connect(
+            dbname=database_name, user=username, password=password, host=host, port=port,
+            connect_timeout=30, application_name="excel_upload_optimized"
+        )
+        cur = conn.cursor()
+        cur.execute("SET synchronous_commit = OFF")
+        cur.execute("SET commit_delay = 0")
+        cur.execute("SET work_mem = '256MB'")
 
-            if table_exists and is_table_in_use == False:
-                # If table exists and is NOT in use, handle missing columns
-                cur.execute(f"SELECT column_name FROM information_schema.columns WHERE table_name = '{table_name}';")
-                existing_columns = [row[0] for row in cur.fetchall()]
-                print(f"Existing columns in table '{table_name}': {existing_columns}")
+        rows_inserted = rows_deleted = rows_updated = rows_skipped = 0
 
-                # Find columns to delete (existing in table but missing in uploaded file)
-                columns_to_delete = [col for col in existing_columns if col not in df.columns]
+        # Open the Excel file once
+        with pd.ExcelFile(excel_file_path, engine='openpyxl') as xls:
+            # If no sheets selected, use all sheets
+            sheets_to_process = selected_sheets or xls.sheet_names
 
-                for col in columns_to_delete:
-                    alter_query = sql.SQL('ALTER TABLE {} DROP COLUMN {}').format(
-                        sql.Identifier(table_name),
-                        sql.Identifier(col)
-                    )
-                    try:
-                        cur.execute(alter_query)
-                        print(f"Deleted column '{col}' from table '{table_name}'.")
-                    except Exception as e:
-                        print(f"Error deleting column '{col}' from table '{table_name}': {str(e)}")
-                        continue
+            for sheet_name in sheets_to_process:
+                sheet_name_cleaned = sheet_name.strip('"').strip()
 
-            if table_exists:
-                print(f"Validating and adding missing columns to table '{table_name}'.")
-                
-                # Detect and add missing columns
-                cur.execute(f"SELECT column_name FROM information_schema.columns WHERE table_name = '{table_name}';")
-                existing_columns = [row[0] for row in cur.fetchall()]
-
-                missing_columns = [col for col in df.columns if col not in existing_columns]
-
-                for col in missing_columns:
-                    # Use the new determine_column_type function
-                    col_type = determine_column_type(df, col)
-
-                    alter_query = sql.SQL('ALTER TABLE {} ADD COLUMN {} {}').format(
-                        sql.Identifier(table_name),
-                        sql.Identifier(col),
-                        sql.SQL(col_type)
-                    )
-
-                    try:
-                        cur.execute(alter_query)
-                        print(f"Added column '{col}' with type '{col_type}' to table '{table_name}'.")
-                    except Exception as e:
-                        print(f"Error adding column '{col}' to table '{table_name}': {str(e)}")
-                        continue
-
-            else:
-                print(f"Creating table '{table_name}'.")
-                
-                # Use the new determine_column_type function for table creation
-                column_types = []
-                for col in df.columns:
-                    col_type = determine_column_type(df, col)
-                    column_types.append((col, col_type))
-
-                columns = ', '.join(f'"{col}" {col_type}' for col, col_type in column_types)
-                create_table_query = sql.SQL('CREATE TABLE {} ({})').format(sql.Identifier(table_name),
-                                                                              sql.SQL(columns))
-                try:
-                    print(f"Create Table Query: {create_table_query.as_string(cur)}")
-                    cur.execute(create_table_query)
-                except Exception as e:
-                    print(f"Error creating table {table_name}: {str(e)}")
+                if sheet_name_cleaned not in xls.sheet_names:
+                    print(f"Sheet '{sheet_name_cleaned}' not found. Skipping...")
                     continue
 
-                if primary_key_column in df.columns:
-                    alter_table_query = sql.SQL('ALTER TABLE {} ADD PRIMARY KEY ({})').format(
-                        sql.Identifier(table_name), sql.Identifier(primary_key_column))
-                    try:
-                        cur.execute(alter_table_query)
-                    except Exception as e:
-                        print(f"Error adding primary key to {table_name}: {str(e)}")
-                        continue
+                # Read sheet
+                df = pd.read_excel(xls, sheet_name=sheet_name_cleaned, dtype_backend='numpy_nullable')
 
-            # Check for duplicate primary keys
-            df.columns = df.columns.str.strip().str.lower().str.replace('.', '_')
-            primary_key_column = primary_key_column.strip().lower().replace('.', '_')
-            duplicate_primary_keys = df[df.duplicated(subset=[primary_key_column], keep=False)][primary_key_column].tolist()
-            if duplicate_primary_keys:
-                return f"Error: Duplicate primary key values found: {', '.join(map(str, duplicate_primary_keys))}"
-
-            # PERFORMANCE OPTIMIZATION: Bulk delete using IN clause with batching
-            primary_key_values = df[primary_key_column].tolist()
-            
-            # Process deletions in batches to avoid query size limits
-            delete_batch_size = 1000
-            total_deleted = 0
-            
-            for i in range(0, len(primary_key_values), delete_batch_size):
-                batch_values = primary_key_values[i:i + delete_batch_size]
+                # Sanitize DataFrame columns
+                # df.columns = [sanitize_column_name(col) for col in df.columns]
+                # df.columns = [sanitize_column_name(col).lower().strip() for col in df.columns]
+                df.columns = [sanitize_column_name(col) for col in df.columns]
                 
-                delete_query = sql.SQL("DELETE FROM {} WHERE {} = ANY(%s)").format(
-                    sql.Identifier(table_name),
-                    sql.Identifier(primary_key_column)
-                )
-                
-                cur.execute(delete_query, (batch_values,))
-                total_deleted += cur.rowcount
-            rows_deleted += total_deleted
-            if total_deleted > 0:
-                print(f"Deleted {total_deleted} rows with matching primary key values in table '{table_name}'.")
-            else:
-                print("No rows were deleted.")
 
-            # PERFORMANCE OPTIMIZATION: Choose best insertion method based on data size
-            print(f"Starting data insertion for {len(df)} rows...")
-            
-            if len(df) > 50000:
-                # For very large datasets, try COPY FROM first
-                print("Using COPY FROM for large dataset...")
-                copy_success = bulk_insert_with_copy(cur, conn, table_name, df)
+                # Sanitize primary key columns
+                # primary_key_columns = [sanitize_column_name(col) for col in primary_key_column]
+                # primary_key_columns = [
+                #     col.strip().lower().replace('.', '_').replace('/', '_')  # replace . and / with _
+                #     for col in primary_key_column
+                # ]
+                print("Primary Key Column Input:", df.columns)
+                if isinstance(primary_key_column, str):
+                    primary_key_column = [col.strip() for col in primary_key_column.split(',')]
+
+                primary_key_columns = [sanitize_column_name(col) for col in primary_key_column]
+
+                print("Primary Key Column Input:", primary_key_columns)
+                print("Sanitized DF Columns:", list(df.columns))
+
+                
+                
+
+                # Check missing primary keys
+                missing_keys = [col for col in primary_key_columns if col not in df.columns]
+                if missing_keys:
+                    return f"Error: Primary key columns not found in sheet '{sheet_name_cleaned}': {', '.join(missing_keys)}"
+
+                # Process date columns if needed
+                df = detect_and_process_date_columns(df)
+
+                table_name = sanitize_column_name(sheet_name_cleaned)
+
+                # Check table existence
+                table_exists = validate_table_structure(cur, table_name, df)
+                is_table_in_use = check_table_usage(cur, table_name)
+                # ---------------------------------------------------------
+                #   PRIMARY KEY UPDATE LOGIC (COMPLETE)
+                # ---------------------------------------------------------
+                if table_exists:
+
+                    # Fetch existing PK
+                    cur.execute("""
+                        SELECT a.attname
+                        FROM   pg_index i
+                        JOIN   pg_attribute a ON a.attrelid = i.indrelid
+                                            AND a.attnum = ANY(i.indkey)
+                        WHERE  i.indrelid = %s::regclass
+                        AND    i.indisprimary;
+                    """, (table_name,))
+                    existing_pk_cols = [row[0] for row in cur.fetchall()]
+                    print("Existing PK:", existing_pk_cols)
+
+                    # Normalize new primary key (list if multi-pk)
+                    if isinstance(primary_key_column, str):
+                        new_pk_cols = [c.strip().lower() for c in primary_key_column.split(",")]
+                    else:
+                        new_pk_cols = [c.strip().lower() for c in primary_key_column]
+
+                    print("Requested New PK:", new_pk_cols)
+
+                    # If PK different → update required
+                    if sorted(existing_pk_cols) != sorted(new_pk_cols):
+
+                        print("⚠ Primary key change detected — Updating PK…")
+
+                        # Block PK update if table used in charts
+                        if is_table_in_use:
+                            raise Exception(
+                                f"Table '{table_name}' is used in charts — cannot modify primary key."
+                            )
+
+                        # Validate: All new PK columns exist
+                        for col in new_pk_cols:
+                            if col not in df.columns:
+                                raise Exception(f"Primary key column '{col}' does not exist in Excel data.")
+
+                        # Validate duplicates before applying PK
+                        if df.duplicated(subset=new_pk_cols).any():
+                            dups = df[df.duplicated(subset=new_pk_cols, keep=False)][new_pk_cols]
+                            raise Exception(f"Duplicate primary key values found:\n{dups}")
+
+                        # Drop existing PK
+                        try:
+                            cur.execute(sql.SQL("ALTER TABLE {} DROP CONSTRAINT IF EXISTS {}")
+                                        .format(
+                                            sql.Identifier(table_name),
+                                            sql.Identifier(f"{table_name}_pkey")
+                                        ))
+                            print("✔ Old primary key dropped.")
+                        except Exception as e:
+                            print("Error dropping old PK:", e)
+
+                        # Add new PK
+                        try:
+                            pk_identifiers = sql.SQL(",").join([sql.Identifier(col) for col in new_pk_cols])
+
+                            cur.execute(
+                                sql.SQL("ALTER TABLE {} ADD PRIMARY KEY ({})")
+                                .format(sql.Identifier(table_name), pk_identifiers)
+                            )
+
+                            print("✔ New primary key applied successfully:", new_pk_cols)
+
+                        except Exception as e:
+                            raise Exception(f"Failed to add new primary key: {e}")
+
+
+                # Create table if not exists
+                if not table_exists:
+                    column_types = [f'"{col}" {determine_column_type(df, col)}' for col in df.columns]
+                    primary_key_sql = ""
+                    if primary_key_columns:
+                        primary_key_sql = ", PRIMARY KEY (" + ", ".join(f'"{col}"' for col in primary_key_columns) + ")"
+
+                        create_table_query = sql.SQL('CREATE TABLE {} ({})').format(
+                            sql.Identifier(table_name),
+                            sql.SQL(', '.join(column_types) + primary_key_sql)
+                        )
+                        try:
+                            cur.execute(create_table_query)
+                            print(f"Table '{table_name}' created with primary key(s): {', '.join(primary_key_columns)}")
+                        except Exception as e:
+                            print(f"Error creating table {table_name}: {str(e)}")
+                            continue
+                    else:
+                        
+                        # Add missing columns if any
+                        cur.execute(f"SELECT column_name FROM information_schema.columns WHERE table_name = '{table_name}';")
+                        existing_columns = [row[0] for row in cur.fetchall()]
+                        missing_columns = [col for col in df.columns if col not in existing_columns]
+                        for col in missing_columns:
+                            col_type = determine_column_type(df, col)
+                            alter_query = sql.SQL('ALTER TABLE {} ADD COLUMN {} {}').format(
+                                sql.Identifier(table_name),
+                                sql.Identifier(col),
+                                sql.SQL(col_type)
+                            )
+                            try:
+                                cur.execute(alter_query)
+                                print(f"Added column '{col}' with type '{col_type}' to table '{table_name}'")
+                            except Exception as e:
+                                print(f"Error adding column '{col}' to table '{table_name}': {str(e)}")
+                                continue
+
+                # Check for duplicates in primary keys
+                duplicated_rows = df[df.duplicated(subset=primary_key_columns, keep=False)]
+                if not duplicated_rows.empty:
+                    return f"Error: Duplicate primary key values found in columns {', '.join(primary_key_columns)}: {duplicated_rows[primary_key_columns].to_dict(orient='records')}"
+
+                # Bulk delete existing rows based on primary keys
+                batch_size = 1000
+                total_deleted = 0
+                for i in range(0, len(df), batch_size):
+                    batch_df = df.iloc[i:i + batch_size]
+                    
+                    if len(primary_key_columns) == 1:
+                        # Single primary key: simple delete with ANY()
+                        delete_query = sql.SQL("DELETE FROM {} WHERE {} = ANY(%s)").format(
+                            sql.Identifier(table_name),
+                            sql.Identifier(primary_key_columns[0])
+                        )
+                        cur.execute(delete_query, (batch_df[primary_key_columns[0]].tolist(),))
+                        total_deleted += cur.rowcount
+
+                    else:
+                        # Multi-column primary key: use DELETE ... USING (VALUES ...) AS t(...)
+                        keys_list = [tuple(row) for row in batch_df[primary_key_columns].values]
+                        flattened_values = [val for key in keys_list for val in key]
+
+                        col_names_sql = sql.SQL(', ').join(map(sql.Identifier, primary_key_columns))
+                        values_sql = sql.SQL(', ').join(
+                            sql.SQL('({})').format(sql.SQL(', ').join(sql.Placeholder() * len(primary_key_columns)))
+                            for _ in keys_list
+                        )
+
+                        delete_query = sql.SQL("""
+                            DELETE FROM {table}
+                            USING (VALUES {vals}) AS t ({cols})
+                            WHERE {where_cond}
+                        """).format(
+                            table=sql.Identifier(table_name),
+                            vals=values_sql,
+                            cols=col_names_sql,
+                            where_cond=sql.SQL(' AND ').join(
+                                sql.SQL("{table}.{col} = t.{col}").format(
+                                    table=sql.Identifier(table_name),
+                                    col=sql.Identifier(col)
+                                ) for col in primary_key_columns
+                            )
+                        )
+
+                        cur.execute(delete_query, flattened_values)
+                        total_deleted += cur.rowcount
+
+                
+                # for i in range(0, len(df), batch_size):
+                #     batch_df = df.iloc[i:i + batch_size]
+                #     if len(primary_key_columns) == 1:
+                #         delete_query = sql.SQL("DELETE FROM {} WHERE {} = ANY(%s)").format(
+                #             sql.Identifier(table_name),
+                #             sql.Identifier(primary_key_columns[0])
+                #         )
+                #         cur.execute(delete_query, (batch_df[primary_key_columns[0]].tolist(),))
+                #     else:
+                #         keys_list = [tuple(row) for row in batch_df[primary_key_columns].values]
+                #         delete_query = sql.SQL("DELETE FROM {} WHERE ({}) IN %s").format(
+                #             sql.Identifier(table_name),
+                #             sql.SQL(', '.join([f'"{col}"' for col in primary_key_columns]))
+                #         )
+                #         extras.execute_values(cur, delete_query.as_string(cur), keys_list, template=None, page_size=batch_size)
+                #     total_deleted += cur.rowcount
+                rows_deleted += total_deleted
+                print(f"Deleted {total_deleted} rows with matching primary key values in table '{table_name}'")
+
+                # Insert new rows
+                if len(df) > 50000:
+                    copy_success = bulk_insert_with_copy(cur, conn, table_name, df)
+                    if not copy_success:
+                        optimized_batch_insert(cur, conn, table_name, df, batch_size=5000)
+                else:
+                    optimized_batch_insert(cur, conn, table_name, df, batch_size=2000)
+
                 rows_inserted += len(df)
-                
-                
-                if not copy_success:
-                    print("COPY FROM failed, using optimized batch insert...")
-                    optimized_batch_insert(cur, conn, table_name, df, batch_size=5000)
-                    rows_inserted += len(df)
-            else:
-                # For smaller datasets, use optimized batch insert
-                print("Using optimized batch insert...")
-                optimized_batch_insert(cur, conn, table_name, df, batch_size=2000)
-                rows_inserted += len(df)
 
-            # Save Excel file
-            file_name = f"{table_name}.xlsx"
-            file_path = os.path.join(directory_path, file_name)
-            df.to_excel(file_path, index=False)
+                # Save sheet Excel
+                file_path = os.path.join(directory_path, f"{table_name}.xlsx")
+                df.to_excel(file_path, index=False)
 
-        # Handle datasource table creation and insertion
-        cur.execute("""
-            SELECT EXISTS (
-                SELECT FROM pg_tables 
-                WHERE schemaname = 'public' 
-                AND tablename = 'datasource'
-            );
-        """)
-        table_exists = cur.fetchone()[0]
+                # Clean up dataframe explicitly
+                del df
+                gc.collect()
 
-        if not table_exists:
-            cur.execute("""
-                CREATE TABLE datasource (
-                    id SERIAL PRIMARY KEY,
-                    data_source_name VARCHAR(255),
-                    data_source_path VARCHAR(255),
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        
-                );
-            """)
-            print("Created 'datasource' table.")
-
-        insert_query = sql.SQL("""
-                    INSERT INTO datasource (data_source_name, data_source_path)
-                    VALUES (%s, %s)
-                """)
-        cur.execute(insert_query, (directory_name, directory_path))
-        
-        # Final commit
+        # Commit changes
         conn.commit()
-        
-        # Reset session parameters
         cur.execute("RESET synchronous_commit")
         cur.execute("RESET commit_delay")
         cur.execute("RESET work_mem")
-
         cur.close()
         conn.close()
+
         operation_summary = []
+        if rows_inserted > 0: operation_summary.append("insert")
+        if rows_updated > 0: operation_summary.append("update")
+        if rows_deleted > 0: operation_summary.append("delete")
+        if rows_skipped > 0: operation_summary.append("skip")
+        if not operation_summary: operation_summary.append("no_change")
 
-        if rows_inserted > 0:
-            operation_summary.append("insert")
-        if rows_updated > 0:
-            operation_summary.append("update")
-        if rows_deleted > 0:
-            operation_summary.append("delete")
-        if rows_skipped > 0:
-            operation_summary.append("skip")
-
-        # Default action type if none performed
-        if not operation_summary:
-            operation_summary.append("no_change")
-        rows_added = rows_inserted
-        # return "Upload successful"
         return {
             "message": "Upload successful",
-            "table_name": table_name,
             "actions_performed": operation_summary,
-            "rows_added": rows_added,
+            "rows_added": rows_inserted,
             "rows_deleted": rows_deleted,
             "rows_updated": rows_updated,
             "rows_skipped": rows_skipped
         }
-        
+
     except Exception as e:
         print("An error occurred:", e)
         traceback.print_exc()

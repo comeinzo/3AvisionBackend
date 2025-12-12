@@ -78,6 +78,7 @@ from dashboard_save.dashboard_save import (
 from excel_upload import upload_excel_to_postgresql
 from histogram_utils import generate_histogram_details, handle_column_data_types
 from json_upload import upload_json_to_postgresql
+from xml_upload import upload_xml_to_postgresql
 from signup.signup import (
     connect_db,
     create_user_table,
@@ -140,11 +141,28 @@ import datetime
 # ==================================
 # ✅ Initialize required DB schema
 # ==================================
+# def init_db():
+
+#     try:
+#         create_schema()
+#         print("✅ Database schema initialized successfully.")
+#     except Exception as e:
+#         print("⚠️ Error initializing schema:", e)
+
+
+
+# def init_db():
 try:
     create_schema()
     print("✅ Database schema initialized successfully.")
 except Exception as e:
+    # Change this to print the full error to see specifically WHY it failed
+    import traceback
+    traceback.print_exc()
     print("⚠️ Error initializing schema:", e)
+
+
+
 # ==============================
 # Configurations
 # ==============================
@@ -371,125 +389,315 @@ def test_db():
 # UPLOAD SECTION START
 # ===================================================================
 
+# @app.route('/uploadexcel', methods=['POST'])
+# @employee_required
+# @token_required
+
+# def upload_file_excel():
+#     try:
+#         # create_table()
+        
+#         # Validate required form data
+#         database_name = request.form.get('company_database')
+#         primary_key_column = request.form.get('primaryKeyColumnName')
+#         user_email = request.form.get('email', 'Unknown User')
+        
+#         if not database_name:
+#             return jsonify({'message': 'Company database name is required', 'status': False}), 400
+        
+#         if not primary_key_column:
+#             return jsonify({'message': 'Primary key column name is required', 'status': False}), 400
+        
+#         # Validate file upload
+#         if 'file' not in request.files:
+#             return jsonify({'message': 'No file uploaded', 'status': False}), 400
+        
+#         excel_file = request.files['file']
+        
+#         if excel_file.filename == '':
+#             return jsonify({'message': 'No file selected', 'status': False}), 400
+        
+#         # Validate file extension
+#         allowed_extensions = {'.xlsx', '.xls'}
+#         file_extension = os.path.splitext(excel_file.filename)[1].lower()
+#         if file_extension not in allowed_extensions:
+#             return jsonify({'message': 'Only Excel files (.xlsx, .xls) are allowed', 'status': False}), 400
+        
+#         # Parse selected sheets
+#         selected_sheets = request.form.getlist('selectedSheets')
+#         if not selected_sheets:
+#             # Try parsing as JSON string if not sent as list
+#             selected_sheets_json = request.form.get('selectedSheets')
+#             if selected_sheets_json:
+#                 try:
+#                     import json
+#                     selected_sheets = json.loads(selected_sheets_json)
+#                 except json.JSONDecodeError:
+#                     return jsonify({'message': 'Invalid selectedSheets format', 'status': False}), 400
+        
+#         print(f"Database name: {database_name}")
+#         print(f"Primary key column: {primary_key_column}")
+#         print(f"Selected sheets: {selected_sheets}")
+#         print(f"User: {request.current_user.get('user_id', 'Unknown')}")
+        
+#         # Save file temporarily
+#         excel_file_name = secure_filename(excel_file.filename)
+#         os.makedirs('tmp', exist_ok=True)
+#         temp_file_path = f'tmp/{excel_file_name}'
+#         excel_file.save(temp_file_path)
+        
+#         try:
+#             # Upload to PostgreSQL
+#             result = upload_excel_to_postgresql(
+#                 database_name, 
+#                 username, 
+#                 password, 
+#                 temp_file_path, 
+#                 primary_key_column, 
+#                 host, 
+#                 port, 
+#                 selected_sheets
+#             )
+            
+#             # if result == "Upload successful":
+#             if isinstance(result, dict) and result.get("message") == "Upload successful":
+#                 sheet_list = ', '.join(selected_sheets)
+#                 log_activity(
+#                     user_email=user_email,
+#                     action_type="Upload Excel",
+#                     description=(
+#                         f"Uploaded Excel file '{excel_file_name}' to database '{database_name}' "
+#                         f"with {result.get('rows_inserted', 0)} inserted, "
+#                         f"{result.get('rows_updated', 0)} updated, "
+#                         f"{result.get('rows_deleted', 0)} deleted, and "
+#                         f"{result.get('rows_skipped', 0)} skipped rows."
+#                     ),
+#                     company_name=database_name,
+#                     table_name=sheet_list
+#                 )
+
+#             # if isinstance(result, dict) and result.get("message") == "Upload successful":
+#                 return jsonify({
+#                     'message': 'File uploaded successfully',
+#                     'status': True,
+#                     'uploaded_by': request.current_user.get('user_id'),
+#                     'file_name': excel_file_name,
+#                     'rows_added': result["rows_added"],
+#                     'rows_deleted': result["rows_deleted"],
+#                     'rows_skipped': result["rows_skipped"],
+#                     'rows_updated': result["rows_updated"]
+#                 }), 200
+#             else:
+#                 log_activity(
+#                     user_email=user_email,
+#                     action_type="Upload Failed",
+#                     description=f"Failed to upload Excel file '{excel_file_name}' to database '{database_name}'. Error: {result}",
+#                     company_name=database_name
+#                 )
+
+#                 return jsonify({'message': result, 'status': False}), 500
+                
+#         finally:
+#             # Clean up temporary file
+#             try:
+#                 if os.path.exists(temp_file_path):
+#                     os.remove(temp_file_path)
+#             except Exception as cleanup_error:
+#                 print(f"Warning: Could not delete temporary file {temp_file_path}: {cleanup_error}")
+        
+#     except Exception as e:
+#         print(f"Upload error: {str(e)}")
+#         return jsonify({'message': 'Internal server error occurred', 'status': False}), 500
 @app.route('/uploadexcel', methods=['POST'])
 @employee_required
 @token_required
-
 def upload_file_excel():
+    temp_file_path = None
     try:
-        # create_table()
-        
-        # Validate required form data
         database_name = request.form.get('company_database')
         primary_key_column = request.form.get('primaryKeyColumnName')
+        print("pcolo",primary_key_column)
         user_email = request.form.get('email', 'Unknown User')
-        
-        if not database_name:
-            return jsonify({'message': 'Company database name is required', 'status': False}), 400
-        
-        if not primary_key_column:
-            return jsonify({'message': 'Primary key column name is required', 'status': False}), 400
-        
-        # Validate file upload
+
+        if not database_name or not primary_key_column:
+            return jsonify({'message': 'Database and primary key are required', 'status': False}), 400
+
         if 'file' not in request.files:
             return jsonify({'message': 'No file uploaded', 'status': False}), 400
-        
+
         excel_file = request.files['file']
-        
         if excel_file.filename == '':
             return jsonify({'message': 'No file selected', 'status': False}), 400
-        
-        # Validate file extension
-        allowed_extensions = {'.xlsx', '.xls'}
+
         file_extension = os.path.splitext(excel_file.filename)[1].lower()
-        if file_extension not in allowed_extensions:
+        if file_extension not in ('.xlsx', '.xls'):
             return jsonify({'message': 'Only Excel files (.xlsx, .xls) are allowed', 'status': False}), 400
-        
-        # Parse selected sheets
+
         selected_sheets = request.form.getlist('selectedSheets')
         if not selected_sheets:
-            # Try parsing as JSON string if not sent as list
             selected_sheets_json = request.form.get('selectedSheets')
             if selected_sheets_json:
+                import json
                 try:
-                    import json
                     selected_sheets = json.loads(selected_sheets_json)
                 except json.JSONDecodeError:
                     return jsonify({'message': 'Invalid selectedSheets format', 'status': False}), 400
-        
-        print(f"Database name: {database_name}")
-        print(f"Primary key column: {primary_key_column}")
-        print(f"Selected sheets: {selected_sheets}")
-        print(f"User: {request.current_user.get('user_id', 'Unknown')}")
-        
-        # Save file temporarily
+
         excel_file_name = secure_filename(excel_file.filename)
         os.makedirs('tmp', exist_ok=True)
-        temp_file_path = f'tmp/{excel_file_name}'
+        temp_file_path = os.path.join('tmp', excel_file_name)
         excel_file.save(temp_file_path)
-        
-        try:
-            # Upload to PostgreSQL
-            result = upload_excel_to_postgresql(
-                database_name, 
-                username, 
-                password, 
-                temp_file_path, 
-                primary_key_column, 
-                host, 
-                port, 
-                selected_sheets
+
+        # Call the safe upload function
+        result = upload_excel_to_postgresql(
+            database_name,
+            username,
+            password,
+            temp_file_path,
+            primary_key_column,
+            host,
+            port,
+            selected_sheets
+        )
+        print("result",result)
+        if isinstance(result, dict) and result.get("message") == "Upload successful":
+            sheet_list = ', '.join(selected_sheets)
+            log_activity(
+                user_email=user_email,
+                action_type="Upload Excel",
+                description=(
+                    f"Uploaded Excel file '{excel_file_name}' to database '{database_name}' "
+                    f"with {result.get('rows_added', 0)} inserted, "
+                    f"{result.get('rows_updated', 0)} updated, "
+                    f"{result.get('rows_deleted', 0)} deleted, "
+                    f"{result.get('rows_skipped', 0)} skipped."
+                ),
+                company_name=database_name,
+                table_name=sheet_list
             )
-            
-            # if result == "Upload successful":
-            if isinstance(result, dict) and result.get("message") == "Upload successful":
-                sheet_list = ', '.join(selected_sheets)
-                log_activity(
-                    user_email=user_email,
-                    action_type="Upload Excel",
-                    description=(
-                        f"Uploaded Excel file '{excel_file_name}' to database '{database_name}' "
-                        f"with {result.get('rows_inserted', 0)} inserted, "
-                        f"{result.get('rows_updated', 0)} updated, "
-                        f"{result.get('rows_deleted', 0)} deleted, and "
-                        f"{result.get('rows_skipped', 0)} skipped rows."
-                    ),
-                    company_name=database_name,
-                    table_name=sheet_list
-                )
 
-            # if isinstance(result, dict) and result.get("message") == "Upload successful":
-                return jsonify({
-                    'message': 'File uploaded successfully',
-                    'status': True,
-                    'uploaded_by': request.current_user.get('user_id'),
-                    'file_name': excel_file_name,
-                    'rows_added': result["rows_added"],
-                    'rows_deleted': result["rows_deleted"],
-                    'rows_skipped': result["rows_skipped"],
-                    'rows_updated': result["rows_updated"]
-                }), 200
-            else:
-                log_activity(
-                    user_email=user_email,
-                    action_type="Upload Failed",
-                    description=f"Failed to upload Excel file '{excel_file_name}' to database '{database_name}'. Error: {result}",
-                    company_name=database_name
-                )
+            return jsonify({
+                'message': 'File uploaded successfully',
+                'status': True,
+                'uploaded_by': request.current_user.get('user_id'),
+                'file_name': excel_file_name,
+                'rows_added': result["rows_added"],
+                'rows_deleted': result["rows_deleted"],
+                'rows_skipped': result["rows_skipped"],
+                'rows_updated': result["rows_updated"]
+            }), 200
+        else:
+            log_activity(
+                user_email=user_email,
+                action_type="Upload Failed",
+                description=f"Failed to upload Excel file '{excel_file_name}' to database '{database_name}'. Error: {result}",
+                company_name=database_name
+            )
+            return jsonify({'message': result, 'status': False}), 500
 
-                return jsonify({'message': result, 'status': False}), 500
-                
-        finally:
-            # Clean up temporary file
-            try:
-                if os.path.exists(temp_file_path):
-                    os.remove(temp_file_path)
-            except Exception as cleanup_error:
-                print(f"Warning: Could not delete temporary file {temp_file_path}: {cleanup_error}")
-        
     except Exception as e:
         print(f"Upload error: {str(e)}")
+        traceback.print_exc()
         return jsonify({'message': 'Internal server error occurred', 'status': False}), 500
+
+    finally:
+        # Delete temp file safely
+        if temp_file_path and os.path.exists(temp_file_path):
+            try:
+                os.remove(temp_file_path)
+            except Exception as cleanup_error:
+                print(f"Warning: Could not delete temporary file {temp_file_path}: {cleanup_error}")
+
+@app.route('/fetch-xml-from-url', methods=['POST'])
+@employee_required
+@token_required
+def fetch_xml_from_url():
+    """
+    Fetch XML from a URL and upload it to PostgreSQL.
+    
+    Request body:
+    {
+        "xml_url": "https://example.com/data.xml",
+        "primaryKeyColumnName": "id" or "region,unit_sold",
+        "company_database": "hdfc"
+    }
+    """
+    try:
+        data = request.get_json()
+        
+        if not data:
+            return jsonify({'message': 'No JSON data provided'}), 400
+        
+        xml_url = data.get('xml_url')
+        primary_key_column = data.get('primaryKeyColumnName')
+        database_name = data.get('company_database')
+        user_email = data.get('email', 'Unknown User')
+        
+        # Validate required parameters
+        if not xml_url:
+            return jsonify({'message': 'Missing required parameter: xml_url'}), 400
+        if not database_name:
+            return jsonify({'message': 'Missing required parameter: company_database'}), 400
+        
+        print(f"Fetching XML from URL: {xml_url}")
+        print(f"Primary key columns: {primary_key_column}")
+        print(f"Database: {database_name}")
+        
+        # Download XML from URL
+        try:
+            response = requests.get(xml_url, timeout=30, verify=False)
+            response.raise_for_status()
+        except requests.exceptions.RequestException as e:
+            return jsonify({'message': f'Failed to fetch XML from URL: {str(e)}'}), 400
+        
+        # Save XML to temporary file
+        os.makedirs('tmp', exist_ok=True)
+        xml_file_name = f"downloaded_{int(__import__('time').time())}.xml"
+        temp_file_path = f'tmp/{xml_file_name}'
+        
+        with open(temp_file_path, 'w', encoding='utf-8') as f:
+            f.write(response.text)
+        
+        print(f"XML saved to: {temp_file_path}")
+        
+        # Call the upload_xml_to_postgresql function
+        result = upload_xml_to_postgresql(
+            database_name, 
+            username, 
+            password, 
+            temp_file_path, 
+            primary_key_column, 
+            host, 
+            port
+        )
+        
+        # Check if upload was successful
+        if isinstance(result, dict) and result.get("message") == "Upload successful":
+            log_activity(
+                user_email=request.current_user.get("email", "Unknown"),
+                action_type=", ".join(result.get("actions_performed", [])),
+                table_name=result.get("table_name"),
+                company_name=database_name,
+                description=f"XML fetch from URL performed with {result['rows_inserted']} inserted, {result['rows_updated']} updated, {result['rows_skipped']} skipped rows."
+            )
+            return jsonify({
+                'message': 'XML fetched and uploaded successfully',
+                'status': True,
+                'uploaded_by': request.current_user.get('user_id'),
+                'file_name': xml_file_name,
+                'rows_added': result["rows_inserted"],
+                'rows_deleted': result["rows_deleted"],
+                'rows_skipped': result["rows_skipped"],
+                'rows_updated': result["rows_updated"],
+                'table_name': result.get("table_name")
+            }), 200
+        else:
+            return jsonify({'message': result, 'status': False}), 500
+            
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'message': f"Internal Server Error: {str(e)}"}), 500
+
 
 @app.route('/uploadcsv', methods=['POST'])
 @employee_required
@@ -545,7 +753,8 @@ def upload_file_csv():
         
         try:
             # Upload to PostgreSQL
-            result = upload_csv_to_postgresql(database_name, username, password, temp_file_path, host, port)
+            result = upload_csv_to_postgresql(database_name=database_name,primary_key_column=primary_key_column, username=username, password=password, csv_file_name=temp_file_path, host=host, port=port)
+            print("result",result)
             if isinstance(result, dict) and result.get("message") == "Upload successful":
                 log_activity(
                     user_email=request.current_user.get("email", "Unknown"),
@@ -578,6 +787,232 @@ def upload_file_csv():
     except Exception as e:
         print(f"CSV Upload error: {str(e)}")
         return jsonify({'message': 'Internal server error occurred', 'status': False}), 500
+
+# ----------------------------------------------------------------------
+# XML → List of Records Parser
+# ----------------------------------------------------------------------
+def parse_xml_to_list(xml_text):
+    """
+    Converts XML like:
+    <root>
+        <item>
+            <name>John</name>
+            <age>30</age>
+        </item>
+        <item>...</item>
+    </root>
+
+    Into:
+    [
+        { "name": "John", "age": "30" },
+        ...
+    ]
+    """
+
+    root = ET.fromstring(xml_text)
+
+    records = []
+    for element in root:
+
+        row = {}
+        for child in element:
+            # tag → key, text → value
+            row[child.tag] = child.text.strip() if child.text else None
+
+        if row:
+            records.append(row)
+
+    return records
+
+
+# ----------------------------------------------------------------------
+# MAIN ROUTE → FRONTEND CALLS THIS
+# # ----------------------------------------------------------------------
+# @app.route('/api/remote-xml-fetch', methods=['POST', 'OPTIONS'])
+
+# def remote_xml_fetch():
+#     try:
+#         payload = request.get_json()
+
+#         url = payload.get("url")
+#         user_id = payload.get("user_id")
+#         company_database = payload.get("company_database")
+#         print("url",url)
+
+#         if not url:
+#             return jsonify({"success": False, "message": "URL is required"}), 400
+
+#         print(f"[XML FETCH] User {user_id} requested URL: {url}")
+
+#         # -------------------------------------------------------------
+#         # Step 1: Fetch XML via server (bypass CORS)
+#         # -------------------------------------------------------------
+#         try:
+#             response = requests.get(url, timeout=15)
+#         except Exception as e:
+#             return jsonify({
+#                 "success": False,
+#                 "message": f"Unable to reach URL: {str(e)}"
+#             }), 400
+
+#         if response.status_code != 200:
+#             return jsonify({
+#                 "success": False,
+#                 "message": f"HTTP {response.status_code}: Failed to fetch URL"
+#             }), 400
+
+#         xml_text = response.text
+
+#         if not xml_text or not xml_text.strip().startswith("<"):
+#             return jsonify({
+#                 "success": False,
+#                 "message": "Fetched content is not valid XML."
+#             }), 400
+
+#         # -------------------------------------------------------------
+#         # Step 2: Try parsing XML
+#         # -------------------------------------------------------------
+#         parsed_data = None
+#         print("xml_text",xml_text)
+#         try:
+#             parsed_data = parse_xml_to_list(xml_text)
+#         except Exception as e:
+#             print("[XML PARSE ERROR]", e)
+
+#         file_name = os.path.basename(url) or "remote.xml"
+
+#         # -------------------------------------------------------------
+#         # OPTION A: Parsed successfully → return JSON records
+#         # -------------------------------------------------------------
+#         if parsed_data and len(parsed_data) > 0:
+#             columns = list(parsed_data[0].keys())
+#             return jsonify({
+#                 "success": True,
+#                 "data": parsed_data,
+#                 "columns": columns,
+#                 "fileName": file_name
+#             }), 200
+
+#         # -------------------------------------------------------------
+#         # OPTION B: XML parsed but empty
+#         # -------------------------------------------------------------
+#         if parsed_data == []:
+#             return jsonify({
+#                 "success": False,
+#                 "message": "XML parsed successfully but contains no data."
+#             }), 400
+
+#         # -------------------------------------------------------------
+#         # OPTION C: Parsing failed → return raw XML text
+#         # Frontend will parse manually
+#         # -------------------------------------------------------------
+#         return jsonify({
+#             "success": True,
+#             "text": xml_text,
+#             "fileName": file_name
+#         }), 200
+
+#     except Exception as e:
+#         print("[SERVER ERROR]", e)
+#         return jsonify({"success": False, "message": str(e)}), 500
+
+
+@app.route('/api/remote-xml-fetch', methods=['POST', 'OPTIONS'])
+def remote_xml_fetch():
+    # -------------------------------------------------------------
+    # ✅ Handle OPTIONS (CORS preflight)
+    # -------------------------------------------------------------
+    if request.method == "OPTIONS":
+        response = jsonify({"message": "CORS preflight OK"})
+        response.headers.add("Access-Control-Allow-Origin", "*")
+        response.headers.add("Access-Control-Allow-Headers", "Content-Type, Authorization")
+        response.headers.add("Access-Control-Allow-Methods", "POST, OPTIONS")
+        return response, 200
+
+    try:
+        # ---------------------------------------------------------
+        # ✅ Ensure JSON Content-Type
+        # ---------------------------------------------------------
+        if not request.is_json:
+            return jsonify({
+                "success": False,
+                "message": "Content-Type must be application/json"
+            }), 415
+
+        payload = request.get_json()
+
+        url = payload.get("url")
+        user_id = payload.get("user_id")
+        company_database = payload.get("company_database")
+
+        if not url:
+            return jsonify({"success": False, "message": "URL is required"}), 400
+
+        print(f"[XML FETCH] User={user_id}, URL={url}")
+
+        # ---------------------------------------------------------
+        # Step 1: Fetch XML
+        # ---------------------------------------------------------
+        try:
+            response = requests.get(url, timeout=20)
+        except Exception as e:
+            return jsonify({
+                "success": False,
+                "message": f"Unable to reach URL: {str(e)}"
+            }), 400
+
+        if response.status_code != 200:
+            return jsonify({
+                "success": False,
+                "message": f"HTTP {response.status_code}: Failed to fetch URL"
+            }), 400
+
+        xml_text = response.text
+
+        if not xml_text.strip().startswith("<"):
+            return jsonify({
+                "success": False,
+                "message": "Fetched content is not valid XML"
+            }), 400
+
+        # ---------------------------------------------------------
+        # Step 2: Try parsing XML
+        # ---------------------------------------------------------
+        try:
+            parsed_data = parse_xml_to_list(xml_text)
+        except Exception as e:
+            print("[XML PARSE ERROR]", e)
+            parsed_data = None
+
+        file_name = os.path.basename(url) or "remote.xml"
+
+        # Return parsed JSON
+        if parsed_data and len(parsed_data) > 0:
+            return jsonify({
+                "success": True,
+                "data": parsed_data,
+                "columns": list(parsed_data[0].keys()),
+                "fileName": file_name
+            }), 200
+
+        # Empty XML case
+        if parsed_data == []:
+            return jsonify({
+                "success": False,
+                "message": "XML parsed successfully but contains no data."
+            }), 400
+
+        # If parse failed → send raw XML text
+        return jsonify({
+            "success": True,
+            "text": xml_text,
+            "fileName": file_name
+        }), 200
+
+    except Exception as e:
+        print("[SERVER ERROR]", e)
+        return jsonify({"success": False, "message": str(e)}), 500
+
 
 @app.route('/upload-json', methods=['POST'])
 @employee_required
@@ -626,6 +1061,69 @@ def upload_file_json():
                     'status': True,
                     'uploaded_by': request.current_user.get('user_id'),
                     'file_name': json_file_name,
+                    'rows_added': result["rows_inserted"],
+                    'rows_deleted': result["rows_deleted"],
+                    'rows_skipped': result["rows_skipped"],
+                    'rows_updated': result["rows_updated"]
+            }), 200
+        else:
+            return jsonify({'message': result, 'status': False}), 500
+        #     return jsonify({'message': 'File uploaded successfully'}), 200
+        # else:
+        #     return jsonify({'message': result}), 500
+
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'message': f"Internal Server Error: {str(e)}"}), 500
+
+
+@app.route('/upload-xml', methods=['POST'])
+@employee_required
+@token_required
+def upload_file_xml():
+    try:
+        database_name = request.form.get('company_database')
+        primary_key_column = request.form.get('primaryKeyColumnName')
+        user_email = request.form.get('email', 'Unknown User')
+        
+        
+        # Check if file is present in the request
+        if 'file' not in request.files:
+            return jsonify({'message': 'No file part in the request'}), 400
+
+        xml_file = request.files['file']
+        
+        # Check if a file is selected
+        if xml_file.filename == '':
+            return jsonify({'message': 'No file selected for uploading'}), 400
+
+        print("primary_key_column:", primary_key_column)
+        print("xml_file:", xml_file.filename)
+        print("database_name:", database_name)
+        
+        # Save the file to a temporary directory
+        xml_file_name = secure_filename(xml_file.filename)
+        os.makedirs('tmp', exist_ok=True)
+        temp_file_path = f'tmp/{xml_file_name}'
+        xml_file.save(temp_file_path)
+
+        # Call the upload_xml_to_postgresql function
+        result = upload_xml_to_postgresql(database_name, username, password, temp_file_path, primary_key_column, host, port)
+        
+        # if result == "Upload successful":
+        if isinstance(result, dict) and result.get("message") == "Upload successful":
+            log_activity(
+                    user_email=request.current_user.get("email", "Unknown"),
+                    action_type=", ".join(result.get("actions_performed", [])),
+                    table_name=result.get("table_name"),
+                    company_name=database_name,
+                    description=f"XML upload performed with {result['rows_inserted']} inserted, {result['rows_updated']} updated, {result['rows_skipped']} skipped rows."
+            )
+            return jsonify({
+                    'message': 'File uploaded successfully',
+                    'status': True,
+                    'uploaded_by': request.current_user.get('user_id'),
+                    'file_name': xml_file_name,
                     'rows_added': result["rows_inserted"],
                     'rows_deleted': result["rows_deleted"],
                     'rows_skipped': result["rows_skipped"],
@@ -1312,6 +1810,7 @@ def fetch_data_for_ts_decomposition(table_name, x_axis_columns, filter_options, 
     query = f"SELECT * FROM {table_name}"
     cur.execute(query)
     data = cur.fetchall()
+    # print("data",data)
     colnames = [desc[0] for desc in cur.description]
     cur.close()
     connection.close()
@@ -1319,6 +1818,9 @@ def fetch_data_for_ts_decomposition(table_name, x_axis_columns, filter_options, 
        
 
     temp_df = global_df.copy()
+    print("📌 INITIAL GLOBAL DF SHAPE:", global_df.shape)
+    print("📌 INITIAL GLOBAL DF COLUMNS:", list(global_df.columns))
+
 
     # Apply calculations if any
     if calculationData and isinstance(calculationData, list):
@@ -1598,27 +2100,109 @@ def fetch_data_for_ts_decomposition(table_name, x_axis_columns, filter_options, 
                     temp_df[new_col_name] = eval(calc_formula_python)
                 except Exception as e:
                     raise ValueError(f"Error evaluating math formula '{calc_formula}': {e}") from e
+    print("📌 AFTER CALCULATIONS SHAPE:", temp_df.shape)
+    print("📌 AFTER CALCULATIONS COLUMNS:", list(temp_df.columns))
+
 
     # Apply filters
     if isinstance(filter_options, str):
         filter_options = json.loads(filter_options)
 
+    # for col, filters in filter_options.items():
+    #     # if col in temp_df.columns:
+    #     if col in date_columns:
+    #         temp_df[col] = pd.to_datetime(temp_df[col]).dt.date
+    #         filters = [pd.to_datetime(f).date() for f in filters]
+    #         temp_df = temp_df[temp_df[col].isin(filters)]
+
+    #     if col not in temp_df.columns:
+    #         print(f"❌ FILTER ERROR: Column '{col}' not found. Skipping filter.")
+    #         continue
+    #     print("   Before filter:", temp_df.shape)
+        
+    #     try:
+    #         if pd.api.types.is_numeric_dtype(temp_df[col]):
+    #             filters_converted = [pd.to_numeric(f, errors='coerce') for f in filters]
+    #             filters_converted = [f for f in filters_converted if pd.notna(f)]
+    #             temp_df = temp_df[temp_df[col].isin(filters_converted)]
+    #         else:
+    #             temp_df[col] = temp_df[col].astype(str)
+    #             filters = list(map(str, filters))
+    #             temp_df = temp_df[temp_df[col].isin(filters)]
+    #     except Exception as e:
+    #         print(f"Warning: Could not apply filter on column '{col}' during TS fetch due to type mismatch or error: {e}. Falling back to string comparison.")
+    #         temp_df[col] = temp_df[col].astype(str)
+    #         filters = list(map(str, filters))
+    #         temp_df = temp_df[temp_df[col].isin(filters)]
+    date_columns = [
+        col for col in temp_df.columns
+        if "date" in col.lower()
+    ]
+
+    print("\n📌 DETECTED DATE COLUMNS:", date_columns)
+
+    # Apply filters
     for col, filters in filter_options.items():
-        if col in temp_df.columns:
-            try:
-                if pd.api.types.is_numeric_dtype(temp_df[col]):
-                    filters_converted = [pd.to_numeric(f, errors='coerce') for f in filters]
-                    filters_converted = [f for f in filters_converted if pd.notna(f)]
-                    temp_df = temp_df[temp_df[col].isin(filters_converted)]
-                else:
-                    temp_df[col] = temp_df[col].astype(str)
-                    filters = list(map(str, filters))
-                    temp_df = temp_df[temp_df[col].isin(filters)]
-            except Exception as e:
-                print(f"Warning: Could not apply filter on column '{col}' during TS fetch due to type mismatch or error: {e}. Falling back to string comparison.")
+
+        print(f"\n🔍 APPLYING FILTER ON COLUMN: {col}")
+        print(f"   ➜ Filter requested: {filters}")
+
+        if col not in temp_df.columns:
+            print(f"❌ FILTER ERROR: Column '{col}' not found. Skipping...")
+            continue
+
+        # Show unique values for debugging
+        try:
+            print("   ➜ Sample unique DF values:", temp_df[col].astype(str).unique()[:10])
+        except Exception:
+            pass
+
+        before_rows = temp_df.shape[0]
+        print("   ➜ Rows before filter:", before_rows)
+
+        try:
+            # DATE FILTER HANDLING
+            if col in date_columns:
+                print("   📅 Date column detected → Converting to date")
+
+                temp_df[col] = pd.to_datetime(temp_df[col], errors='coerce').dt.date
+                filters = [pd.to_datetime(f, errors='coerce').date() for f in filters]
+
+                temp_df = temp_df[temp_df[col].isin(filters)]
+
+            # NUMERIC FILTER HANDLING
+            elif pd.api.types.is_numeric_dtype(temp_df[col]):
+                filters_converted = [pd.to_numeric(f, errors='coerce') for f in filters]
+                filters_converted = [f for f in filters_converted if pd.notna(f)]
+                temp_df = temp_df[temp_df[col].isin(filters_converted)]
+
+            # STRING FILTER HANDLING
+            else:
                 temp_df[col] = temp_df[col].astype(str)
                 filters = list(map(str, filters))
                 temp_df = temp_df[temp_df[col].isin(filters)]
+
+        except Exception as e:
+            print(f"⚠ FILTER ERROR: {e}. Falling back to string comparison.")
+
+            temp_df[col] = temp_df[col].astype(str)
+            filters = list(map(str, filters))
+            temp_df = temp_df[temp_df[col].isin(filters)]
+
+        after_rows = temp_df.shape[0]
+
+        print(f"   ➜ Rows after filter: {after_rows}")
+
+        if after_rows == 0:
+            print("   ❌ FILTER REMOVED ALL ROWS!")
+            print("   ⚠ Returning original data to prevent crash.\n")
+            temp_df = global_df.copy()
+            break
+
+    print("\n📌 FINAL temp_df SHAPE:", temp_df.shape)
+    print(temp_df.head())
+                
+    print("temp_df",temp_df)
 
     return temp_df[[x_axis_columns[0], y_axis_column[0]]] if x_axis_columns and y_axis_column else temp_df
 
@@ -1639,17 +2223,31 @@ def get_bar_chart_route():
 
     table_name = data['selectedTable']
     y_axis_columns = data['yAxis']  # Assuming yAxis can be multiple columns as well
-    aggregation = data['aggregate']
+    # aggregation = data['aggregate']
     filter_options = data['filterOptions']
     checked_option = data['filterOptions']
     db_nameeee = data['databaseName']
     selectedUser = data['selectedUser']
     chart_data = data['chartType']
+     
+    # agg_value = data['aggregate']
+    # aggregation = agg_value.get('aggregation', None)
+    agg_value = data['aggregate']  # list of objects
+    clicked_index = data.get("clickedIndex", 0)  # default 0
+
+    aggregation = next(
+        (item['aggregation'] for item in agg_value if item['index'] == clicked_index),
+        None
+    )
+
+    print("Selected aggregation:", aggregation)
+    print("agg_value",agg_value)
 
     dateGranularity= data.get('dateGranularity', None)
 
     print("filter_options-----",filter_options)
     print("dateGranularity-----",dateGranularity)
+    print("aggregation",aggregation)
 
 
     # print("chart_data",data)
@@ -1915,7 +2513,10 @@ def get_bar_chart_route():
         print("Single treeHierarchy chart")
 
         try:
-            temp_df = new_df.copy()
+           
+            df = fetch_chart_data(database_con, table_name)
+            temp_df = df.copy()
+            
             # ============== DATE GRANULARITY PROCESSING ==============
             # Handle date granularity - convert date columns to specified granularity
             if dateGranularity and isinstance(dateGranularity, dict):
@@ -1924,7 +2525,8 @@ def get_bar_chart_route():
                         print(f"Applying date granularity: {date_col} -> {granularity}")
                         
                         # Ensure the column is datetime
-                        temp_df[date_col] = pd.to_datetime(temp_df[date_col], errors='coerce')
+                        # temp_df[date_col] = pd.to_datetime(temp_df[date_col], errors='coerce')
+                        temp_df[date_col] = pd.to_datetime(temp_df[date_col], errors='coerce', dayfirst=True)
                         
                         # Create new column name for the granularity
                         granularity_col = f"{date_col}_{granularity}"
@@ -2220,7 +2822,7 @@ def get_bar_chart_route():
         try:
 
             print("calculationData",calculationData)
-            data = fetch_data_for_duel(table_name, x_axis_columns, filter_options, y_axis_columns, aggregation, db_nameeee, selectedUser,calculationData= data.get('calculationData'),dateGranularity=dateGranularity)
+            data = fetch_data_for_duel(table_name, x_axis_columns, filter_options, y_axis_columns, agg_value, db_nameeee, selectedUser,calculationData= data.get('calculationData'),dateGranularity=dateGranularity)
             
             # Debug: Print the structure of fetched data
             print(f"🔍 Dual Y-axis Chart - Original data length: {len(data)}")
@@ -2338,7 +2940,37 @@ def get_edit_chart_route():
     table_name = data['selectedTable']
     x_axis_columns = data['xAxis'].split(', ')  # Split multiple columns into a list
     y_axis_columns = data['yAxis'] # Assuming yAxis can be multiple columns as well
-    aggregation = data['aggregate']
+    # aggregation = data['aggregate']
+    agg_value = data.get("aggregate")
+    current_y_axis = y_axis_columns[0] if y_axis_columns else None
+    aggregation = None
+
+    # CASE 1 → Direct aggregate string
+    if isinstance(agg_value, str) and agg_value.lower() in ["sum", "count", "avg", "mean", "min", "max"]:
+        aggregation = agg_value.lower()
+        print("✔ Using direct string aggregate:", aggregation)
+
+    # CASE 2 → JSON string or list
+    else:
+        import json
+        # Convert JSON string to list
+        if isinstance(agg_value, str):
+            try:
+                agg_value = json.loads(agg_value)
+            except json.JSONDecodeError:
+                agg_value = []
+
+        # Extract matching yAxis aggregation from list
+        if isinstance(agg_value, list):
+            aggregation = next(
+                (item.get('aggregation') for item in agg_value if item.get('yAxis') == current_y_axis),
+                None
+            )
+            if not aggregation and agg_value:
+                aggregation = agg_value[0].get('aggregation')
+
+    print("Final selected aggregate:", aggregation)
+
     checked_option = data['filterOptions'] 
     db_nameeee = data['databaseName']
     chartType = data['chartType']
@@ -2974,7 +3606,7 @@ def get_edit_chart_route():
                 return jsonify({"error": str(e)}), 500
         
     elif len(y_axis_columns) == 2:
-        datass = fetch_data_for_duel(table_name, x_axis_columns, checked_option, y_axis_columns, aggregation, db_nameeee,selectedUser,calculationData,dateGranularity=dateGranularity)
+        datass = fetch_data_for_duel(table_name, x_axis_columns, checked_option, y_axis_columns, agg_value, db_nameeee,selectedUser,calculationData,dateGranularity=dateGranularity)
         data = {
              "categories": [row[0] for row in datass],
             "series1": [row[1] for row in datass],
@@ -3192,7 +3824,7 @@ def save_data():
             data.get('selectedTable'),
             data.get('xAxis'),
             data.get('yAxis'),
-            data.get('aggregate'),
+            json.dumps(data.get('aggregate')),
             data.get('chartType'),
             # data.get('chartColor'),
             chart_color_json,
@@ -3317,7 +3949,7 @@ def update_data():
             data.get('selectedTable'),
             data.get('xAxis'),
             data.get('yAxis'),
-            data.get('aggregate'),
+            json.dumps(data.get('aggregate')),
             data.get('chartType'),
             chart_color_json,
             chart_heading_json,
@@ -3451,7 +4083,7 @@ def get_chart_names(user_id, database_name):
                     SELECT user_id, chart_name 
                     FROM table_chart_save
                     WHERE user_id IN ({placeholders}) AND company_name = %s
-                    ORDER BY timestamp ASC
+                    ORDER BY updated_at DESC;
                 """
 
                 cursor.execute(query, tuple(all_employee_ids)+ (database_name,))
@@ -4808,7 +5440,48 @@ def receive_chart_details():
     tableName = data.get('tableName')
     x_axis = data.get('x_axis')  # Assuming this is a list of columns to group by
     y_axis = data.get('y_axis')  # Assuming this is a list of columns to aggregate
-    aggregate = data.get('aggregate')  # Aggregation method, e.g., 'sum', 'mean', etc.
+    # aggregate = data.get('aggregate')  # Aggregation method, e.g., 'sum', 'mean', etc.
+    agg_value = data.get('aggregate') # list of objects
+    print("agg_value0",agg_value)
+    
+
+    current_y_axis = y_axis[0] if isinstance(y_axis, list) and y_axis else None
+    aggregate = None
+
+    # CASE 1: agg_value is direct string like sum, count, avg
+    if isinstance(agg_value, str) and agg_value.lower() in ["sum", "count", "avg", "mean", "min", "max"]:
+        aggregate = agg_value
+        print("✔ Using direct string aggregate:", aggregate)
+
+    else:
+        # CASE 2: JSON String or list of objects
+        if isinstance(agg_value, str):
+            try:
+                agg_value = json.loads(agg_value)
+            except:
+                agg_value = []
+
+        # Filter list by yAxis matching
+        if isinstance(agg_value, list):
+            aggregate = next(
+                (item.get('aggregation') for item in agg_value if item.get('yAxis') == current_y_axis),
+                None
+            )
+
+        # Fallback to first available aggregation
+        if not aggregate and isinstance(agg_value, list) and agg_value:
+            aggregate = agg_value[0].get('aggregation')
+
+    print("Final selected aggregate:", aggregate)
+
+    # # Find aggregation based on y-axis column
+    # aggregate = next(
+    #     (item.get('aggregation') for item in agg_value if item.get('yAxis') == current_y_axis),
+    #     None
+    # )
+    # print("agg_value0",agg_value)
+    # print("aggregate",aggregate)
+
     chart_type = data.get('chart_type')
     chart_heading = data.get('chart_heading')
     optimizeData= data.get('optimizeData')
@@ -5092,7 +5765,7 @@ def receive_chart_details():
                     })
             if chart_type == "duealChart"  :
                     print("Dual y-axis chart detected")
-                    data = fetch_data_for_duel(tableName, x_axis, filter_options, y_axis, aggregate, databaseName, selectedUser,calculation_data,dateGranularity)
+                    data = fetch_data_for_duel(tableName, x_axis, filter_options, y_axis, agg_value, databaseName, selectedUser,calculation_data,dateGranularity)
                     description = f"{user_name} viewed the chart '{chart}' from table '{tableName}'."
                     log_activity(
                             company_name=databaseName,
@@ -8491,8 +9164,8 @@ def save_dashboard():
             positions = json.dumps([{'x': p['x'], 'y': p['y']} for p in position])
             # Extract width and height from the new position structure
             chart_sizes = json.dumps([{'width': p['width'], 'height': p['height']} for p in position])
-
-            aggregations = json.dumps([chart.get('aggregation', None) for chart in chart_details]) # Handle optional aggregation
+            aggregations = [chart.get('aggregation', None) for chart in chart_details]
+            # aggregations = json.dumps([chart.get('aggregation', None) for chart in chart_details]) # Handle optional aggregation
             xaxes = json.dumps([chart.get('x_axis', []) for chart in chart_details])  # Correct key name
             yaxes = json.dumps([chart.get('y_axis', []) for chart in chart_details])  # Correct key name
             opacities = json.dumps([chart.get('opacity', 1) for chart in chart_details])  # default to 1 if missing
@@ -8528,7 +9201,7 @@ def save_dashboard():
                 SET chart_ids = %s, heading = %s, position = %s::jsonb, chart_size = %s::jsonb, chart_aggregate = %s::jsonb, chart_xaxis = %s::jsonb, chart_yaxis = %s::jsonb,chart_type = %s::jsonb,filterdata = %s,droppableBgColor=%s, opacity = %s::jsonb,chartcolor = %s::jsonb,font_style_state = %s,
                 font_size = %s,font_color = %s,wallpaper_id = %s WHERE user_id = %s AND file_name = %s;
             """
-            cur.execute(update_chart_query, (chart_ids_str, DashboardHeading, positions, chart_sizes, aggregations, xaxes, yaxes, chart_type, filter_options,droppableBgColor,opacities,bgcolors,fontStyleState, fontSize, fontColor,wallpaper_id, user_id, dashboard_name))
+            cur.execute(update_chart_query, (chart_ids_str, DashboardHeading, positions, chart_sizes,json.dumps(aggregations), xaxes, yaxes, chart_type, filter_options,droppableBgColor,opacities,bgcolors,fontStyleState, fontSize, fontColor,wallpaper_id, user_id, dashboard_name))
             conn.commit()
             
             for chart in chart_details:
@@ -9825,7 +10498,8 @@ def share_dashboard():
                         old_chart["selected_table"],
                         old_chart["x_axis"],
                         old_chart["y_axis"],
-                        old_chart["aggregate"],
+                        # old_chart["aggregate"],
+                        json.dumps(old_chart["aggregate"]) if isinstance(old_chart.get("aggregate"), dict) else old_chart.get("aggregate"),
                         old_chart["chart_type"],
                         old_chart["chart_color"],
                         old_chart["chart_heading"],
@@ -13697,52 +14371,53 @@ load_dotenv()
 # Configure Google Gemini
 genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
 
-def get_working_gemini_model():
-    """
-    Finds the best available free model.
-    STRICTLY avoids experimental models to prevent 429 Quota errors.
-    """
-    # 1. The Gold Standard for Free Tier (High limits, low latency)
-    preferred_models = [
-        "gemini-1.5-flash",
-        "gemini-1.5-flash-latest", 
-        "gemini-1.0-pro",
-        "gemini-pro"
-    ]
+# def get_working_gemini_model():
+#     """
+#     Finds the best available free model.
+#     STRICTLY avoids experimental models to prevent 429 Quota errors.
+#     """
+#     # 1. The Gold Standard for Free Tier (High limits, low latency)
+#     preferred_models = [
+#         # "gemini-1.5-flash",
+#         # "gemini-1.5-flash-latest", 
+#         "gemini-2.5-flash-lite",
+#         "gemini-1.0-pro",
+#         "gemini-pro"
+#     ]
     
-    print("🔍 Checking available Gemini models...")
+#     print("🔍 Checking available Gemini models...")
 
-    # 2. Try preferred models first
-    for model_name in preferred_models:
-        try:
-            model = genai.GenerativeModel(model_name)
-            # Test generation to ensure we have access
-            model.generate_content("test")
-            print(f"✅ Successfully connected to: {model_name}")
-            return model_name
-        except Exception:
-            continue
+#     # 2. Try preferred models first
+#     for model_name in preferred_models:
+#         try:
+#             model = genai.GenerativeModel(model_name)
+#             # Test generation to ensure we have access
+#             model.generate_content("test")
+#             print(f"✅ Successfully connected to: {model_name}")
+#             return model_name
+#         except Exception:
+#             continue
 
-    # 3. Last resort: Find ANY stable model (No Experimental ones)
-    try:
-        for m in genai.list_models():
-            if 'generateContent' in m.supported_generation_methods:
-                name = m.name.replace('models/', '')
-                # Skip experimental/preview models which have strict quotas
-                if 'exp' in name or 'preview' in name or 'vision' in name:
-                    continue
-                print(f"✅ Falling back to available model: {name}")
-                return name
-    except Exception:
-        pass
+#     # 3. Last resort: Find ANY stable model (No Experimental ones)
+#     try:
+#         for m in genai.list_models():
+#             if 'generateContent' in m.supported_generation_methods:
+#                 name = m.name.replace('models/', '')
+#                 # Skip experimental/preview models which have strict quotas
+#                 if 'exp' in name or 'preview' in name or 'vision' in name:
+#                     continue
+#                 print(f"✅ Falling back to available model: {name}")
+#                 return name
+#     except Exception:
+#         pass
     
-    # 4. Absolute fallback
-    print("⚠️ Defaulting to gemini-1.5-flash (Force)")
-    return "gemini-1.5-flash"
+#     # 4. Absolute fallback
+#     print("⚠️ Defaulting to gemini-1.5-flash (Force)")
+#     return "gemini-1.5-flash"
 
 # Initialize model once on startup
-ACTIVE_MODEL_NAME = get_working_gemini_model()
-
+# ACTIVE_MODEL_NAME = get_working_gemini_model()
+ACTIVE_MODEL_NAME = "gemini-2.5-flash-lite"
 # app = Flask(__name__)
 
 # # DB CONFIG
@@ -13948,7 +14623,7 @@ SQL Query:"""
         model = genai.GenerativeModel(ACTIVE_MODEL_NAME)
         response = model.generate_content(
             prompt,
-            generation_config=genai.GenerationConfig(temperature=0.1)
+            generation_config=genai.GenerationConfig(temperature=0.6)
         )
         
         sql = response.text.strip()
@@ -14411,6 +15086,209 @@ def get_schema(table_name):
 #         }), 500
 
 
+# @app.route('/api/query', methods=['POST'])
+# def process_query():
+#     try:
+#         data = request.json
+#         question = data.get('question')
+#         table_name = data.get('table_name')
+        
+#         if not question or not table_name:
+#             return jsonify({
+#                 'success': False,
+#                 'error': 'Missing question or table_name'
+#             }), 400
+        
+#         # 1. Get table schema
+#         schema = get_table_schema(table_name)
+#         if not schema:
+#             return jsonify({
+#                 'success': False,
+#                 'error': f'Table {table_name} not found'
+#             }), 404
+        
+#         # 2. Generate SQL query (USING GEMINI)
+#         sql_query = generate_sql_with_gemini(question, schema, table_name)
+        
+#         if not sql_query:
+#             return jsonify({
+#                 'success': False,
+#                 'error': 'Failed to generate SQL query'
+#             }), 500
+        
+#         # 3. Execute query
+#         results_df, error = execute_sql(sql_query)
+        
+#         if error:
+#             return jsonify({
+#                 'success': False,
+#                 'error': f'SQL execution error: {error}',
+#                 'sql': sql_query
+#             }), 400
+        
+#         # 4. Generate natural language answer (USING GEMINI)
+#         natural_answer = generate_natural_answer(question, sql_query, results_df)
+        
+#         # Convert DataFrame to list of dicts for JSON response
+#         results_list = results_df.to_dict('records') if results_df is not None else []
+        
+#         # Extract filter conditions from SQL query
+#         filters = extract_filters_from_sql(sql_query)
+        
+#         # ---------------------------------------------------------
+#         # NEW LOGIC: AI AUTOMATICALLY DETERMINES THE CHART
+#         # ---------------------------------------------------------
+#         chart_data = None
+#         chart_type = None
+        
+#         # We only look for a chart if there is data
+#         if results_df is not None and not results_df.empty and len(results_df) > 0:
+            
+#             # Ask Gemini to decide the chart type and map columns
+#             chart_config = determine_optimal_chart(question, results_df, sql_query)
+            
+#             if chart_config and chart_config.get('chart_type') not in [None, "None", "null"]:
+                
+#                 chart_type = chart_config['chart_type']
+#                 x_col = chart_config.get('x_axis_column')
+#                 y_col = chart_config.get('y_axis_column')
+                
+#                 # Check if the AI-selected columns actually exist in the data
+#                 if x_col in results_df.columns and y_col in results_df.columns:
+                    
+#                     # Format data for the frontend
+#                     chart_data = {
+#                         'categories': results_df[x_col].tolist(),
+#                         'values': [
+#                             float(x) if isinstance(x, (int, float)) or (isinstance(x, str) and x.replace('.','',1).isdigit()) 
+#                             else 0 
+#                             for x in results_df[y_col].tolist()
+#                         ],
+#                         'xAxis': x_col,
+#                         'yAxis': y_col,
+#                         'chartType': chart_type,
+#                         'title': chart_config.get('title', 'Data Visualization'),
+#                         'filter_conditions': filters
+#                     }
+#                 else:
+#                     # Fallback: If AI picked wrong column names, default to first 2 columns
+#                     if len(results_df.columns) >= 2:
+#                         print("AI column mismatch, falling back to default columns.")
+#                         chart_type = 'bar'
+#                         chart_data = {
+#                             'categories': results_df.iloc[:, 0].tolist(),
+#                             'values': results_df.iloc[:, 1].tolist(),
+#                             'xAxis': results_df.columns[0],
+#                             'yAxis': results_df.columns[1],
+#                             'chartType': 'bar',
+#                             'filter_conditions': filters
+#                         }
+
+#         return jsonify({
+#             'success': True,
+#             'question': question,
+#             'sql': sql_query,
+#             'answer': natural_answer,
+#             'results': results_list,
+#             'row_count': len(results_list),
+#             'chart_type': chart_type,
+#             'chart_data': chart_data,
+#             'filters': filters
+#         })
+        
+#     except Exception as e:
+#         print(f"Error processing query: {e}")
+#         print(traceback.format_exc())
+#         return jsonify({
+#             'success': False,
+#             'error': str(e)
+#         }), 500
+
+
+
+# ============================================================================
+# NEW OPTIMIZED HELPER FUNCTION (Replaces the old 2 functions)
+# ============================================================================
+
+def generate_answer_and_chart(question, sql_query, results_df):
+    """
+    COMBINED REQUEST: Generates both the natural language answer AND 
+    determines the best chart visualization in a SINGLE API call.
+    """
+    if results_df is None or len(results_df) == 0:
+        return {
+            "answer": "No results found for your query.",
+            "chart": None
+        }
+
+    # Prepare data sample for the AI
+    # Convert timestamps to strings for JSON safety
+    data_sample = results_df.head(5).to_dict(orient='records')
+    for row in data_sample:
+        for k, v in row.items():
+            if isinstance(v, (pd.Timestamp, pd.Timedelta)):
+                row[k] = str(v)
+
+    row_count = len(results_df)
+    columns = list(results_df.columns)
+
+    prompt = f"""
+    You are a Data Analyst and Visualization Expert.
+    
+    User Question: "{question}"
+    SQL Query Executed: "{sql_query}"
+    Rows Returned: {row_count}
+    Data Columns: {columns}
+    Data Sample (First 5 rows): {json.dumps(data_sample, default=str)}
+
+    Task 1: Provide a natural language answer summarizing the findings (friendly, non-technical).
+    Task 2: Determine the best chart type to visualize this data (if applicable).
+
+    Chart Rules:
+    - "bar": Comparing categories (e.g., Sales by Product).
+    - "line": Trends over time (e.g., Revenue by Month).
+    - "pie": Parts of a whole (e.g., Status distribution).
+    - "scatter": Correlation between two numbers.
+    - "None": If data is a single number, text-only, or too complex.
+
+    RESPOND ONLY IN VALID JSON FORMAT:
+    {{
+      "answer": "Your natural language summary here...",
+      "chart_config": {{
+          "chart_type": "bar" | "line" | "pie" | "scatter" | "None",
+          "x_axis": "column_name_for_x",
+          "y_axis": "column_name_for_y",
+          "title": "Chart Title"
+      }}
+    }}
+    """
+
+    try:
+        model = genai.GenerativeModel(ACTIVE_MODEL_NAME)
+        response = model.generate_content(
+            prompt,
+            generation_config=genai.GenerationConfig(
+                response_mime_type="application/json",
+                temperature=0.5
+            )
+        )
+        
+        # Parse the JSON response
+        result = json.loads(response.text)
+        return result
+
+    except Exception as e:
+        print(f"Error in combined generation: {e}")
+        # Fallback if AI fails
+        return {
+            "answer": f"I found {row_count} result{'s' if row_count != 1 else ''} for your query.",
+            "chart": None
+        }
+
+# ============================================================================
+# UPDATED API ENDPOINT (Uses the new combined function)
+# ============================================================================
+
 @app.route('/api/query', methods=['POST'])
 def process_query():
     try:
@@ -14419,95 +15297,69 @@ def process_query():
         table_name = data.get('table_name')
         
         if not question or not table_name:
-            return jsonify({
-                'success': False,
-                'error': 'Missing question or table_name'
-            }), 400
+            return jsonify({'success': False, 'error': 'Missing question or table_name'}), 400
         
-        # 1. Get table schema
+        # 1. Get Schema
         schema = get_table_schema(table_name)
         if not schema:
-            return jsonify({
-                'success': False,
-                'error': f'Table {table_name} not found'
-            }), 404
+            return jsonify({'success': False, 'error': f'Table {table_name} not found'}), 404
         
-        # 2. Generate SQL query (USING GEMINI)
+        # 2. Generate SQL (REQUEST #1 to Gemini)
         sql_query = generate_sql_with_gemini(question, schema, table_name)
-        
         if not sql_query:
-            return jsonify({
-                'success': False,
-                'error': 'Failed to generate SQL query'
-            }), 500
+            return jsonify({'success': False, 'error': 'Failed to generate SQL query'}), 500
         
-        # 3. Execute query
+        # 3. Execute SQL
         results_df, error = execute_sql(sql_query)
-        
         if error:
-            return jsonify({
-                'success': False,
-                'error': f'SQL execution error: {error}',
-                'sql': sql_query
-            }), 400
+            return jsonify({'success': False, 'error': f'SQL error: {error}', 'sql': sql_query}), 400
         
-        # 4. Generate natural language answer (USING GEMINI)
-        natural_answer = generate_natural_answer(question, sql_query, results_df)
-        
-        # Convert DataFrame to list of dicts for JSON response
         results_list = results_df.to_dict('records') if results_df is not None else []
-        
-        # Extract filter conditions from SQL query
         filters = extract_filters_from_sql(sql_query)
+
+        # 4. Generate Answer AND Chart Config (REQUEST #2 to Gemini)
+        # This replaces the two separate calls you had before
+        ai_result = generate_answer_and_chart(question, sql_query, results_df)
         
-        # ---------------------------------------------------------
-        # NEW LOGIC: AI AUTOMATICALLY DETERMINES THE CHART
-        # ---------------------------------------------------------
+        natural_answer = ai_result.get("answer", "Analysis complete.")
+        chart_config = ai_result.get("chart_config", {})
+        
+        # 5. Process Chart Data if AI suggested one
+        chart_type = chart_config.get("chart_type")
         chart_data = None
-        chart_type = None
         
-        # We only look for a chart if there is data
-        if results_df is not None and not results_df.empty and len(results_df) > 0:
+        if chart_type and chart_type not in ["None", None, "null"]:
+            x_col = chart_config.get("x_axis")
+            y_col = chart_config.get("y_axis")
             
-            # Ask Gemini to decide the chart type and map columns
-            chart_config = determine_optimal_chart(question, results_df, sql_query)
-            
-            if chart_config and chart_config.get('chart_type') not in [None, "None", "null"]:
-                
-                chart_type = chart_config['chart_type']
-                x_col = chart_config.get('x_axis_column')
-                y_col = chart_config.get('y_axis_column')
-                
-                # Check if the AI-selected columns actually exist in the data
-                if x_col in results_df.columns and y_col in results_df.columns:
-                    
-                    # Format data for the frontend
+            # Validate that AI picked columns that actually exist
+            if results_df is not None and x_col in results_df.columns and y_col in results_df.columns:
+                chart_data = {
+                    'categories': results_df[x_col].tolist(),
+                    'values': [
+                        float(x) if isinstance(x, (int, float)) or (isinstance(x, str) and x.replace('.','',1).isdigit()) 
+                        else 0 
+                        for x in results_df[y_col].tolist()
+                    ],
+                    'xAxis': x_col,
+                    'yAxis': y_col,
+                    'chartType': chart_type,
+                    'title': chart_config.get('title', 'Data Visualization'),
+                    'filter_conditions': filters
+                }
+            else:
+                 # Fallback: Default to first two columns if AI guessed wrong names
+                if results_df is not None and len(results_df.columns) >= 2:
+                    chart_type = 'bar'
                     chart_data = {
-                        'categories': results_df[x_col].tolist(),
-                        'values': [
-                            float(x) if isinstance(x, (int, float)) or (isinstance(x, str) and x.replace('.','',1).isdigit()) 
-                            else 0 
-                            for x in results_df[y_col].tolist()
-                        ],
-                        'xAxis': x_col,
-                        'yAxis': y_col,
-                        'chartType': chart_type,
-                        'title': chart_config.get('title', 'Data Visualization'),
+                        'categories': results_df.iloc[:, 0].tolist(),
+                        'values': results_df.iloc[:, 1].tolist(),
+                        'xAxis': results_df.columns[0],
+                        'yAxis': results_df.columns[1],
+                        'chartType': 'bar',
+                        'title': 'Data Overview',
                         'filter_conditions': filters
                     }
-                else:
-                    # Fallback: If AI picked wrong column names, default to first 2 columns
-                    if len(results_df.columns) >= 2:
-                        print("AI column mismatch, falling back to default columns.")
-                        chart_type = 'bar'
-                        chart_data = {
-                            'categories': results_df.iloc[:, 0].tolist(),
-                            'values': results_df.iloc[:, 1].tolist(),
-                            'xAxis': results_df.columns[0],
-                            'yAxis': results_df.columns[1],
-                            'chartType': 'bar',
-                            'filter_conditions': filters
-                        }
 
         return jsonify({
             'success': True,
@@ -14524,10 +15376,9 @@ def process_query():
     except Exception as e:
         print(f"Error processing query: {e}")
         print(traceback.format_exc())
-        return jsonify({
-            'success': False,
-            'error': str(e)
-        }), 500
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 
 
 
@@ -15274,4 +16125,608 @@ def get_kpi_insights(table_name):
 if __name__ == "__main__":
     # Use socketio.run to enable WebSocket support
     # socketio.run(app, debug=True, host='0.0.0.0', port=5000)
+
      socketio.run(app, host='0.0.0.0', port=5000, debug=True)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# # ============================================================================
+# # OLLAMA INTEGRATION
+# # ============================================================================
+
+
+
+# # Load environment variables (For DB credentials only, no Gemini Key needed!)
+# load_dotenv()
+
+# # ============================================================================
+# # CONFIGURATION
+# # ============================================================================
+
+
+# # OLLAMA CONFIGURATION (Local AI)
+# OLLAMA_API_URL = "http://localhost:11434/api/generate"
+# OLLAMA_MODEL = "llama3"  # You can change this to 'mistral' or 'sqlcoder'
+
+# # ============================================================================
+# # OLLAMA HELPER FUNCTION (The Core Replacement)
+# # ============================================================================
+
+# def query_ollama(prompt, model=OLLAMA_MODEL, temperature=0.3, format_json=False):
+#     """
+#     Sends a request to the local Ollama instance.
+#     """
+#     payload = {
+#         "model": model,
+#         "prompt": prompt,
+#         "stream": False,
+#         "options": {
+#             "temperature": temperature
+#         }
+#     }
+    
+#     # Enforce JSON mode if requested (Supported by Llama3 and others)
+#     if format_json:
+#         payload["format"] = "json"
+
+#     try:
+#         response = requests.post(OLLAMA_API_URL, json=payload)
+#         response.raise_for_status()
+#         result = response.json()
+#         return result.get('response', '').strip()
+#     except requests.exceptions.ConnectionError:
+#         print("❌ Error: Ollama is not running. Please run 'ollama serve' or open the Ollama app.")
+#         return None
+#     except Exception as e:
+#         print(f"❌ Error querying Ollama: {e}")
+#         return None
+
+# # ============================================================================
+# # DATABASE HELPER FUNCTIONS
+# # ============================================================================
+
+# def list_available_tables():
+#     """List all available tables in the database."""
+#     try:
+#         conn = psycopg2.connect(
+#             host=HOST, port=PORT, database="comienzonew", user=USER_NAME, password=PASSWORD
+#         )
+#         cursor = conn.cursor()
+#         cursor.execute("""
+#             SELECT table_name 
+#             FROM information_schema.tables 
+#             WHERE table_schema = 'public' 
+#             ORDER BY table_name
+#         """)
+#         tables = cursor.fetchall()
+#         cursor.close()
+#         conn.close()
+#         return [table[0] for table in tables]
+#     except Exception as e:
+#         print(f"Error listing tables: {e}")
+#         return []
+
+# # def get_table_schema(table_name):
+# #     """Fetch the schema for a specific table."""
+# #     try:
+# #         conn = psycopg2.connect(
+# #             host=HOST, port=PORT, database=DB_NAME, user=USER_NAME, password=PASSWORD
+# #         )
+# #         cursor = conn.cursor()
+# #         cursor.execute("""
+# #             SELECT column_name, data_type, is_nullable
+# #             FROM information_schema.columns
+# #             WHERE table_name = %s
+# #             ORDER BY ordinal_position
+# #         """, (table_name,))
+# #         columns = cursor.fetchall()
+        
+# #         if not columns:
+# #             cursor.close(); conn.close()
+# #             return None
+        
+# #         schema_text = f"Table: {table_name}\nColumns:\n"
+# #         for col_name, data_type, is_nullable in columns:
+# #             nullable = "NULL" if is_nullable == "YES" else "NOT NULL"
+# #             schema_text += f"  - {col_name} ({data_type}) {nullable}\n"
+        
+# #         cursor.close(); conn.close()
+# #         return schema_text
+# #     except Exception as e:
+# #         print(f"Error getting schema: {e}")
+# #         return None
+
+# def get_table_schema(table_name):
+#     """Fetch the schema for a specific table with robust error handling."""
+#     try:
+#         # Clean the input
+#         table_name = table_name.strip()
+        
+#         conn = psycopg2.connect(
+#             host=HOST, port=PORT, database="comienzonew", user=USER_NAME, password=PASSWORD
+#         )
+#         cursor = conn.cursor()
+        
+#         # FIX 1: Explicitly check 'public' schema to match list_available_tables
+#         # FIX 2: Use lower() to handle potential case sensitivity issues in input
+#         cursor.execute("""
+#             SELECT column_name, data_type, is_nullable
+#             FROM information_schema.columns
+#             WHERE lower(table_name) = lower(%s) 
+#             AND table_schema = 'public'
+#             ORDER BY ordinal_position
+#         """, (table_name,))
+        
+#         columns = cursor.fetchall()
+        
+#         cursor.close()
+#         conn.close()
+        
+#         if not columns:
+#             print(f"⚠️ Warning: No columns found for table '{table_name}' in public schema.")
+#             # Debugging: Check if table exists at all
+#             return None
+        
+#         # Format schema for the AI
+#         schema_text = f"Table: {table_name}\nColumns:\n"
+#         for col_name, data_type, is_nullable in columns:
+#             nullable = "NULL" if is_nullable == "YES" else "NOT NULL"
+#             schema_text += f"  - {col_name} ({data_type}) {nullable}\n"
+        
+#         return schema_text
+
+#     except Exception as e:
+#         print(f"❌ Error getting schema for {table_name}: {e}")
+#         return None
+
+
+
+# def execute_sql(sql_query):
+#     """Execute SQL query and return results."""
+#     try:
+#         # Security: Basic check to prevent destructive queries
+#         if re.search(r'\b(DROP|DELETE|TRUNCATE|INSERT|UPDATE)\b', sql_query, re.IGNORECASE):
+#             return None, "Destructive queries are not allowed."
+
+#         conn = psycopg2.connect(
+#             host=HOST, port=PORT, database="comienzonew", user=USER_NAME, password=PASSWORD
+#         )
+#         df = pd.read_sql_query(sql_query, conn)
+#         conn.close()
+#         return df, None
+#     except Exception as e:
+#         return None, str(e)
+
+# # ============================================================================
+# # AI BUSINESS LOGIC (REFACTORED FOR OLLAMA)
+# # ============================================================================
+
+# def generate_sql_with_ollama(question, schema, table_name):
+#     """Generate SQL using Local LLM."""
+#     prompt = f"""You are an expert PostgreSQL SQL generator.
+
+# Database Schema:
+# {schema}
+
+# User Question: {question}
+
+# Instructions:
+# 1. Generate a valid PostgreSQL query to answer the question.
+# 2. The table name is '{table_name}'.
+# 3. Return ONLY the SQL code. Do not wrap it in markdown or backticks.
+# 4. Do not provide explanations.
+
+# SQL Query:"""
+    
+#     sql = query_ollama(prompt, temperature=0.1) # Low temp for precision
+    
+#     if sql:
+#         # Clean up commonly added markdown by LLMs
+#         sql = sql.replace('```sql', '').replace('```', '').strip()
+#     return sql
+
+# def generate_natural_answer(question, sql_query, results_df):
+#     """Generate natural language answer using Local LLM."""
+#     if results_df is None or len(results_df) == 0:
+#         return "No results found for your query."
+    
+#     row_count = len(results_df)
+#     preview = results_df.head(5).to_string(index=False)
+    
+#     prompt = f"""You are a data analyst assistant.
+    
+# User Question: {question}
+# SQL Query Used: {sql_query}
+# Data Result ({row_count} rows):
+# {preview}
+
+# Task: Write a short, friendly 1-2 sentence summary answer for the user based on this data.
+# Answer:"""
+    
+#     return query_ollama(prompt, temperature=0.6)
+
+# def determine_optimal_chart(question, results_df, sql_query):
+#     """Decide best chart type using Local LLM (JSON Mode)."""
+#     try:
+#         data_sample = results_df.head(3).to_dict(orient='records')
+#         # Convert timestamps to strings for JSON serialization
+#         for row in data_sample:
+#             for k, v in row.items():
+#                 if isinstance(v, (pd.Timestamp, pd.Timedelta)):
+#                     row[k] = str(v)
+
+#         prompt = f"""
+#         You are a Data Viz Expert. Analyze this data to pick the best chart.
+        
+#         Question: "{question}"
+#         Data Sample: {json.dumps(data_sample, default=str)}
+        
+#         Return a JSON object with this exact format:
+#         {{
+#             "chart_type": "bar" or "line" or "pie" or "scatter" or "None",
+#             "x_axis_column": "column_name",
+#             "y_axis_column": "column_name",
+#             "title": "Chart Title"
+#         }}
+#         """
+        
+#         response_text = query_ollama(prompt, temperature=0.1, format_json=True)
+#         return json.loads(response_text)
+#     except Exception as e:
+#         print(f"Chart determination error: {e}")
+#         return None
+
+# def generate_business_insights(table_name, schema, data_summary, focus_area, sample_data):
+#     """Generate insights using Local LLM (JSON Mode)."""
+    
+#     # Safe dump of stats
+#     stats_str = json.dumps(data_summary.get('numeric_stats', {}), default=str)
+    
+#     prompt = f"""
+#     You are a Senior Business Analyst. Analyze this dataset.
+    
+#     Table: {table_name}
+#     Schema: {schema}
+#     Numeric Stats: {stats_str}
+#     Sample Data: {sample_data}
+#     Focus Area: {focus_area}
+    
+#     Return a valid JSON object with these keys:
+#     {{
+#       "key_findings": ["string", "string"],
+#       "recommendations": [{{"title": "string", "description": "string", "priority": "high"}}],
+#       "data_quality": ["string"],
+#       "suggested_metrics": ["string"],
+#       "quick_wins": [{{"action": "string", "outcome": "string"}}]
+#     }}
+#     """
+    
+#     try:
+#         response_text = query_ollama(prompt, temperature=0.5, format_json=True)
+#         return json.loads(response_text)
+#     except Exception as e:
+#         print(f"Insights error: {e}")
+#         return {"key_findings": ["Could not generate insights locally."], "recommendations": []}
+
+# def generate_contextual_chat_response(user_message, table_name, schema, context, sample_data):
+#     """Chat with the dashboard data."""
+#     context_str = json.dumps(context, indent=2) if context else "None"
+    
+#     prompt = f"""
+#     You are an AI Advisor in a dashboard.
+#     Table: {table_name}
+#     Schema: {schema}
+#     Sample Data: {sample_data}
+#     Context: {context_str}
+    
+#     User says: "{user_message}"
+    
+#     Provide a helpful, short (max 3 sentences) response tailored to the data.
+#     """
+#     return query_ollama(prompt, temperature=0.7)
+
+# def generate_kpi_structure_with_ai(table_name, schema, data_profile, sample_data):
+#     """Determine KPIs using Local LLM."""
+#     prompt = f"""
+#     Analyze this table to suggest KPIs.
+#     Table: {table_name}
+#     Schema: {schema}
+    
+#     Return JSON format:
+#     {{
+#       "primary_kpis": [
+#         {{ "name": "string", "description": "string", "calculation": "column name", "format": "number|currency", "icon": "TrendingUp", "category": "operational" }}
+#       ],
+#       "charts": [
+#         {{ "type": "bar", "title": "string", "x_axis": "column", "y_axis": "column", "aggregation": "sum" }}
+#       ]
+#     }}
+#     """
+#     try:
+#         response_text = query_ollama(prompt, temperature=0.2, format_json=True)
+#         return json.loads(response_text)
+#     except Exception as e:
+#         print(f"KPI Gen error: {e}")
+#         return generate_default_kpi_structure(data_profile)
+
+# def generate_kpi_insights_with_ai(table_name, kpi_values, chart_data):
+#     """Analyze calculated KPIs."""
+#     prompt = f"""
+#     Analyze these KPI results.
+#     KPIs: {json.dumps(kpi_values, default=str)}
+    
+#     Return JSON:
+#     {{
+#       "observations": ["string"],
+#       "action_items": [{{"title": "string", "priority": "high"}}],
+#       "opportunities": ["string"],
+#       "risks": ["string"]
+#     }}
+#     """
+#     try:
+#         response_text = query_ollama(prompt, temperature=0.5, format_json=True)
+#         return json.loads(response_text)
+#     except Exception as e:
+#         return {"observations": [], "action_items": []}
+
+# # ============================================================================
+# # NON-AI HELPERS
+# # ============================================================================
+
+# def extract_filters_from_sql(sql_query):
+#     filters = {}
+#     try:
+#         if 'WHERE' not in sql_query.upper(): return filters
+#         where_clause = re.search(r'WHERE\s+(.+?)(?:GROUP BY|ORDER BY|LIMIT|$)', sql_query, re.IGNORECASE | re.DOTALL)
+#         if where_clause:
+#             conditions = re.split(r'\s+(?:AND|OR)\s+', where_clause.group(1), flags=re.IGNORECASE)
+#             for cond in conditions:
+#                 match = re.search(r'(\w+)\s*=\s*[\'"]?([^\'"]+)[\'"]?', cond)
+#                 if match:
+#                     col, val = match.group(1), match.group(2)
+#                     if col not in filters: filters[col] = []
+#                     filters[col].append(val)
+#     except: pass
+#     return filters
+
+# def generate_data_summary(df):
+#     summary = {'total_rows': len(df), 'numeric_stats': {}, 'categorical_stats': {}}
+#     for col in df.select_dtypes(include=['number']).columns:
+#         summary['numeric_stats'][col] = {
+#             'mean': float(df[col].mean()), 'max': float(df[col].max())
+#         }
+#     return summary
+
+# def generate_comprehensive_data_profile(df, table_name):
+#     profile = {'table_name': table_name, 'columns': {}}
+#     for col in df.columns:
+#         dtype = 'numeric' if pd.api.types.is_numeric_dtype(df[col]) else 'categorical'
+#         profile['columns'][col] = {'data_type': dtype}
+#     return profile
+
+# def generate_default_kpi_structure(data_profile):
+#     # Fallback if AI fails
+#     numeric = [c for c, i in data_profile['columns'].items() if i['data_type'] == 'numeric']
+#     cat = [c for c, i in data_profile['columns'].items() if i['data_type'] == 'categorical']
+    
+#     kpis = []
+#     if numeric:
+#         kpis.append({"name": f"Total {numeric[0]}", "calculation": numeric[0], "format": "number", "icon": "TrendingUp"})
+    
+#     charts = []
+#     if numeric and cat:
+#         charts.append({"type": "bar", "title": "Overview", "x_axis": cat[0], "y_axis": numeric[0], "aggregation": "sum"})
+        
+#     return {"primary_kpis": kpis, "charts": charts}
+
+# def calculate_kpis(df, kpi_structure):
+#     results = []
+#     for kpi in kpi_structure.get('primary_kpis', []):
+#         col = kpi['calculation']
+#         if col in df.columns:
+#             val = float(df[col].sum()) # Simple sum for now
+#             results.append({**kpi, "value": val, "change": 0})
+#     return results
+
+# def generate_chart_data(df, kpi_structure):
+#     charts = []
+#     for cfg in kpi_structure.get('charts', []):
+#         x, y = cfg['x_axis'], cfg['y_axis']
+#         if x in df.columns and y in df.columns:
+#             # Simple aggregation
+#             grp = df.groupby(x)[y].sum().reset_index().head(10)
+#             charts.append({
+#                 "type": cfg['type'],
+#                 "title": cfg['title'],
+#                 "x_axis": x, "y_axis": y,
+#                 "data": grp.to_dict('records')
+#             })
+#     return charts
+
+# # ============================================================================
+# # API ENDPOINTS
+# # ============================================================================
+
+# @app.route('/api/aihealth', methods=['GET'])
+# def health_check():
+#     """Check if Ollama is reachable."""
+#     try:
+#         requests.get(OLLAMA_API_URL.replace("/api/generate", ""))
+#         status = "healthy"
+#     except:
+#         status = "offline (Ollama not running)"
+        
+#     return jsonify({
+#         'status': status,
+#         'model': OLLAMA_MODEL,
+#         'message': f'Local SQL Agent is running.'
+#     })
+
+# @app.route('/api/tables', methods=['GET'])
+# def get_tablessssss():
+#     tables = list_available_tables()
+#     return jsonify({'success': True, 'tables': tables})
+
+# @app.route('/api/schema/<table_name>', methods=['GET'])
+# def get_schema(table_name):
+#     schema = get_table_schema(table_name)
+#     if schema: return jsonify({'success': True, 'schema': schema})
+#     return jsonify({'success': False, 'error': 'Not found'}), 404
+
+# @app.route('/api/query', methods=['POST'])
+# def process_query():
+#     data = request.json
+#     question = data.get('question')
+#     table_name = data.get('table_name')
+    
+#     schema = get_table_schema(table_name)
+
+#     # print(f"Processing query for table: {table_name}")
+#     # print(f"Schema:\n{schema}")
+#     # print(f"Question: {question}")
+#     if not schema: return jsonify({'error': 'Table not found'}), 404
+    
+#     # 1. Generate SQL via Ollama
+#     sql_query = generate_sql_with_ollama(question, schema, table_name)
+#     if not sql_query: return jsonify({'error': 'Failed to generate SQL'}), 500
+    
+#     # 2. Execute
+#     df, error = execute_sql(sql_query)
+#     if error: return jsonify({'error': error, 'sql': sql_query}), 400
+    
+#     # 3. Answer & Visualize via Ollama
+#     answer = generate_natural_answer(question, sql_query, df)
+#     filters = extract_filters_from_sql(sql_query)
+    
+#     chart_config = None
+#     chart_data = None
+    
+#     if df is not None and not df.empty:
+#         chart_config = determine_optimal_chart(question, df, sql_query)
+#         if chart_config and chart_config.get('chart_type') != 'None':
+#             x, y = chart_config.get('x_axis_column'), chart_config.get('y_axis_column')
+#             if x in df.columns and y in df.columns:
+#                 chart_data = {
+#                     'categories': df[x].tolist(),
+#                     'values': df[y].tolist(),
+#                     'xAxis': x, 'yAxis': y,
+#                     'chartType': chart_config['chart_type'],
+#                     'title': chart_config.get('title', 'Chart')
+#                 }
+
+#     return jsonify({
+#         'success': True,
+#         'sql': sql_query,
+#         'answer': answer,
+#         'results': df.to_dict('records') if df is not None else [],
+#         'chart_data': chart_data,
+#         'filters': filters
+#     })
+
+# @app.route('/api/dashboard/insights/<table_name>', methods=['POST'])
+# def get_insights(table_name):
+#     data = request.json
+#     schema = get_table_schema(table_name)
+#     summary_df, _ = execute_sql(f"SELECT * FROM {table_name} LIMIT 100")
+    
+#     if summary_df is None: return jsonify({'error': 'No data'}), 500
+    
+#     stats = generate_data_summary(summary_df)
+#     insights = generate_business_insights(
+#         table_name, schema, stats, data.get('focus_area', 'general'), 
+#         summary_df.head(10).to_string()
+#     )
+    
+#     return jsonify({'success': True, 'insights': insights})
+
+# @app.route('/api/dashboard/kpi/<table_name>', methods=['GET'])
+# def get_kpi_dashboard(table_name):
+#     schema = get_table_schema(table_name)
+#     df, _ = execute_sql(f"SELECT * FROM {table_name} LIMIT 1000")
+    
+#     if df is None: return jsonify({'error': 'No data'}), 500
+    
+#     profile = generate_comprehensive_data_profile(df, table_name)
+#     kpi_struct = generate_kpi_structure_with_ai(table_name, schema, profile, df.head(10).to_string())
+    
+#     kpi_vals = calculate_kpis(df, kpi_struct)
+#     charts = generate_chart_data(df, kpi_struct)
+    
+#     return jsonify({
+#         'success': True, 
+#         'kpi_structure': kpi_struct, 
+#         'kpi_values': kpi_vals, 
+#         'chart_data': charts
+#     })
+
+# @app.route('/api/dashboard/chat', methods=['POST'])
+# def chat_endpoint():
+#     data = request.json
+#     schema = get_table_schema(data.get('table_name'))
+#     response = generate_contextual_chat_response(
+#         data.get('message'), data.get('table_name'), schema, 
+#         data.get('context'), "sample data..."
+#     )
+
+#     return jsonify({'success': True, 'response': response})
+
+
+# if __name__ == "__main__":
+#      init_db()
+#     # Use socketio.run to enable WebSocket support
+#     # socketio.run(app, debug=True, host='0.0.0.0', port=5000)
+
+#      socketio.run(app, host='0.0.0.0', port=5000, debug=True)
+
