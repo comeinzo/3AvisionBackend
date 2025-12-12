@@ -64,6 +64,7 @@ dashboard_save/__pycache__/
 # VS Code settings (optional)
 .vscode/
 *.vscode
+.env
 
 # OS generated files
 .DS_Store
@@ -73,3 +74,4 @@ dashboard_save/__pycache__/
 .Trashes
 ehthumbs.db
 Thumbs.db
+.env
