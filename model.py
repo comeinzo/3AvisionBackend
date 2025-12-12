@@ -540,7 +540,7 @@ class LicenseManager:
                 "created_at": "TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
                 "updated_at": "TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
                 "dashboard_filter": "TEXT"
-            },
+            }
 
         }
 

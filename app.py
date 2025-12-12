@@ -78,6 +78,7 @@ from dashboard_save.dashboard_save import (
 from excel_upload import upload_excel_to_postgresql
 from histogram_utils import generate_histogram_details, handle_column_data_types
 from json_upload import upload_json_to_postgresql
+from xml_upload import upload_xml_to_postgresql
 from signup.signup import (
     connect_db,
     create_user_table,
@@ -388,125 +389,315 @@ def test_db():
 # UPLOAD SECTION START
 # ===================================================================
 
+# @app.route('/uploadexcel', methods=['POST'])
+# @employee_required
+# @token_required
+
+# def upload_file_excel():
+#     try:
+#         # create_table()
+        
+#         # Validate required form data
+#         database_name = request.form.get('company_database')
+#         primary_key_column = request.form.get('primaryKeyColumnName')
+#         user_email = request.form.get('email', 'Unknown User')
+        
+#         if not database_name:
+#             return jsonify({'message': 'Company database name is required', 'status': False}), 400
+        
+#         if not primary_key_column:
+#             return jsonify({'message': 'Primary key column name is required', 'status': False}), 400
+        
+#         # Validate file upload
+#         if 'file' not in request.files:
+#             return jsonify({'message': 'No file uploaded', 'status': False}), 400
+        
+#         excel_file = request.files['file']
+        
+#         if excel_file.filename == '':
+#             return jsonify({'message': 'No file selected', 'status': False}), 400
+        
+#         # Validate file extension
+#         allowed_extensions = {'.xlsx', '.xls'}
+#         file_extension = os.path.splitext(excel_file.filename)[1].lower()
+#         if file_extension not in allowed_extensions:
+#             return jsonify({'message': 'Only Excel files (.xlsx, .xls) are allowed', 'status': False}), 400
+        
+#         # Parse selected sheets
+#         selected_sheets = request.form.getlist('selectedSheets')
+#         if not selected_sheets:
+#             # Try parsing as JSON string if not sent as list
+#             selected_sheets_json = request.form.get('selectedSheets')
+#             if selected_sheets_json:
+#                 try:
+#                     import json
+#                     selected_sheets = json.loads(selected_sheets_json)
+#                 except json.JSONDecodeError:
+#                     return jsonify({'message': 'Invalid selectedSheets format', 'status': False}), 400
+        
+#         print(f"Database name: {database_name}")
+#         print(f"Primary key column: {primary_key_column}")
+#         print(f"Selected sheets: {selected_sheets}")
+#         print(f"User: {request.current_user.get('user_id', 'Unknown')}")
+        
+#         # Save file temporarily
+#         excel_file_name = secure_filename(excel_file.filename)
+#         os.makedirs('tmp', exist_ok=True)
+#         temp_file_path = f'tmp/{excel_file_name}'
+#         excel_file.save(temp_file_path)
+        
+#         try:
+#             # Upload to PostgreSQL
+#             result = upload_excel_to_postgresql(
+#                 database_name, 
+#                 username, 
+#                 password, 
+#                 temp_file_path, 
+#                 primary_key_column, 
+#                 host, 
+#                 port, 
+#                 selected_sheets
+#             )
+            
+#             # if result == "Upload successful":
+#             if isinstance(result, dict) and result.get("message") == "Upload successful":
+#                 sheet_list = ', '.join(selected_sheets)
+#                 log_activity(
+#                     user_email=user_email,
+#                     action_type="Upload Excel",
+#                     description=(
+#                         f"Uploaded Excel file '{excel_file_name}' to database '{database_name}' "
+#                         f"with {result.get('rows_inserted', 0)} inserted, "
+#                         f"{result.get('rows_updated', 0)} updated, "
+#                         f"{result.get('rows_deleted', 0)} deleted, and "
+#                         f"{result.get('rows_skipped', 0)} skipped rows."
+#                     ),
+#                     company_name=database_name,
+#                     table_name=sheet_list
+#                 )
+
+#             # if isinstance(result, dict) and result.get("message") == "Upload successful":
+#                 return jsonify({
+#                     'message': 'File uploaded successfully',
+#                     'status': True,
+#                     'uploaded_by': request.current_user.get('user_id'),
+#                     'file_name': excel_file_name,
+#                     'rows_added': result["rows_added"],
+#                     'rows_deleted': result["rows_deleted"],
+#                     'rows_skipped': result["rows_skipped"],
+#                     'rows_updated': result["rows_updated"]
+#                 }), 200
+#             else:
+#                 log_activity(
+#                     user_email=user_email,
+#                     action_type="Upload Failed",
+#                     description=f"Failed to upload Excel file '{excel_file_name}' to database '{database_name}'. Error: {result}",
+#                     company_name=database_name
+#                 )
+
+#                 return jsonify({'message': result, 'status': False}), 500
+                
+#         finally:
+#             # Clean up temporary file
+#             try:
+#                 if os.path.exists(temp_file_path):
+#                     os.remove(temp_file_path)
+#             except Exception as cleanup_error:
+#                 print(f"Warning: Could not delete temporary file {temp_file_path}: {cleanup_error}")
+        
+#     except Exception as e:
+#         print(f"Upload error: {str(e)}")
+#         return jsonify({'message': 'Internal server error occurred', 'status': False}), 500
 @app.route('/uploadexcel', methods=['POST'])
 @employee_required
 @token_required
-
 def upload_file_excel():
+    temp_file_path = None
     try:
-        # create_table()
-        
-        # Validate required form data
         database_name = request.form.get('company_database')
         primary_key_column = request.form.get('primaryKeyColumnName')
+        print("pcolo",primary_key_column)
         user_email = request.form.get('email', 'Unknown User')
-        
-        if not database_name:
-            return jsonify({'message': 'Company database name is required', 'status': False}), 400
-        
-        if not primary_key_column:
-            return jsonify({'message': 'Primary key column name is required', 'status': False}), 400
-        
-        # Validate file upload
+
+        if not database_name or not primary_key_column:
+            return jsonify({'message': 'Database and primary key are required', 'status': False}), 400
+
         if 'file' not in request.files:
             return jsonify({'message': 'No file uploaded', 'status': False}), 400
-        
+
         excel_file = request.files['file']
-        
         if excel_file.filename == '':
             return jsonify({'message': 'No file selected', 'status': False}), 400
-        
-        # Validate file extension
-        allowed_extensions = {'.xlsx', '.xls'}
+
         file_extension = os.path.splitext(excel_file.filename)[1].lower()
-        if file_extension not in allowed_extensions:
+        if file_extension not in ('.xlsx', '.xls'):
             return jsonify({'message': 'Only Excel files (.xlsx, .xls) are allowed', 'status': False}), 400
-        
-        # Parse selected sheets
+
         selected_sheets = request.form.getlist('selectedSheets')
         if not selected_sheets:
-            # Try parsing as JSON string if not sent as list
             selected_sheets_json = request.form.get('selectedSheets')
             if selected_sheets_json:
+                import json
                 try:
-                    import json
                     selected_sheets = json.loads(selected_sheets_json)
                 except json.JSONDecodeError:
                     return jsonify({'message': 'Invalid selectedSheets format', 'status': False}), 400
-        
-        print(f"Database name: {database_name}")
-        print(f"Primary key column: {primary_key_column}")
-        print(f"Selected sheets: {selected_sheets}")
-        print(f"User: {request.current_user.get('user_id', 'Unknown')}")
-        
-        # Save file temporarily
+
         excel_file_name = secure_filename(excel_file.filename)
         os.makedirs('tmp', exist_ok=True)
-        temp_file_path = f'tmp/{excel_file_name}'
+        temp_file_path = os.path.join('tmp', excel_file_name)
         excel_file.save(temp_file_path)
-        
-        try:
-            # Upload to PostgreSQL
-            result = upload_excel_to_postgresql(
-                database_name, 
-                username, 
-                password, 
-                temp_file_path, 
-                primary_key_column, 
-                host, 
-                port, 
-                selected_sheets
+
+        # Call the safe upload function
+        result = upload_excel_to_postgresql(
+            database_name,
+            username,
+            password,
+            temp_file_path,
+            primary_key_column,
+            host,
+            port,
+            selected_sheets
+        )
+        print("result",result)
+        if isinstance(result, dict) and result.get("message") == "Upload successful":
+            sheet_list = ', '.join(selected_sheets)
+            log_activity(
+                user_email=user_email,
+                action_type="Upload Excel",
+                description=(
+                    f"Uploaded Excel file '{excel_file_name}' to database '{database_name}' "
+                    f"with {result.get('rows_added', 0)} inserted, "
+                    f"{result.get('rows_updated', 0)} updated, "
+                    f"{result.get('rows_deleted', 0)} deleted, "
+                    f"{result.get('rows_skipped', 0)} skipped."
+                ),
+                company_name=database_name,
+                table_name=sheet_list
             )
-            
-            # if result == "Upload successful":
-            if isinstance(result, dict) and result.get("message") == "Upload successful":
-                sheet_list = ', '.join(selected_sheets)
-                log_activity(
-                    user_email=user_email,
-                    action_type="Upload Excel",
-                    description=(
-                        f"Uploaded Excel file '{excel_file_name}' to database '{database_name}' "
-                        f"with {result.get('rows_inserted', 0)} inserted, "
-                        f"{result.get('rows_updated', 0)} updated, "
-                        f"{result.get('rows_deleted', 0)} deleted, and "
-                        f"{result.get('rows_skipped', 0)} skipped rows."
-                    ),
-                    company_name=database_name,
-                    table_name=sheet_list
-                )
 
-            # if isinstance(result, dict) and result.get("message") == "Upload successful":
-                return jsonify({
-                    'message': 'File uploaded successfully',
-                    'status': True,
-                    'uploaded_by': request.current_user.get('user_id'),
-                    'file_name': excel_file_name,
-                    'rows_added': result["rows_added"],
-                    'rows_deleted': result["rows_deleted"],
-                    'rows_skipped': result["rows_skipped"],
-                    'rows_updated': result["rows_updated"]
-                }), 200
-            else:
-                log_activity(
-                    user_email=user_email,
-                    action_type="Upload Failed",
-                    description=f"Failed to upload Excel file '{excel_file_name}' to database '{database_name}'. Error: {result}",
-                    company_name=database_name
-                )
+            return jsonify({
+                'message': 'File uploaded successfully',
+                'status': True,
+                'uploaded_by': request.current_user.get('user_id'),
+                'file_name': excel_file_name,
+                'rows_added': result["rows_added"],
+                'rows_deleted': result["rows_deleted"],
+                'rows_skipped': result["rows_skipped"],
+                'rows_updated': result["rows_updated"]
+            }), 200
+        else:
+            log_activity(
+                user_email=user_email,
+                action_type="Upload Failed",
+                description=f"Failed to upload Excel file '{excel_file_name}' to database '{database_name}'. Error: {result}",
+                company_name=database_name
+            )
+            return jsonify({'message': result, 'status': False}), 500
 
-                return jsonify({'message': result, 'status': False}), 500
-                
-        finally:
-            # Clean up temporary file
-            try:
-                if os.path.exists(temp_file_path):
-                    os.remove(temp_file_path)
-            except Exception as cleanup_error:
-                print(f"Warning: Could not delete temporary file {temp_file_path}: {cleanup_error}")
-        
     except Exception as e:
         print(f"Upload error: {str(e)}")
+        traceback.print_exc()
         return jsonify({'message': 'Internal server error occurred', 'status': False}), 500
+
+    finally:
+        # Delete temp file safely
+        if temp_file_path and os.path.exists(temp_file_path):
+            try:
+                os.remove(temp_file_path)
+            except Exception as cleanup_error:
+                print(f"Warning: Could not delete temporary file {temp_file_path}: {cleanup_error}")
+
+@app.route('/fetch-xml-from-url', methods=['POST'])
+@employee_required
+@token_required
+def fetch_xml_from_url():
+    """
+    Fetch XML from a URL and upload it to PostgreSQL.
+    
+    Request body:
+    {
+        "xml_url": "https://example.com/data.xml",
+        "primaryKeyColumnName": "id" or "region,unit_sold",
+        "company_database": "hdfc"
+    }
+    """
+    try:
+        data = request.get_json()
+        
+        if not data:
+            return jsonify({'message': 'No JSON data provided'}), 400
+        
+        xml_url = data.get('xml_url')
+        primary_key_column = data.get('primaryKeyColumnName')
+        database_name = data.get('company_database')
+        user_email = data.get('email', 'Unknown User')
+        
+        # Validate required parameters
+        if not xml_url:
+            return jsonify({'message': 'Missing required parameter: xml_url'}), 400
+        if not database_name:
+            return jsonify({'message': 'Missing required parameter: company_database'}), 400
+        
+        print(f"Fetching XML from URL: {xml_url}")
+        print(f"Primary key columns: {primary_key_column}")
+        print(f"Database: {database_name}")
+        
+        # Download XML from URL
+        try:
+            response = requests.get(xml_url, timeout=30, verify=False)
+            response.raise_for_status()
+        except requests.exceptions.RequestException as e:
+            return jsonify({'message': f'Failed to fetch XML from URL: {str(e)}'}), 400
+        
+        # Save XML to temporary file
+        os.makedirs('tmp', exist_ok=True)
+        xml_file_name = f"downloaded_{int(__import__('time').time())}.xml"
+        temp_file_path = f'tmp/{xml_file_name}'
+        
+        with open(temp_file_path, 'w', encoding='utf-8') as f:
+            f.write(response.text)
+        
+        print(f"XML saved to: {temp_file_path}")
+        
+        # Call the upload_xml_to_postgresql function
+        result = upload_xml_to_postgresql(
+            database_name, 
+            username, 
+            password, 
+            temp_file_path, 
+            primary_key_column, 
+            host, 
+            port
+        )
+        
+        # Check if upload was successful
+        if isinstance(result, dict) and result.get("message") == "Upload successful":
+            log_activity(
+                user_email=request.current_user.get("email", "Unknown"),
+                action_type=", ".join(result.get("actions_performed", [])),
+                table_name=result.get("table_name"),
+                company_name=database_name,
+                description=f"XML fetch from URL performed with {result['rows_inserted']} inserted, {result['rows_updated']} updated, {result['rows_skipped']} skipped rows."
+            )
+            return jsonify({
+                'message': 'XML fetched and uploaded successfully',
+                'status': True,
+                'uploaded_by': request.current_user.get('user_id'),
+                'file_name': xml_file_name,
+                'rows_added': result["rows_inserted"],
+                'rows_deleted': result["rows_deleted"],
+                'rows_skipped': result["rows_skipped"],
+                'rows_updated': result["rows_updated"],
+                'table_name': result.get("table_name")
+            }), 200
+        else:
+            return jsonify({'message': result, 'status': False}), 500
+            
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'message': f"Internal Server Error: {str(e)}"}), 500
+
 
 @app.route('/uploadcsv', methods=['POST'])
 @employee_required
@@ -562,7 +753,8 @@ def upload_file_csv():
         
         try:
             # Upload to PostgreSQL
-            result = upload_csv_to_postgresql(database_name, username, password, temp_file_path, host, port)
+            result = upload_csv_to_postgresql(database_name=database_name,primary_key_column=primary_key_column, username=username, password=password, csv_file_name=temp_file_path, host=host, port=port)
+            print("result",result)
             if isinstance(result, dict) and result.get("message") == "Upload successful":
                 log_activity(
                     user_email=request.current_user.get("email", "Unknown"),
@@ -595,6 +787,232 @@ def upload_file_csv():
     except Exception as e:
         print(f"CSV Upload error: {str(e)}")
         return jsonify({'message': 'Internal server error occurred', 'status': False}), 500
+
+# ----------------------------------------------------------------------
+# XML → List of Records Parser
+# ----------------------------------------------------------------------
+def parse_xml_to_list(xml_text):
+    """
+    Converts XML like:
+    <root>
+        <item>
+            <name>John</name>
+            <age>30</age>
+        </item>
+        <item>...</item>
+    </root>
+
+    Into:
+    [
+        { "name": "John", "age": "30" },
+        ...
+    ]
+    """
+
+    root = ET.fromstring(xml_text)
+
+    records = []
+    for element in root:
+
+        row = {}
+        for child in element:
+            # tag → key, text → value
+            row[child.tag] = child.text.strip() if child.text else None
+
+        if row:
+            records.append(row)
+
+    return records
+
+
+# ----------------------------------------------------------------------
+# MAIN ROUTE → FRONTEND CALLS THIS
+# # ----------------------------------------------------------------------
+# @app.route('/api/remote-xml-fetch', methods=['POST', 'OPTIONS'])
+
+# def remote_xml_fetch():
+#     try:
+#         payload = request.get_json()
+
+#         url = payload.get("url")
+#         user_id = payload.get("user_id")
+#         company_database = payload.get("company_database")
+#         print("url",url)
+
+#         if not url:
+#             return jsonify({"success": False, "message": "URL is required"}), 400
+
+#         print(f"[XML FETCH] User {user_id} requested URL: {url}")
+
+#         # -------------------------------------------------------------
+#         # Step 1: Fetch XML via server (bypass CORS)
+#         # -------------------------------------------------------------
+#         try:
+#             response = requests.get(url, timeout=15)
+#         except Exception as e:
+#             return jsonify({
+#                 "success": False,
+#                 "message": f"Unable to reach URL: {str(e)}"
+#             }), 400
+
+#         if response.status_code != 200:
+#             return jsonify({
+#                 "success": False,
+#                 "message": f"HTTP {response.status_code}: Failed to fetch URL"
+#             }), 400
+
+#         xml_text = response.text
+
+#         if not xml_text or not xml_text.strip().startswith("<"):
+#             return jsonify({
+#                 "success": False,
+#                 "message": "Fetched content is not valid XML."
+#             }), 400
+
+#         # -------------------------------------------------------------
+#         # Step 2: Try parsing XML
+#         # -------------------------------------------------------------
+#         parsed_data = None
+#         print("xml_text",xml_text)
+#         try:
+#             parsed_data = parse_xml_to_list(xml_text)
+#         except Exception as e:
+#             print("[XML PARSE ERROR]", e)
+
+#         file_name = os.path.basename(url) or "remote.xml"
+
+#         # -------------------------------------------------------------
+#         # OPTION A: Parsed successfully → return JSON records
+#         # -------------------------------------------------------------
+#         if parsed_data and len(parsed_data) > 0:
+#             columns = list(parsed_data[0].keys())
+#             return jsonify({
+#                 "success": True,
+#                 "data": parsed_data,
+#                 "columns": columns,
+#                 "fileName": file_name
+#             }), 200
+
+#         # -------------------------------------------------------------
+#         # OPTION B: XML parsed but empty
+#         # -------------------------------------------------------------
+#         if parsed_data == []:
+#             return jsonify({
+#                 "success": False,
+#                 "message": "XML parsed successfully but contains no data."
+#             }), 400
+
+#         # -------------------------------------------------------------
+#         # OPTION C: Parsing failed → return raw XML text
+#         # Frontend will parse manually
+#         # -------------------------------------------------------------
+#         return jsonify({
+#             "success": True,
+#             "text": xml_text,
+#             "fileName": file_name
+#         }), 200
+
+#     except Exception as e:
+#         print("[SERVER ERROR]", e)
+#         return jsonify({"success": False, "message": str(e)}), 500
+
+
+@app.route('/api/remote-xml-fetch', methods=['POST', 'OPTIONS'])
+def remote_xml_fetch():
+    # -------------------------------------------------------------
+    # ✅ Handle OPTIONS (CORS preflight)
+    # -------------------------------------------------------------
+    if request.method == "OPTIONS":
+        response = jsonify({"message": "CORS preflight OK"})
+        response.headers.add("Access-Control-Allow-Origin", "*")
+        response.headers.add("Access-Control-Allow-Headers", "Content-Type, Authorization")
+        response.headers.add("Access-Control-Allow-Methods", "POST, OPTIONS")
+        return response, 200
+
+    try:
+        # ---------------------------------------------------------
+        # ✅ Ensure JSON Content-Type
+        # ---------------------------------------------------------
+        if not request.is_json:
+            return jsonify({
+                "success": False,
+                "message": "Content-Type must be application/json"
+            }), 415
+
+        payload = request.get_json()
+
+        url = payload.get("url")
+        user_id = payload.get("user_id")
+        company_database = payload.get("company_database")
+
+        if not url:
+            return jsonify({"success": False, "message": "URL is required"}), 400
+
+        print(f"[XML FETCH] User={user_id}, URL={url}")
+
+        # ---------------------------------------------------------
+        # Step 1: Fetch XML
+        # ---------------------------------------------------------
+        try:
+            response = requests.get(url, timeout=20)
+        except Exception as e:
+            return jsonify({
+                "success": False,
+                "message": f"Unable to reach URL: {str(e)}"
+            }), 400
+
+        if response.status_code != 200:
+            return jsonify({
+                "success": False,
+                "message": f"HTTP {response.status_code}: Failed to fetch URL"
+            }), 400
+
+        xml_text = response.text
+
+        if not xml_text.strip().startswith("<"):
+            return jsonify({
+                "success": False,
+                "message": "Fetched content is not valid XML"
+            }), 400
+
+        # ---------------------------------------------------------
+        # Step 2: Try parsing XML
+        # ---------------------------------------------------------
+        try:
+            parsed_data = parse_xml_to_list(xml_text)
+        except Exception as e:
+            print("[XML PARSE ERROR]", e)
+            parsed_data = None
+
+        file_name = os.path.basename(url) or "remote.xml"
+
+        # Return parsed JSON
+        if parsed_data and len(parsed_data) > 0:
+            return jsonify({
+                "success": True,
+                "data": parsed_data,
+                "columns": list(parsed_data[0].keys()),
+                "fileName": file_name
+            }), 200
+
+        # Empty XML case
+        if parsed_data == []:
+            return jsonify({
+                "success": False,
+                "message": "XML parsed successfully but contains no data."
+            }), 400
+
+        # If parse failed → send raw XML text
+        return jsonify({
+            "success": True,
+            "text": xml_text,
+            "fileName": file_name
+        }), 200
+
+    except Exception as e:
+        print("[SERVER ERROR]", e)
+        return jsonify({"success": False, "message": str(e)}), 500
+
 
 @app.route('/upload-json', methods=['POST'])
 @employee_required
@@ -643,6 +1061,69 @@ def upload_file_json():
                     'status': True,
                     'uploaded_by': request.current_user.get('user_id'),
                     'file_name': json_file_name,
+                    'rows_added': result["rows_inserted"],
+                    'rows_deleted': result["rows_deleted"],
+                    'rows_skipped': result["rows_skipped"],
+                    'rows_updated': result["rows_updated"]
+            }), 200
+        else:
+            return jsonify({'message': result, 'status': False}), 500
+        #     return jsonify({'message': 'File uploaded successfully'}), 200
+        # else:
+        #     return jsonify({'message': result}), 500
+
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'message': f"Internal Server Error: {str(e)}"}), 500
+
+
+@app.route('/upload-xml', methods=['POST'])
+@employee_required
+@token_required
+def upload_file_xml():
+    try:
+        database_name = request.form.get('company_database')
+        primary_key_column = request.form.get('primaryKeyColumnName')
+        user_email = request.form.get('email', 'Unknown User')
+        
+        
+        # Check if file is present in the request
+        if 'file' not in request.files:
+            return jsonify({'message': 'No file part in the request'}), 400
+
+        xml_file = request.files['file']
+        
+        # Check if a file is selected
+        if xml_file.filename == '':
+            return jsonify({'message': 'No file selected for uploading'}), 400
+
+        print("primary_key_column:", primary_key_column)
+        print("xml_file:", xml_file.filename)
+        print("database_name:", database_name)
+        
+        # Save the file to a temporary directory
+        xml_file_name = secure_filename(xml_file.filename)
+        os.makedirs('tmp', exist_ok=True)
+        temp_file_path = f'tmp/{xml_file_name}'
+        xml_file.save(temp_file_path)
+
+        # Call the upload_xml_to_postgresql function
+        result = upload_xml_to_postgresql(database_name, username, password, temp_file_path, primary_key_column, host, port)
+        
+        # if result == "Upload successful":
+        if isinstance(result, dict) and result.get("message") == "Upload successful":
+            log_activity(
+                    user_email=request.current_user.get("email", "Unknown"),
+                    action_type=", ".join(result.get("actions_performed", [])),
+                    table_name=result.get("table_name"),
+                    company_name=database_name,
+                    description=f"XML upload performed with {result['rows_inserted']} inserted, {result['rows_updated']} updated, {result['rows_skipped']} skipped rows."
+            )
+            return jsonify({
+                    'message': 'File uploaded successfully',
+                    'status': True,
+                    'uploaded_by': request.current_user.get('user_id'),
+                    'file_name': xml_file_name,
                     'rows_added': result["rows_inserted"],
                     'rows_deleted': result["rows_deleted"],
                     'rows_skipped': result["rows_skipped"],
@@ -1329,6 +1810,7 @@ def fetch_data_for_ts_decomposition(table_name, x_axis_columns, filter_options, 
     query = f"SELECT * FROM {table_name}"
     cur.execute(query)
     data = cur.fetchall()
+    # print("data",data)
     colnames = [desc[0] for desc in cur.description]
     cur.close()
     connection.close()
@@ -1336,6 +1818,9 @@ def fetch_data_for_ts_decomposition(table_name, x_axis_columns, filter_options, 
        
 
     temp_df = global_df.copy()
+    print("📌 INITIAL GLOBAL DF SHAPE:", global_df.shape)
+    print("📌 INITIAL GLOBAL DF COLUMNS:", list(global_df.columns))
+
 
     # Apply calculations if any
     if calculationData and isinstance(calculationData, list):
@@ -1615,27 +2100,109 @@ def fetch_data_for_ts_decomposition(table_name, x_axis_columns, filter_options, 
                     temp_df[new_col_name] = eval(calc_formula_python)
                 except Exception as e:
                     raise ValueError(f"Error evaluating math formula '{calc_formula}': {e}") from e
+    print("📌 AFTER CALCULATIONS SHAPE:", temp_df.shape)
+    print("📌 AFTER CALCULATIONS COLUMNS:", list(temp_df.columns))
+
 
     # Apply filters
     if isinstance(filter_options, str):
         filter_options = json.loads(filter_options)
 
+    # for col, filters in filter_options.items():
+    #     # if col in temp_df.columns:
+    #     if col in date_columns:
+    #         temp_df[col] = pd.to_datetime(temp_df[col]).dt.date
+    #         filters = [pd.to_datetime(f).date() for f in filters]
+    #         temp_df = temp_df[temp_df[col].isin(filters)]
+
+    #     if col not in temp_df.columns:
+    #         print(f"❌ FILTER ERROR: Column '{col}' not found. Skipping filter.")
+    #         continue
+    #     print("   Before filter:", temp_df.shape)
+        
+    #     try:
+    #         if pd.api.types.is_numeric_dtype(temp_df[col]):
+    #             filters_converted = [pd.to_numeric(f, errors='coerce') for f in filters]
+    #             filters_converted = [f for f in filters_converted if pd.notna(f)]
+    #             temp_df = temp_df[temp_df[col].isin(filters_converted)]
+    #         else:
+    #             temp_df[col] = temp_df[col].astype(str)
+    #             filters = list(map(str, filters))
+    #             temp_df = temp_df[temp_df[col].isin(filters)]
+    #     except Exception as e:
+    #         print(f"Warning: Could not apply filter on column '{col}' during TS fetch due to type mismatch or error: {e}. Falling back to string comparison.")
+    #         temp_df[col] = temp_df[col].astype(str)
+    #         filters = list(map(str, filters))
+    #         temp_df = temp_df[temp_df[col].isin(filters)]
+    date_columns = [
+        col for col in temp_df.columns
+        if "date" in col.lower()
+    ]
+
+    print("\n📌 DETECTED DATE COLUMNS:", date_columns)
+
+    # Apply filters
     for col, filters in filter_options.items():
-        if col in temp_df.columns:
-            try:
-                if pd.api.types.is_numeric_dtype(temp_df[col]):
-                    filters_converted = [pd.to_numeric(f, errors='coerce') for f in filters]
-                    filters_converted = [f for f in filters_converted if pd.notna(f)]
-                    temp_df = temp_df[temp_df[col].isin(filters_converted)]
-                else:
-                    temp_df[col] = temp_df[col].astype(str)
-                    filters = list(map(str, filters))
-                    temp_df = temp_df[temp_df[col].isin(filters)]
-            except Exception as e:
-                print(f"Warning: Could not apply filter on column '{col}' during TS fetch due to type mismatch or error: {e}. Falling back to string comparison.")
+
+        print(f"\n🔍 APPLYING FILTER ON COLUMN: {col}")
+        print(f"   ➜ Filter requested: {filters}")
+
+        if col not in temp_df.columns:
+            print(f"❌ FILTER ERROR: Column '{col}' not found. Skipping...")
+            continue
+
+        # Show unique values for debugging
+        try:
+            print("   ➜ Sample unique DF values:", temp_df[col].astype(str).unique()[:10])
+        except Exception:
+            pass
+
+        before_rows = temp_df.shape[0]
+        print("   ➜ Rows before filter:", before_rows)
+
+        try:
+            # DATE FILTER HANDLING
+            if col in date_columns:
+                print("   📅 Date column detected → Converting to date")
+
+                temp_df[col] = pd.to_datetime(temp_df[col], errors='coerce').dt.date
+                filters = [pd.to_datetime(f, errors='coerce').date() for f in filters]
+
+                temp_df = temp_df[temp_df[col].isin(filters)]
+
+            # NUMERIC FILTER HANDLING
+            elif pd.api.types.is_numeric_dtype(temp_df[col]):
+                filters_converted = [pd.to_numeric(f, errors='coerce') for f in filters]
+                filters_converted = [f for f in filters_converted if pd.notna(f)]
+                temp_df = temp_df[temp_df[col].isin(filters_converted)]
+
+            # STRING FILTER HANDLING
+            else:
                 temp_df[col] = temp_df[col].astype(str)
                 filters = list(map(str, filters))
                 temp_df = temp_df[temp_df[col].isin(filters)]
+
+        except Exception as e:
+            print(f"⚠ FILTER ERROR: {e}. Falling back to string comparison.")
+
+            temp_df[col] = temp_df[col].astype(str)
+            filters = list(map(str, filters))
+            temp_df = temp_df[temp_df[col].isin(filters)]
+
+        after_rows = temp_df.shape[0]
+
+        print(f"   ➜ Rows after filter: {after_rows}")
+
+        if after_rows == 0:
+            print("   ❌ FILTER REMOVED ALL ROWS!")
+            print("   ⚠ Returning original data to prevent crash.\n")
+            temp_df = global_df.copy()
+            break
+
+    print("\n📌 FINAL temp_df SHAPE:", temp_df.shape)
+    print(temp_df.head())
+                
+    print("temp_df",temp_df)
 
     return temp_df[[x_axis_columns[0], y_axis_column[0]]] if x_axis_columns and y_axis_column else temp_df
 
@@ -1656,17 +2223,31 @@ def get_bar_chart_route():
 
     table_name = data['selectedTable']
     y_axis_columns = data['yAxis']  # Assuming yAxis can be multiple columns as well
-    aggregation = data['aggregate']
+    # aggregation = data['aggregate']
     filter_options = data['filterOptions']
     checked_option = data['filterOptions']
     db_nameeee = data['databaseName']
     selectedUser = data['selectedUser']
     chart_data = data['chartType']
+     
+    # agg_value = data['aggregate']
+    # aggregation = agg_value.get('aggregation', None)
+    agg_value = data['aggregate']  # list of objects
+    clicked_index = data.get("clickedIndex", 0)  # default 0
+
+    aggregation = next(
+        (item['aggregation'] for item in agg_value if item['index'] == clicked_index),
+        None
+    )
+
+    print("Selected aggregation:", aggregation)
+    print("agg_value",agg_value)
 
     dateGranularity= data.get('dateGranularity', None)
 
     print("filter_options-----",filter_options)
     print("dateGranularity-----",dateGranularity)
+    print("aggregation",aggregation)
 
 
     # print("chart_data",data)
@@ -1932,7 +2513,10 @@ def get_bar_chart_route():
         print("Single treeHierarchy chart")
 
         try:
-            temp_df = new_df.copy()
+           
+            df = fetch_chart_data(database_con, table_name)
+            temp_df = df.copy()
+            
             # ============== DATE GRANULARITY PROCESSING ==============
             # Handle date granularity - convert date columns to specified granularity
             if dateGranularity and isinstance(dateGranularity, dict):
@@ -1941,7 +2525,8 @@ def get_bar_chart_route():
                         print(f"Applying date granularity: {date_col} -> {granularity}")
                         
                         # Ensure the column is datetime
-                        temp_df[date_col] = pd.to_datetime(temp_df[date_col], errors='coerce')
+                        # temp_df[date_col] = pd.to_datetime(temp_df[date_col], errors='coerce')
+                        temp_df[date_col] = pd.to_datetime(temp_df[date_col], errors='coerce', dayfirst=True)
                         
                         # Create new column name for the granularity
                         granularity_col = f"{date_col}_{granularity}"
@@ -2237,7 +2822,7 @@ def get_bar_chart_route():
         try:
 
             print("calculationData",calculationData)
-            data = fetch_data_for_duel(table_name, x_axis_columns, filter_options, y_axis_columns, aggregation, db_nameeee, selectedUser,calculationData= data.get('calculationData'),dateGranularity=dateGranularity)
+            data = fetch_data_for_duel(table_name, x_axis_columns, filter_options, y_axis_columns, agg_value, db_nameeee, selectedUser,calculationData= data.get('calculationData'),dateGranularity=dateGranularity)
             
             # Debug: Print the structure of fetched data
             print(f"🔍 Dual Y-axis Chart - Original data length: {len(data)}")
@@ -2355,7 +2940,37 @@ def get_edit_chart_route():
     table_name = data['selectedTable']
     x_axis_columns = data['xAxis'].split(', ')  # Split multiple columns into a list
     y_axis_columns = data['yAxis'] # Assuming yAxis can be multiple columns as well
-    aggregation = data['aggregate']
+    # aggregation = data['aggregate']
+    agg_value = data.get("aggregate")
+    current_y_axis = y_axis_columns[0] if y_axis_columns else None
+    aggregation = None
+
+    # CASE 1 → Direct aggregate string
+    if isinstance(agg_value, str) and agg_value.lower() in ["sum", "count", "avg", "mean", "min", "max"]:
+        aggregation = agg_value.lower()
+        print("✔ Using direct string aggregate:", aggregation)
+
+    # CASE 2 → JSON string or list
+    else:
+        import json
+        # Convert JSON string to list
+        if isinstance(agg_value, str):
+            try:
+                agg_value = json.loads(agg_value)
+            except json.JSONDecodeError:
+                agg_value = []
+
+        # Extract matching yAxis aggregation from list
+        if isinstance(agg_value, list):
+            aggregation = next(
+                (item.get('aggregation') for item in agg_value if item.get('yAxis') == current_y_axis),
+                None
+            )
+            if not aggregation and agg_value:
+                aggregation = agg_value[0].get('aggregation')
+
+    print("Final selected aggregate:", aggregation)
+
     checked_option = data['filterOptions'] 
     db_nameeee = data['databaseName']
     chartType = data['chartType']
@@ -2991,7 +3606,7 @@ def get_edit_chart_route():
                 return jsonify({"error": str(e)}), 500
         
     elif len(y_axis_columns) == 2:
-        datass = fetch_data_for_duel(table_name, x_axis_columns, checked_option, y_axis_columns, aggregation, db_nameeee,selectedUser,calculationData,dateGranularity=dateGranularity)
+        datass = fetch_data_for_duel(table_name, x_axis_columns, checked_option, y_axis_columns, agg_value, db_nameeee,selectedUser,calculationData,dateGranularity=dateGranularity)
         data = {
              "categories": [row[0] for row in datass],
             "series1": [row[1] for row in datass],
@@ -3209,7 +3824,7 @@ def save_data():
             data.get('selectedTable'),
             data.get('xAxis'),
             data.get('yAxis'),
-            data.get('aggregate'),
+            json.dumps(data.get('aggregate')),
             data.get('chartType'),
             # data.get('chartColor'),
             chart_color_json,
@@ -3334,7 +3949,7 @@ def update_data():
             data.get('selectedTable'),
             data.get('xAxis'),
             data.get('yAxis'),
-            data.get('aggregate'),
+            json.dumps(data.get('aggregate')),
             data.get('chartType'),
             chart_color_json,
             chart_heading_json,
@@ -3468,7 +4083,7 @@ def get_chart_names(user_id, database_name):
                     SELECT user_id, chart_name 
                     FROM table_chart_save
                     WHERE user_id IN ({placeholders}) AND company_name = %s
-                    ORDER BY timestamp ASC
+                    ORDER BY updated_at DESC;
                 """
 
                 cursor.execute(query, tuple(all_employee_ids)+ (database_name,))
@@ -4825,7 +5440,48 @@ def receive_chart_details():
     tableName = data.get('tableName')
     x_axis = data.get('x_axis')  # Assuming this is a list of columns to group by
     y_axis = data.get('y_axis')  # Assuming this is a list of columns to aggregate
-    aggregate = data.get('aggregate')  # Aggregation method, e.g., 'sum', 'mean', etc.
+    # aggregate = data.get('aggregate')  # Aggregation method, e.g., 'sum', 'mean', etc.
+    agg_value = data.get('aggregate') # list of objects
+    print("agg_value0",agg_value)
+    
+
+    current_y_axis = y_axis[0] if isinstance(y_axis, list) and y_axis else None
+    aggregate = None
+
+    # CASE 1: agg_value is direct string like sum, count, avg
+    if isinstance(agg_value, str) and agg_value.lower() in ["sum", "count", "avg", "mean", "min", "max"]:
+        aggregate = agg_value
+        print("✔ Using direct string aggregate:", aggregate)
+
+    else:
+        # CASE 2: JSON String or list of objects
+        if isinstance(agg_value, str):
+            try:
+                agg_value = json.loads(agg_value)
+            except:
+                agg_value = []
+
+        # Filter list by yAxis matching
+        if isinstance(agg_value, list):
+            aggregate = next(
+                (item.get('aggregation') for item in agg_value if item.get('yAxis') == current_y_axis),
+                None
+            )
+
+        # Fallback to first available aggregation
+        if not aggregate and isinstance(agg_value, list) and agg_value:
+            aggregate = agg_value[0].get('aggregation')
+
+    print("Final selected aggregate:", aggregate)
+
+    # # Find aggregation based on y-axis column
+    # aggregate = next(
+    #     (item.get('aggregation') for item in agg_value if item.get('yAxis') == current_y_axis),
+    #     None
+    # )
+    # print("agg_value0",agg_value)
+    # print("aggregate",aggregate)
+
     chart_type = data.get('chart_type')
     chart_heading = data.get('chart_heading')
     optimizeData= data.get('optimizeData')
@@ -5109,7 +5765,7 @@ def receive_chart_details():
                     })
             if chart_type == "duealChart"  :
                     print("Dual y-axis chart detected")
-                    data = fetch_data_for_duel(tableName, x_axis, filter_options, y_axis, aggregate, databaseName, selectedUser,calculation_data,dateGranularity)
+                    data = fetch_data_for_duel(tableName, x_axis, filter_options, y_axis, agg_value, databaseName, selectedUser,calculation_data,dateGranularity)
                     description = f"{user_name} viewed the chart '{chart}' from table '{tableName}'."
                     log_activity(
                             company_name=databaseName,
@@ -8508,8 +9164,8 @@ def save_dashboard():
             positions = json.dumps([{'x': p['x'], 'y': p['y']} for p in position])
             # Extract width and height from the new position structure
             chart_sizes = json.dumps([{'width': p['width'], 'height': p['height']} for p in position])
-
-            aggregations = json.dumps([chart.get('aggregation', None) for chart in chart_details]) # Handle optional aggregation
+            aggregations = [chart.get('aggregation', None) for chart in chart_details]
+            # aggregations = json.dumps([chart.get('aggregation', None) for chart in chart_details]) # Handle optional aggregation
             xaxes = json.dumps([chart.get('x_axis', []) for chart in chart_details])  # Correct key name
             yaxes = json.dumps([chart.get('y_axis', []) for chart in chart_details])  # Correct key name
             opacities = json.dumps([chart.get('opacity', 1) for chart in chart_details])  # default to 1 if missing
@@ -8545,7 +9201,7 @@ def save_dashboard():
                 SET chart_ids = %s, heading = %s, position = %s::jsonb, chart_size = %s::jsonb, chart_aggregate = %s::jsonb, chart_xaxis = %s::jsonb, chart_yaxis = %s::jsonb,chart_type = %s::jsonb,filterdata = %s,droppableBgColor=%s, opacity = %s::jsonb,chartcolor = %s::jsonb,font_style_state = %s,
                 font_size = %s,font_color = %s,wallpaper_id = %s WHERE user_id = %s AND file_name = %s;
             """
-            cur.execute(update_chart_query, (chart_ids_str, DashboardHeading, positions, chart_sizes, aggregations, xaxes, yaxes, chart_type, filter_options,droppableBgColor,opacities,bgcolors,fontStyleState, fontSize, fontColor,wallpaper_id, user_id, dashboard_name))
+            cur.execute(update_chart_query, (chart_ids_str, DashboardHeading, positions, chart_sizes,json.dumps(aggregations), xaxes, yaxes, chart_type, filter_options,droppableBgColor,opacities,bgcolors,fontStyleState, fontSize, fontColor,wallpaper_id, user_id, dashboard_name))
             conn.commit()
             
             for chart in chart_details:
@@ -9842,7 +10498,8 @@ def share_dashboard():
                         old_chart["selected_table"],
                         old_chart["x_axis"],
                         old_chart["y_axis"],
-                        old_chart["aggregate"],
+                        # old_chart["aggregate"],
+                        json.dumps(old_chart["aggregate"]) if isinstance(old_chart.get("aggregate"), dict) else old_chart.get("aggregate"),
                         old_chart["chart_type"],
                         old_chart["chart_color"],
                         old_chart["chart_heading"],

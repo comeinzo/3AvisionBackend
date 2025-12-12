@@ -40,11 +40,19 @@ def check_table_usage(cur, table_name):
     print("is_in_use", is_in_use)
     return is_in_use
 
-def sanitize_column_name(col_name):
-    if isinstance(col_name, str):
-        return re.sub(r'\W+', '_', col_name).lower()
-    else:
-        return col_name
+# def sanitize_column_name(col_name):
+#     if isinstance(col_name, str):
+#         return re.sub(r'\W+', '_', col_name).lower()
+#     else:
+#         return col_name
+
+def sanitize_column_name(header):
+    """Sanitize column names to lowercase, replace non-alphanumeric with _, collapse multiple _"""
+    sanitized = str(header).lower().strip()
+    sanitized = re.sub(r'[^a-z0-9]+', '_', sanitized)  # replace non-alphanumeric with _
+    sanitized = re.sub(r'_+', '_', sanitized)           # collapse multiple underscores
+    sanitized = sanitized.strip('_')                    # remove leading/trailing _
+    return sanitized
 
 def clean_data(df):
     for col in df.select_dtypes(include='object').columns:
@@ -265,13 +273,143 @@ def bulk_insert_with_copy(cur, conn, table_name, df, primary_key_col):
 #         if conn:
 #             conn.rollback()
 #         raise e
+
+# def optimized_batch_insert(cur, conn, table_name, df, primary_key_col, batch_size=5000):
+#     try:
+#         rows_to_insert = []
+#         inserted_count = 0
+#         updated_count = 0
+#         skipped_count = 0
+
+#         for _, row in df.iterrows():
+#             processed_row = []
+#             for col in df.columns:
+#                 value = row[col]
+#                 if pd.isna(value):
+#                     processed_row.append(None)
+#                 elif pd.api.types.is_datetime64_any_dtype(df[col]) and pd.notna(value):
+#                     processed_row.append(value.to_pydatetime() if hasattr(value, 'to_pydatetime') else value)
+#                 else:
+#                     processed_row.append(value)
+#             rows_to_insert.append(tuple(processed_row))
+
+#         columns = df.columns.tolist()
+#         placeholders = ', '.join(['%s'] * len(columns))
+
+#         # Build UPSERT with RETURNING clause
+#         insert_query_base = sql.SQL("INSERT INTO {} ({}) VALUES %s").format(
+#             sql.Identifier(table_name),
+#             sql.SQL(', ').join(map(sql.Identifier, columns))
+#         )
+
+#         upsert_query = insert_query_base
+#         # Determine conflict target
+#         if primary_key_col:
+#             if isinstance(primary_key_col, list):  # Multi-column PK
+#                 conflict_target = sql.SQL(', ').join([sql.Identifier(col) for col in primary_key_col])
+#             else:  # Single column PK
+#                 conflict_target = sql.Identifier(primary_key_col)
+
+#             update_columns = [col for col in columns if col not in (primary_key_col if isinstance(primary_key_col, list) else [primary_key_col])]
+#             if update_columns:
+#                 update_set_clause = sql.SQL(', ').join(
+#                     sql.SQL("{0} = EXCLUDED.{0}").format(sql.Identifier(col))
+#                     for col in update_columns
+#                 )
+#                 upsert_query = sql.SQL("""
+#                     INSERT INTO {} ({}) VALUES %s
+#                     ON CONFLICT ({}) DO UPDATE SET {}
+#                 """).format(
+#                     sql.Identifier(table_name),
+#                     sql.SQL(', ').join(map(sql.Identifier, columns)),
+#                     conflict_target,
+#                     update_set_clause
+#                 )
+#             else:
+#                 upsert_query = sql.SQL("""
+#                     INSERT INTO {} ({}) VALUES %s
+#                     ON CONFLICT ({}) DO NOTHING
+#                 """).format(
+#                     sql.Identifier(table_name),
+#                     sql.SQL(', ').join(map(sql.Identifier, columns)),
+#                     conflict_target
+#                 )
+#         else:
+#             # No PK, just insert
+#             upsert_query = sql.SQL("INSERT INTO {} ({}) VALUES %s").format(
+#                 sql.Identifier(table_name),
+#                 sql.SQL(', ').join(map(sql.Identifier, columns))
+#             )
+
+#         print(f"Batch UPSERT query: {upsert_query.as_string(conn)}")
+
+#         with tqdm(total=len(rows_to_insert), desc=f"Inserting/Updating into {table_name}", unit="row") as pbar:
+#             for i in range(0, len(rows_to_insert), batch_size):
+#                 batch = rows_to_insert[i:i + batch_size]
+#                 cur.execute("SAVEPOINT before_batch;")
+#                 try:
+#                     # Run UPSERT with RETURNING
+#                     execute_values(
+#                         cur,
+#                         upsert_query.as_string(conn),
+#                         batch,
+#                         template=f"({placeholders})",
+#                         page_size=batch_size
+#                     )
+
+#                     # Count inserted vs updated from returned rows
+#                     try:
+#                         results = cur.fetchall()
+#                         for res in results:
+#                             if res[0]:
+#                                 inserted_count += 1
+#                             else:
+#                                 updated_count += 1
+#                     except Exception:
+#                         # Some cases (like DO NOTHING) will return nothing
+#                         skipped_count += len(batch)
+
+#                     if (i // batch_size) % 5 == 0 or (i + batch_size) >= len(rows_to_insert):
+#                         conn.commit()
+#                 except Exception as e:
+#                     print(f"Error inserting batch: {str(e)}")
+#                     cur.execute("ROLLBACK TO SAVEPOINT before_batch;")
+#                     skipped_count += len(batch)
+#                 finally:
+#                     pbar.update(len(batch))
+
+#         print(f"Inserted: {inserted_count}, Updated: {updated_count}, Skipped: {skipped_count}")
+#         return inserted_count, updated_count, skipped_count
+
+#     except Exception as e:
+#         print(f"Error during optimized batch insert/update: {str(e)}")
+#         traceback.print_exc()
+#         if conn:
+#             conn.rollback()
+#         raise e
+
 def optimized_batch_insert(cur, conn, table_name, df, primary_key_col, batch_size=5000):
+    """
+    Performs batch insert or UPSERT into PostgreSQL table.
+    Counts inserted vs updated rows using RETURNING (xmax = 0).
+    
+    Args:
+        cur: psycopg2 cursor
+        conn: psycopg2 connection
+        table_name: str
+        df: pandas DataFrame
+        primary_key_col: str or list
+        batch_size: int
+    Returns:
+        inserted_count, updated_count, skipped_count
+    """
     try:
         rows_to_insert = []
         inserted_count = 0
         updated_count = 0
         skipped_count = 0
 
+        # Prepare rows
         for _, row in df.iterrows():
             processed_row = []
             for col in df.columns:
@@ -287,43 +425,64 @@ def optimized_batch_insert(cur, conn, table_name, df, primary_key_col, batch_siz
         columns = df.columns.tolist()
         placeholders = ', '.join(['%s'] * len(columns))
 
-        # Build UPSERT with RETURNING clause
-        insert_query_base = sql.SQL("INSERT INTO {} ({}) VALUES %s").format(
-            sql.Identifier(table_name),
-            sql.SQL(', ').join(map(sql.Identifier, columns))
-        )
-
-        upsert_query = insert_query_base
+        # Determine conflict target
         if primary_key_col:
-            update_columns = [col for col in columns if col != primary_key_col]
+            if isinstance(primary_key_col, list):
+                conflict_target = sql.SQL(', ').join([sql.Identifier(col) for col in primary_key_col])
+                pk_list_for_update = primary_key_col
+            else:
+                conflict_target = sql.Identifier(primary_key_col)
+                pk_list_for_update = [primary_key_col]
+        else:
+            conflict_target = None
+            pk_list_for_update = []
+
+        # Columns to update
+        update_columns = [col for col in columns if col not in pk_list_for_update]
+        if update_columns:
+            update_set_clause = sql.SQL(', ').join(
+                sql.SQL("{0} = EXCLUDED.{0}").format(sql.Identifier(col))
+                for col in update_columns
+            )
+
+        # Build UPSERT with RETURNING xmax
+        if primary_key_col:
             if update_columns:
-                update_set_clause = sql.SQL(', ').join(
-                    sql.SQL("{0} = EXCLUDED.{0}").format(sql.Identifier(col))
-                    for col in update_columns
-                )
-                # Return a flag whether inserted or updated
                 upsert_query = sql.SQL("""
-                    {} ON CONFLICT ({}) DO UPDATE SET {}
-                    RETURNING (xmax = 0) AS inserted;
+                    INSERT INTO {} ({}) VALUES %s
+                    ON CONFLICT ({}) DO UPDATE SET {}
+                    RETURNING (xmax = 0) AS inserted
                 """).format(
-                    insert_query_base,
-                    sql.Identifier(primary_key_col),
+                    sql.Identifier(table_name),
+                    sql.SQL(', ').join(map(sql.Identifier, columns)),
+                    conflict_target,
                     update_set_clause
                 )
             else:
-                upsert_query = sql.SQL("{} ON CONFLICT ({}) DO NOTHING RETURNING (xmax = 0) AS inserted;").format(
-                    insert_query_base,
-                    sql.Identifier(primary_key_col)
+                upsert_query = sql.SQL("""
+                    INSERT INTO {} ({}) VALUES %s
+                    ON CONFLICT ({}) DO NOTHING
+                    RETURNING (xmax = 0) AS inserted
+                """).format(
+                    sql.Identifier(table_name),
+                    sql.SQL(', ').join(map(sql.Identifier, columns)),
+                    conflict_target
                 )
+        else:
+            # No PK, just insert
+            upsert_query = sql.SQL("INSERT INTO {} ({}) VALUES %s RETURNING (xmax = 0) AS inserted").format(
+                sql.Identifier(table_name),
+                sql.SQL(', ').join(map(sql.Identifier, columns))
+            )
 
         print(f"Batch UPSERT query: {upsert_query.as_string(conn)}")
 
+        # Batch insert
         with tqdm(total=len(rows_to_insert), desc=f"Inserting/Updating into {table_name}", unit="row") as pbar:
             for i in range(0, len(rows_to_insert), batch_size):
                 batch = rows_to_insert[i:i + batch_size]
                 cur.execute("SAVEPOINT before_batch;")
                 try:
-                    # Run UPSERT with RETURNING
                     execute_values(
                         cur,
                         upsert_query.as_string(conn),
@@ -331,8 +490,7 @@ def optimized_batch_insert(cur, conn, table_name, df, primary_key_col, batch_siz
                         template=f"({placeholders})",
                         page_size=batch_size
                     )
-
-                    # Count inserted vs updated from returned rows
+                    # Fetch inserted/updated info
                     try:
                         results = cur.fetchall()
                         for res in results:
@@ -341,13 +499,13 @@ def optimized_batch_insert(cur, conn, table_name, df, primary_key_col, batch_siz
                             else:
                                 updated_count += 1
                     except Exception:
-                        # Some cases (like DO NOTHING) will return nothing
+                        # Some cases (DO NOTHING) return nothing
                         skipped_count += len(batch)
 
-                    if (i // batch_size) % 5 == 0 or (i + batch_size) >= len(rows_to_insert):
-                        conn.commit()
+                    conn.commit()
                 except Exception as e:
                     print(f"Error inserting batch: {str(e)}")
+                    traceback.print_exc()
                     cur.execute("ROLLBACK TO SAVEPOINT before_batch;")
                     skipped_count += len(batch)
                 finally:
@@ -370,10 +528,16 @@ def process_csv_in_chunks(csv_file_path, chunk_size=50000):
 
 UPLOAD_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'uploads', 'csv')
 
-def upload_csv_to_postgresql(database_name, username, password, csv_file_name, host, port='5432'):
+def upload_csv_to_postgresql(database_name,primary_key_column, username, password, csv_file_name, host, port='5432',):
     conn = None
     cur = None
     try:
+        print("Primary Key Column Input:", primary_key_column)
+        if isinstance(primary_key_column, str):
+            primary_key_column = [col.strip() for col in primary_key_column.split(',')]
+        
+           
+        
         current_dir = os.getcwd()
         csv_file_path = os.path.join(current_dir, csv_file_name)
 
@@ -417,6 +581,7 @@ def upload_csv_to_postgresql(database_name, username, password, csv_file_name, h
         schema_df = preprocess_dates(schema_df)
         schema_df = clean_data(schema_df)
         schema_df.columns = [sanitize_column_name(col) for col in schema_df.columns]
+        
 
         duplicate_columns = check_repeating_columns(schema_df)
         if duplicate_columns:
@@ -446,11 +611,54 @@ def upload_csv_to_postgresql(database_name, username, password, csv_file_name, h
         primary_key_column_from_csv = identify_primary_key(initial_df)
         db_primary_key_column = 'id'
 
+        # if primary_key_column_from_csv:
+        #     print(f"Using column '{primary_key_column}' from CSV as primary key.")
+        #     db_primary_key_column = primary_key_column
+        #     # Check for duplicates in the initial chunk if using CSV's PK
+        #     # FIX: handle single-column or multi-column PK
+        #     if isinstance(db_primary_key_column, list):
+        #         subset_cols = db_primary_key_column
+        #     else:
+        #         subset_cols = [db_primary_key_column]
+
+        #     duplicate_primary_keys = (
+        #         initial_df[ initial_df.duplicated(subset=subset_cols, keep=False) ][subset_cols]
+        #         .astype(str)
+        #         .agg('-'.join, axis=1)
+        #         .tolist()
+        #     )
+
         if primary_key_column_from_csv:
-            print(f"Using column '{primary_key_column_from_csv}' from CSV as primary key.")
-            db_primary_key_column = primary_key_column_from_csv
-            # Check for duplicates in the initial chunk if using CSV's PK
-            duplicate_primary_keys = initial_df[initial_df.duplicated(subset=[db_primary_key_column], keep=False)][db_primary_key_column].tolist()
+            print(f"Using column '{primary_key_column}' from CSV as primary key.")
+            
+           
+            if isinstance(primary_key_column, str):
+                primary_key_column = [col.strip() for col in primary_key_column.split(',')]
+
+            # Ensure PK columns match sanitized DF columns
+            primary_key_column = [sanitize_column_name(col) for col in primary_key_column]
+            db_primary_key_column = primary_key_column
+
+            # Ensure PK is a list
+            subset_cols = db_primary_key_column if isinstance(db_primary_key_column, list) else [db_primary_key_column]
+
+            # Get duplicate rows
+            dup_df = initial_df[initial_df.duplicated(subset=subset_cols, keep=False)][subset_cols]
+
+            # Always define the variable
+            duplicate_primary_keys = []
+
+            if not dup_df.empty:
+                duplicate_primary_keys = (
+                    dup_df.astype(str)
+                        .apply(lambda row: " | ".join(row.values), axis=1)
+                        .tolist()
+                )
+                print(f"❌ Duplicate composite primary keys found: {duplicate_primary_keys}")
+            else:
+                print("✔ No duplicate composite primary keys found.")
+
+            # duplicate_primary_keys = initial_df[initial_df.duplicated(subset=[db_primary_key_column], keep=False)][db_primary_key_column].tolist()
             if duplicate_primary_keys:
                 print(f"Warning: Duplicate primary key values found in CSV for column '{db_primary_key_column}': {', '.join(map(str, duplicate_primary_keys))}. Consider data cleaning or using a database-managed ID if these are not intended for UPSERT.")
                 # Decide here: if duplicates in CSV means no natural PK, then fall back to SERIAL 'id'
@@ -476,6 +684,75 @@ def upload_csv_to_postgresql(database_name, username, password, csv_file_name, h
 
         table_exists = validate_table_structure(cur, table_name)
         is_table_in_use = False
+        if table_exists:
+
+                    # Fetch existing PK
+            cur.execute("""
+                        SELECT a.attname
+                        FROM   pg_index i
+                        JOIN   pg_attribute a ON a.attrelid = i.indrelid
+                                            AND a.attnum = ANY(i.indkey)
+                        WHERE  i.indrelid = %s::regclass
+                        AND    i.indisprimary;
+                    """, (table_name,))
+            existing_pk_cols = [row[0] for row in cur.fetchall()]
+            print("Existing PK:", existing_pk_cols)
+
+                    # Normalize new primary key (list if multi-pk)
+            if isinstance(primary_key_column, str):
+                new_pk_cols = [c.strip().lower() for c in primary_key_column.split(",")]
+            else:
+                new_pk_cols = [c.strip().lower() for c in primary_key_column]
+
+            print("Requested New PK:", new_pk_cols)
+
+                    # If PK different → update required
+            if sorted(existing_pk_cols) != sorted(new_pk_cols):
+
+                print("⚠ Primary key change detected — Updating PK…")
+
+                        # Block PK update if table used in charts
+                if is_table_in_use:
+                    raise Exception(
+                            f"Table '{table_name}' is used in charts — cannot modify primary key."
+                    )
+
+                        # Validate: All new PK columns exist
+                for col in new_pk_cols:
+                    if col not in initial_df.columns:
+                        raise Exception(f"Primary key column '{col}' does not exist in Excel data.")
+
+                        # Validate duplicates before applying PK
+                if initial_df.duplicated(subset=new_pk_cols).any():
+                    dups = initial_df[initial_df.duplicated(subset=new_pk_cols, keep=False)][new_pk_cols]
+                    raise Exception(f"Duplicate primary key values found:\n{dups}")
+
+                        # Drop existing PK
+                try:
+                    cur.execute(sql.SQL("ALTER TABLE {} DROP CONSTRAINT IF EXISTS {}")
+                                        .format(
+                                            sql.Identifier(table_name),
+                                            sql.Identifier(f"{table_name}_pkey")
+                                        ))
+                    print("✔ Old primary key dropped.")
+                except Exception as e:
+                    print("Error dropping old PK:", e)
+
+                        # Add new PK
+                try:
+                    pk_identifiers = sql.SQL(",").join([sql.Identifier(col) for col in new_pk_cols])
+
+                    cur.execute(
+                                sql.SQL("ALTER TABLE {} ADD PRIMARY KEY ({})")
+                                .format(sql.Identifier(table_name), pk_identifiers)
+                            )
+
+                    print("✔ New primary key applied successfully:", new_pk_cols)
+
+                except Exception as e:
+                    raise Exception(f"Failed to add new primary key: {e}")
+
+
         if table_exists:
             is_table_in_use = check_table_usage(cur, table_name)
             print(f"Table '{table_name}' is in use: {is_table_in_use}")
@@ -578,14 +855,26 @@ def upload_csv_to_postgresql(database_name, username, password, csv_file_name, h
                 # If no natural PK in CSV, add 'id' as SERIAL PRIMARY KEY
                 column_defs.insert(0, f'"{db_primary_key_column}" SERIAL PRIMARY KEY')
             else:
+                if isinstance(db_primary_key_column, list):
+                    # Multi-column PK
+                    pk_clause = "PRIMARY KEY (" + ", ".join([f'"{c}"' for c in db_primary_key_column]) + ")"
+                    column_defs.append(pk_clause)
+                else:
+                    # Single-column PK
+                    try:
+                        pk_idx = initial_df.columns.get_loc(db_primary_key_column)
+                        column_defs[pk_idx] = f'"{db_primary_key_column}" {determine_sql_data_type(initial_df[db_primary_key_column])} PRIMARY KEY'
+                    except KeyError:
+                        print(f"Warning: Primary key column '{db_primary_key_column}' not found in DataFrame columns after processing.")
+
                 # If CSV has a natural PK, mark that column as PRIMARY KEY
-                try:
-                    pk_idx = initial_df.columns.get_loc(db_primary_key_column)
-                    # Modify the existing column definition to include PRIMARY KEY
-                    # This assumes the column is already in column_defs
-                    column_defs[pk_idx] = f'"{db_primary_key_column}" {determine_sql_data_type(initial_df[db_primary_key_column])} PRIMARY KEY'
-                except KeyError:
-                    print(f"Warning: Primary key column '{db_primary_key_column}' not found in DataFrame columns after processing. Cannot set PRIMARY KEY constraint directly.")
+                # try:
+                #     pk_idx = initial_df.columns.get_loc(db_primary_key_column)
+                #     # Modify the existing column definition to include PRIMARY KEY
+                #     # This assumes the column is already in column_defs
+                #     column_defs[pk_idx] = f'"{db_primary_key_column}" {determine_sql_data_type(initial_df[db_primary_key_column])} PRIMARY KEY'
+                # except KeyError:
+                #     print(f"Warning: Primary key column '{db_primary_key_column}' not found in DataFrame columns after processing. Cannot set PRIMARY KEY constraint directly.")
 
             create_table_query = sql.SQL('CREATE TABLE {} ({})').format(
                 sql.Identifier(table_name),
@@ -615,7 +904,7 @@ def upload_csv_to_postgresql(database_name, username, password, csv_file_name, h
             # Determine the actual primary key column name used in the DB for UPSERT
             # This is crucial. If 'id' is SERIAL and not in CSV, don't use it for UPSERT from CSV.
             # Only use a CSV-provided primary key for UPSERT.
-            actual_pk_for_upsert = primary_key_column_from_csv if primary_key_column_from_csv else None
+            actual_pk_for_upsert = primary_key_column if primary_key_column else None
             # If the DB-managed 'id' is the primary key and no CSV PK was found, we CANNOT UPSERT on 'id' from CSV data.
             # In this case, if we re-upload, we'll either get duplicates (if no TRUNCATE) or new unique IDs.
             # The current error `Key (id)=(1) already exists.` implies 'id' is the PK and you're providing it.

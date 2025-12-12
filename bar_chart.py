@@ -711,6 +711,7 @@ def fetch_data(table_name, x_axis_columns, filter_options, y_axis_column, aggreg
     import json
     import re
     print("dateGranularity......................", dateGranularity)
+    print("data",table_name, x_axis_columns, filter_options, y_axis_column, aggregation, db_name, selectedUser, calculationData, dateGranularity)
 
     global global_df
     # print("global_df",global_df)
@@ -1151,20 +1152,24 @@ def fetch_data(table_name, x_axis_columns, filter_options, y_axis_column, aggreg
         filtered_df = temp_df[temp_df[x_axis_columns[0]].isin(options)]
     else:
         filtered_df = temp_df
+    if isinstance(y_axis_column[0], dict):
+        y_axis_column = y_axis_column[0].get('column')
+    else:
+        y_axis_column = y_axis_column[0]
 
     # Perform aggregation
     if aggregation == "sum":
-        grouped_df = filtered_df.groupby(x_axis_columns_str[0])[y_axis_column[0]].sum().reset_index()
+        grouped_df = filtered_df.groupby(x_axis_columns_str[0])[y_axis_column].sum().reset_index()
     elif aggregation == "average":
-        grouped_df = filtered_df.groupby(x_axis_columns_str[0])[y_axis_column[0]].mean().reset_index()
+        grouped_df = filtered_df.groupby(x_axis_columns_str[0])[y_axis_column].mean().reset_index()
     elif aggregation == "count":
         grouped_df = filtered_df.groupby(x_axis_columns_str[0]).size().reset_index(name="count")
     elif aggregation == "maximum":
-        grouped_df = filtered_df.groupby(x_axis_columns_str[0])[y_axis_column[0]].max().reset_index()
+        grouped_df = filtered_df.groupby(x_axis_columns_str[0])[y_axis_column].max().reset_index()
     elif aggregation == "minimum":
-        grouped_df = filtered_df.groupby(x_axis_columns_str[0])[y_axis_column[0]].min().reset_index()
+        grouped_df = filtered_df.groupby(x_axis_columns_str[0])[y_axis_column].min().reset_index()
     elif aggregation == "variance":
-        grouped_df = filtered_df.groupby(x_axis_columns_str[0])[y_axis_column[0]].var().reset_index()
+        grouped_df = filtered_df.groupby(x_axis_columns_str[0])[y_axis_column].var().reset_index()
     else:
         raise ValueError(f"Unsupported aggregation type: {aggregation}")
 
@@ -1897,16 +1902,16 @@ def fetch_data_for_duel(
                 filter_clause = "WHERE " + " AND ".join(where_clauses)
 
         # ---------------------- AGGREGATION ----------------------
-        agg_func = {
-            "sum": "SUM",
-            "average": "AVG",
-            "count": "COUNT",
-            "maximum": "MAX",
-            "minimum": "MIN"
-        }.get(aggregation.lower())
+        # agg_func = {
+        #     "sum": "SUM",
+        #     "average": "AVG",
+        #     "count": "COUNT",
+        #     "maximum": "MAX",
+        #     "minimum": "MIN"
+        # }.get(aggregation.lower())
 
-        if not agg_func:
-            raise ValueError(f"Unsupported aggregation: {aggregation}")
+        # if not agg_func:
+        #     raise ValueError(f"Unsupported aggregation: {aggregation}")
 
         # ---------------------- X-AXIS EXPRESSIONS ----------------------
         x_axis_exprs = []
@@ -1946,8 +1951,25 @@ def fetch_data_for_duel(
 
         # ---------------------- Y-AXIS EXPRESSIONS ----------------------
         select_exprs = []
+        agg_map = {}
+        if isinstance(aggregation, list):
+            for item in aggregation:
+                y = item.get("yAxis")
+                a = item.get("aggregation", "sum")
+                if y:
+                    agg_map[y] = a.lower()
+
 
         for y_col in y_axis_columns:
+            selected_agg = agg_map.get(y_col, "sum").lower()
+
+            agg_func = {
+                "sum": "SUM",
+                "average": "AVG",
+                "count": "COUNT",
+                "maximum": "MAX",
+                "minimum": "MIN"
+            }.get(selected_agg, "SUM")
 
             # detect datatype based on sample row
             cur.execute(f'SELECT "{y_col}" FROM {table_name} LIMIT 1')
