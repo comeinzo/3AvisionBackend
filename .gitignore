@@ -74,3 +74,4 @@ dashboard_save/__pycache__/
 .Trashes
 ehthumbs.db
 Thumbs.db
+.env

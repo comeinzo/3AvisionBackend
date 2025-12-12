@@ -140,11 +140,28 @@ import datetime
 # ==================================
 # ✅ Initialize required DB schema
 # ==================================
+# def init_db():
+
+#     try:
+#         create_schema()
+#         print("✅ Database schema initialized successfully.")
+#     except Exception as e:
+#         print("⚠️ Error initializing schema:", e)
+
+
+
+# def init_db():
 try:
     create_schema()
     print("✅ Database schema initialized successfully.")
 except Exception as e:
+    # Change this to print the full error to see specifically WHY it failed
+    import traceback
+    traceback.print_exc()
     print("⚠️ Error initializing schema:", e)
+
+
+
 # ==============================
 # Configurations
 # ==============================
@@ -13678,24 +13695,24 @@ def serve_static(filename):
 
 
 
-# # import os
-# # import json
-# # import traceback
-# # import pandas as pd
-# # import psycopg2
-# # import google.generativeai as genai
-# # from flask import Flask, request, jsonify
-# # from dotenv import load_dotenv
+# import os
+# import json
+# import traceback
+# import pandas as pd
+# import psycopg2
+# import google.generativeai as genai
+# from flask import Flask, request, jsonify
+# from dotenv import load_dotenv
 
-# # Load environment variables
-# load_dotenv()
+# Load environment variables
+load_dotenv()
 
-# # ============================================================================
-# # GOOGLE GEMINI CONFIGURATION & ROBUST MODEL SELECTOR
-# # ============================================================================
+# ============================================================================
+# GOOGLE GEMINI CONFIGURATION & ROBUST MODEL SELECTOR
+# ============================================================================
 
-# # Configure Google Gemini
-# genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
+# Configure Google Gemini
+genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
 
 # def get_working_gemini_model():
 #     """
@@ -13704,8 +13721,9 @@ def serve_static(filename):
 #     """
 #     # 1. The Gold Standard for Free Tier (High limits, low latency)
 #     preferred_models = [
-#         "gemini-1.5-flash",
-#         "gemini-1.5-flash-latest", 
+#         # "gemini-1.5-flash",
+#         # "gemini-1.5-flash-latest", 
+#         "gemini-2.5-flash-lite",
 #         "gemini-1.0-pro",
 #         "gemini-pro"
 #     ]
@@ -13740,82 +13758,45 @@ def serve_static(filename):
 #     print("⚠️ Defaulting to gemini-1.5-flash (Force)")
 #     return "gemini-1.5-flash"
 
-# # Initialize model once on startup
+# Initialize model once on startup
 # ACTIVE_MODEL_NAME = get_working_gemini_model()
+ACTIVE_MODEL_NAME = "gemini-2.5-flash-lite"
+# app = Flask(__name__)
 
-# # app = Flask(__name__)
-
-# # # DB CONFIG
-# # HOST = os.getenv("DB_HOST")
-# # PORT = os.getenv("DB_PORT")
-# # USER_NAME = os.getenv("DB_USER")
-# # PASSWORD = os.getenv("DB_PASSWORD")
-
-
-# # ============================================================================
-# # DATABASE HELPER FUNCTIONS
-# # ============================================================================
-
-# def list_available_tables():
-#     """List all available tables in the database."""
-#     try:
-#         conn = psycopg2.connect(
-#             host=HOST, port=PORT, database="comienzonew", user=USER_NAME, password=PASSWORD
-#         )
-#         cursor = conn.cursor()
-        
-#         cursor.execute("""
-#             SELECT table_name 
-#             FROM information_schema.tables 
-#             WHERE table_schema = 'public' 
-#             ORDER BY table_name
-#         """)
-        
-#         tables = cursor.fetchall()
-#         cursor.close()
-#         conn.close()
-        
-#         return [table[0] for table in tables]
-#     except Exception as e:
-#         print(f"Error listing tables: {e}")
-#         return []
+# # DB CONFIG
+# HOST = os.getenv("DB_HOST")
+# PORT = os.getenv("DB_PORT")
+# USER_NAME = os.getenv("DB_USER")
+# PASSWORD = os.getenv("DB_PASSWORD")
 
 
-# # def get_table_schema(table_name):
-# #     """Fetch the schema for a specific table."""
-# #     try:
-# #         conn = psycopg2.connect(
-# #             host=HOST, port=PORT, database="comienzonew", user=USER_NAME, password=PASSWORD
-# #         )
-# #         cursor = conn.cursor()
+# ============================================================================
+# DATABASE HELPER FUNCTIONS
+# ============================================================================
+
+def list_available_tables():
+    """List all available tables in the database."""
+    try:
+        conn = psycopg2.connect(
+            host=HOST, port=PORT, database="comienzonew", user=USER_NAME, password=PASSWORD
+        )
+        cursor = conn.cursor()
         
-# #         cursor.execute("""
-# #             SELECT column_name, data_type, is_nullable
-# #             FROM information_schema.columns
-# #             WHERE table_name = %s
-# #             ORDER BY ordinal_position
-# #         """, (table_name,))
+        cursor.execute("""
+            SELECT table_name 
+            FROM information_schema.tables 
+            WHERE table_schema = 'public' 
+            ORDER BY table_name
+        """)
         
-# #         columns = cursor.fetchall()
+        tables = cursor.fetchall()
+        cursor.close()
+        conn.close()
         
-# #         if not columns:
-# #             cursor.close()
-# #             conn.close()
-# #             return None
-        
-# #         # Format schema
-# #         schema_text = f"Table: {table_name}\nColumns:\n"
-# #         for col_name, data_type, is_nullable in columns:
-# #             nullable = "NULL" if is_nullable == "YES" else "NOT NULL"
-# #             schema_text += f"  - {col_name} ({data_type}) {nullable}\n"
-        
-# #         cursor.close()
-# #         conn.close()
-        
-# #         return schema_text
-# #     except Exception as e:
-# #         print(f"Error getting schema: {e}")
-# #         return None
+        return [table[0] for table in tables]
+    except Exception as e:
+        print(f"Error listing tables: {e}")
+        return []
 
 
 # def get_table_schema(table_name):
@@ -13855,19 +13836,41 @@ def serve_static(filename):
 #         return None
 
 
-# # def execute_sql(sql_query):
-# #     """Execute SQL query and return results."""
-# #     try:
-# #         conn = psycopg2.connect(
-# #             host=HOST, port=PORT, database="comienzonew", user=USER_NAME, password=PASSWORD
-# #         )
+def get_table_schema(table_name):
+    """Fetch the schema for a specific table."""
+    try:
+        conn = psycopg2.connect(
+            host=HOST, port=PORT, database="comienzonew", user=USER_NAME, password=PASSWORD
+        )
+        cursor = conn.cursor()
         
-# #         df = pd.read_sql_query(sql_query, conn)
-# #         conn.close()
+        cursor.execute("""
+            SELECT column_name, data_type, is_nullable
+            FROM information_schema.columns
+            WHERE table_name = %s
+            ORDER BY ordinal_position
+        """, (table_name,))
         
-# #         return df, None
-# #     except Exception as e:
-# #         return None, str(e)
+        columns = cursor.fetchall()
+        
+        if not columns:
+            cursor.close()
+            conn.close()
+            return None
+        
+        # Format schema
+        schema_text = f"Table: {table_name}\nColumns:\n"
+        for col_name, data_type, is_nullable in columns:
+            nullable = "NULL" if is_nullable == "YES" else "NOT NULL"
+            schema_text += f"  - {col_name} ({data_type}) {nullable}\n"
+        
+        cursor.close()
+        conn.close()
+        
+        return schema_text
+    except Exception as e:
+        print(f"Error getting schema: {e}")
+        return None
 
 
 # def execute_sql(sql_query):
@@ -13883,51 +13886,30 @@ def serve_static(filename):
 #         return df, None
 #     except Exception as e:
 #         return None, str(e)
-    
-# # ============================================================================
-# # GEMINI AI FUNCTIONS (Replaces OpenAI Logic)
-# # ============================================================================
 
-# # def generate_sql_with_gemini(question, schema, table_name):
-# #     """Generate SQL using Google Gemini API with agentic reasoning."""
-    
-# #     # We combine system instruction into the prompt for maximum compatibility across Gemini versions
-# #     prompt = f"""You are an expert SQL agent who generates optimized PostgreSQL queries.
-    
-# # Database Schema:
-# # {schema}
 
-# # Question: {question}
-
-# # Instructions:
-# # 1. Analyze the question carefully
-# # 2. Identify the relevant columns from the schema
-# # 3. Generate an efficient PostgreSQL query
-# # 4. The table name is '{table_name}'
-# # 5. Return ONLY the SQL query without any explanation or markdown formatting (no ```sql).
-
-# # SQL Query:"""
-    
-# #     try:
-# #         model = genai.GenerativeModel(ACTIVE_MODEL_NAME)
-# #         response = model.generate_content(
-# #             prompt,
-# #             generation_config=genai.GenerationConfig(temperature=0.1)
-# #         )
+def execute_sql(sql_query):
+    """Execute SQL query and return results."""
+    try:
+        conn = psycopg2.connect(
+            host=HOST, port=PORT, database="comienzonew", user=USER_NAME, password=PASSWORD
+        )
         
-# #         sql = response.text.strip()
+        df = pd.read_sql_query(sql_query, conn)
+        conn.close()
         
-# #         # Clean up the SQL if Gemini adds markdown
-# #         sql = sql.replace('```sql', '').replace('```', '').strip()
-        
-# #         return sql
-# #     except Exception as e:
-# #         print(f"Error generating SQL with Gemini: {e}")
-# #         return None
-
+        return df, None
+    except Exception as e:
+        return None, str(e)
+    
+# ============================================================================
+# GEMINI AI FUNCTIONS (Replaces OpenAI Logic)
+# ============================================================================
 
 # def generate_sql_with_gemini(question, schema, table_name):
-#     """Generate SQL using Google Gemini API."""
+#     """Generate SQL using Google Gemini API with agentic reasoning."""
+    
+#     # We combine system instruction into the prompt for maximum compatibility across Gemini versions
 #     prompt = f"""You are an expert SQL agent who generates optimized PostgreSQL queries.
     
 # Database Schema:
@@ -13940,7 +13922,7 @@ def serve_static(filename):
 # 2. Identify the relevant columns from the schema
 # 3. Generate an efficient PostgreSQL query
 # 4. The table name is '{table_name}'
-# 5. Return ONLY the SQL query without any explanation or markdown formatting.
+# 5. Return ONLY the SQL query without any explanation or markdown formatting (no ```sql).
 
 # SQL Query:"""
     
@@ -13952,6 +13934,7 @@ def serve_static(filename):
 #         )
         
 #         sql = response.text.strip()
+        
 #         # Clean up the SQL if Gemini adds markdown
 #         sql = sql.replace('```sql', '').replace('```', '').strip()
         
@@ -13961,48 +13944,39 @@ def serve_static(filename):
 #         return None
 
 
-# # def generate_natural_answer(question, sql_query, results_df):
-# #     """Generate a natural language answer from the query results using Gemini."""
+def generate_sql_with_gemini(question, schema, table_name):
+    """Generate SQL using Google Gemini API."""
+    prompt = f"""You are an expert SQL agent who generates optimized PostgreSQL queries.
     
-# #     if results_df is None or len(results_df) == 0:
-# #         return "No results found for your query."
+Database Schema:
+{schema}
+
+Question: {question}
+
+Instructions:
+1. Analyze the question carefully
+2. Identify the relevant columns from the schema
+3. Generate an efficient PostgreSQL query
+4. The table name is '{table_name}'
+5. Return ONLY the SQL query without any explanation or markdown formatting.
+
+SQL Query:"""
     
-# #     # Create a summary of the results
-# #     row_count = len(results_df)
-    
-# #     # Get a preview of the data
-# #     preview = results_df.head(3).to_string(index=False) if row_count > 0 else "No data"
-    
-# #     prompt = f"""You are a helpful data analyst assistant. Based on the SQL query results, provide a natural, conversational answer to the user's question.
-
-# # User's Question: {question}
-
-# # SQL Query Executed: {sql_query}
-
-# # Number of Rows: {row_count}
-
-# # Data Preview:
-# # {preview}
-
-# # Provide a brief, friendly answer that:
-# # 1. Directly answers the question
-# # 2. Mentions key findings
-# # 3. Is conversational and easy to understand
-# # 4. Avoids technical jargon
-
-# # Answer:"""
-    
-# #     try:
-# #         model = genai.GenerativeModel(ACTIVE_MODEL_NAME)
-# #         response = model.generate_content(
-# #             prompt,
-# #             generation_config=genai.GenerationConfig(temperature=0.7)
-# #         )
+    try:
+        model = genai.GenerativeModel(ACTIVE_MODEL_NAME)
+        response = model.generate_content(
+            prompt,
+            generation_config=genai.GenerationConfig(temperature=0.6)
+        )
         
-# #         return response.text.strip()
-# #     except Exception as e:
-# #         print(f"Error generating answer: {e}")
-# #         return f"I found {row_count} result{'s' if row_count != 1 else ''} for your query."
+        sql = response.text.strip()
+        # Clean up the SQL if Gemini adds markdown
+        sql = sql.replace('```sql', '').replace('```', '').strip()
+        
+        return sql
+    except Exception as e:
+        print(f"Error generating SQL with Gemini: {e}")
+        return None
 
 
 # def generate_natural_answer(question, sql_query, results_df):
@@ -14011,21 +13985,27 @@ def serve_static(filename):
 #     if results_df is None or len(results_df) == 0:
 #         return "No results found for your query."
     
+#     # Create a summary of the results
 #     row_count = len(results_df)
+    
+#     # Get a preview of the data
 #     preview = results_df.head(3).to_string(index=False) if row_count > 0 else "No data"
     
-#     prompt = f"""You are a helpful data analyst assistant.
-    
+#     prompt = f"""You are a helpful data analyst assistant. Based on the SQL query results, provide a natural, conversational answer to the user's question.
+
 # User's Question: {question}
+
 # SQL Query Executed: {sql_query}
+
 # Number of Rows: {row_count}
+
 # Data Preview:
 # {preview}
 
 # Provide a brief, friendly answer that:
 # 1. Directly answers the question
 # 2. Mentions key findings
-# 3. Is conversational
+# 3. Is conversational and easy to understand
 # 4. Avoids technical jargon
 
 # Answer:"""
@@ -14036,260 +14016,274 @@ def serve_static(filename):
 #             prompt,
 #             generation_config=genai.GenerationConfig(temperature=0.7)
 #         )
+        
 #         return response.text.strip()
 #     except Exception as e:
 #         print(f"Error generating answer: {e}")
 #         return f"I found {row_count} result{'s' if row_count != 1 else ''} for your query."
 
-# def generate_business_insights(table_name, schema, data_summary, focus_area, sample_data):
-#     """Generate AI-powered business insights using Gemini."""
+
+def generate_natural_answer(question, sql_query, results_df):
+    """Generate a natural language answer from the query results using Gemini."""
     
-#     prompt = f"""You are an expert business analyst and data scientist. Analyze the following database table and provide actionable insights.
-
-# Table Name: {table_name}
-
-# Schema:
-# {schema}
-
-# Data Summary:
-# - Total Records: {data_summary['total_rows']}
-# - Numeric Columns Stats: {json.dumps(data_summary['numeric_stats'], indent=2)}
-# - Categorical Columns Stats: {json.dumps(data_summary['categorical_stats'], indent=2)}
-
-# Sample Data Preview:
-# {sample_data}
-
-# Focus Area: {focus_area}
-
-# Please provide:
-# 1. **Key Findings**
-# 2. **Actionable Recommendations**
-# 3. **Data Quality Observations**
-# 4. **Suggested Metrics to Track**
-# 5. **Quick Wins**
-
-# Format your response as JSON with the following structure:
-# {{
-#   "key_findings": ["finding 1", ...],
-#   "recommendations": [
-#     {{"title": "Title", "description": "Desc", "priority": "high", "impact": "Impact"}}
-#   ],
-#   "data_quality": ["obs 1", ...],
-#   "suggested_metrics": ["metric 1", ...],
-#   "quick_wins": [
-#     {{"action": "Action", "expected_outcome": "Outcome"}}
-#   ]
-# }}
-
-# Provide ONLY the JSON response, no additional text or markdown."""
+    if results_df is None or len(results_df) == 0:
+        return "No results found for your query."
     
-#     try:
-#         model = genai.GenerativeModel(ACTIVE_MODEL_NAME)
-#         response = model.generate_content(
-#             prompt,
-#             generation_config=genai.GenerationConfig(temperature=0.7)
-#         )
-        
-#         insights_text = response.text.strip()
-#         # Clean up markdown
-#         insights_text = insights_text.replace('```json', '').replace('```', '').strip()
-        
-#         return json.loads(insights_text)
-        
-#     except Exception as e:
-#         print(f"Error generating insights with Gemini: {e}")
-#         return {
-#             "key_findings": ["Error generating insights"],
-#             "recommendations": [],
-#             "data_quality": [],
-#             "suggested_metrics": [],
-#             "quick_wins": []
-#         }
-
-
-# def generate_contextual_chat_response(user_message, table_name, schema, context, sample_data):
-#     """Generate contextual AI responses for dashboard chat using Gemini."""
+    row_count = len(results_df)
+    preview = results_df.head(3).to_string(index=False) if row_count > 0 else "No data"
     
-#     context_str = json.dumps(context, indent=2) if context else "No additional context"
+    prompt = f"""You are a helpful data analyst assistant.
     
-#     prompt = f"""You are an AI business advisor integrated into a data analytics dashboard. 
+User's Question: {question}
+SQL Query Executed: {sql_query}
+Number of Rows: {row_count}
+Data Preview:
+{preview}
 
-# Current Table: {table_name}
+Provide a brief, friendly answer that:
+1. Directly answers the question
+2. Mentions key findings
+3. Is conversational
+4. Avoids technical jargon
 
-# Schema:
-# {schema}
-
-# Sample Data:
-# {sample_data}
-
-# Dashboard Context:
-# {context_str}
-
-# User Message: {user_message}
-
-# Provide a helpful, actionable response that:
-# 1. Directly addresses the user's question or concern
-# 2. Provides specific, data-driven recommendations when appropriate
-# 3. Offers tips to increase profit, market share, or operational efficiency
-# 4. Is conversational and encouraging
-
-# Keep your response concise (2-4 paragraphs)."""
+Answer:"""
     
-#     try:
-#         model = genai.GenerativeModel(ACTIVE_MODEL_NAME)
-#         response = model.generate_content(
-#             prompt,
-#             generation_config=genai.GenerationConfig(temperature=0.8)
-#         )
-        
-#         return response.text.strip()
-        
-#     except Exception as e:
-#         print(f"Error generating chat response: {e}")
-#         return "I apologize, but I'm having trouble generating a response right now. Please try again."
+    try:
+        model = genai.GenerativeModel(ACTIVE_MODEL_NAME)
+        response = model.generate_content(
+            prompt,
+            generation_config=genai.GenerationConfig(temperature=0.7)
+        )
+        return response.text.strip()
+    except Exception as e:
+        print(f"Error generating answer: {e}")
+        return f"I found {row_count} result{'s' if row_count != 1 else ''} for your query."
 
-
-# def generate_kpi_structure_with_ai(table_name, schema, data_profile, sample_data):
-#     """Use Gemini to determine the most relevant KPIs for this table."""
+def generate_business_insights(table_name, schema, data_summary, focus_area, sample_data):
+    """Generate AI-powered business insights using Gemini."""
     
-#     prompt = f"""You are a data analytics expert. Analyze this database table and determine the most relevant KPIs.
+    prompt = f"""You are an expert business analyst and data scientist. Analyze the following database table and provide actionable insights.
 
-# Table Name: {table_name}
-# Schema: {schema}
-# Data Profile: {json.dumps(data_profile, indent=2)}
-# Sample Data: {sample_data}
+Table Name: {table_name}
 
-# Respond ONLY with valid JSON in this exact structure:
-# {{
-#   "primary_kpis": [
-#     {{
-#       "name": "KPI Name",
-#       "description": "What it measures",
-#       "calculation": "column_name or aggregation",
-#       "format": "number|currency|percentage|date",
-#       "icon": "icon_name",
-#       "category": "category"
-#     }}
-#   ],
-#   "charts": [
-#     {{
-#       "type": "bar|line|pie|area",
-#       "title": "Chart Title",
-#       "x_axis": "column_name",
-#       "y_axis": "column_name",
-#       "aggregation": "sum|count|avg|min|max",
-#       "description": "Insight provided",
-#       "limit": 10
-#     }}
-#   ],
-#   "trends": [],
-#   "segments": []
-# }}"""
+Schema:
+{schema}
+
+Data Summary:
+- Total Records: {data_summary['total_rows']}
+- Numeric Columns Stats: {json.dumps(data_summary['numeric_stats'], indent=2)}
+- Categorical Columns Stats: {json.dumps(data_summary['categorical_stats'], indent=2)}
+
+Sample Data Preview:
+{sample_data}
+
+Focus Area: {focus_area}
+
+Please provide:
+1. **Key Findings**
+2. **Actionable Recommendations**
+3. **Data Quality Observations**
+4. **Suggested Metrics to Track**
+5. **Quick Wins**
+
+Format your response as JSON with the following structure:
+{{
+  "key_findings": ["finding 1", ...],
+  "recommendations": [
+    {{"title": "Title", "description": "Desc", "priority": "high", "impact": "Impact"}}
+  ],
+  "data_quality": ["obs 1", ...],
+  "suggested_metrics": ["metric 1", ...],
+  "quick_wins": [
+    {{"action": "Action", "expected_outcome": "Outcome"}}
+  ]
+}}
+
+Provide ONLY the JSON response, no additional text or markdown."""
     
-#     try:
-#         model = genai.GenerativeModel(ACTIVE_MODEL_NAME)
-#         response = model.generate_content(
-#             prompt,
-#             generation_config=genai.GenerationConfig(temperature=0.3)
-#         )
+    try:
+        model = genai.GenerativeModel(ACTIVE_MODEL_NAME)
+        response = model.generate_content(
+            prompt,
+            generation_config=genai.GenerationConfig(temperature=0.7)
+        )
         
-#         kpi_text = response.text.strip()
-#         kpi_text = kpi_text.replace('```json', '').replace('```', '').strip()
-#         return json.loads(kpi_text)
+        insights_text = response.text.strip()
+        # Clean up markdown
+        insights_text = insights_text.replace('```json', '').replace('```', '').strip()
         
-#     except Exception as e:
-#         print(f"Error generating KPI structure: {e}")
-#         return generate_default_kpi_structure(data_profile)
+        return json.loads(insights_text)
+        
+    except Exception as e:
+        print(f"Error generating insights with Gemini: {e}")
+        return {
+            "key_findings": ["Error generating insights"],
+            "recommendations": [],
+            "data_quality": [],
+            "suggested_metrics": [],
+            "quick_wins": []
+        }
 
 
-# def generate_kpi_insights_with_ai(table_name, kpi_values, chart_data):
-#     """Generate business insights based on KPI values using Gemini."""
+def generate_contextual_chat_response(user_message, table_name, schema, context, sample_data):
+    """Generate contextual AI responses for dashboard chat using Gemini."""
     
-#     prompt = f"""You are a business intelligence expert. Analyze these KPI metrics and provide actionable insights.
-
-# Table: {table_name}
-# KPI Values: {json.dumps(kpi_values, indent=2)}
-# Chart Data Summary: {json.dumps([{'title': c['title'], 'type': c['type']} for c in chart_data], indent=2)}
-
-# Respond with JSON:
-# {{
-#   "observations": ["observation 1", ...],
-#   "action_items": [
-#     {{"title": "Action", "description": "Details", "priority": "high|medium|low"}}
-#   ],
-#   "opportunities": ["opportunity 1", ...],
-#   "risks": ["risk 1", ...]
-# }}"""
+    context_str = json.dumps(context, indent=2) if context else "No additional context"
     
-#     try:
-#         model = genai.GenerativeModel(ACTIVE_MODEL_NAME)
-#         response = model.generate_content(
-#             prompt,
-#             generation_config=genai.GenerationConfig(temperature=0.7)
-#         )
+    prompt = f"""You are an AI business advisor integrated into a data analytics dashboard. 
+
+Current Table: {table_name}
+
+Schema:
+{schema}
+
+Sample Data:
+{sample_data}
+
+Dashboard Context:
+{context_str}
+
+User Message: {user_message}
+
+Provide a helpful, actionable response that:
+1. Directly addresses the user's question or concern
+2. Provides specific, data-driven recommendations when appropriate
+3. Offers tips to increase profit, market share, or operational efficiency
+4. Is conversational and encouraging
+
+Keep your response concise (2-4 paragraphs)."""
+    
+    try:
+        model = genai.GenerativeModel(ACTIVE_MODEL_NAME)
+        response = model.generate_content(
+            prompt,
+            generation_config=genai.GenerationConfig(temperature=0.8)
+        )
         
-#         insights_text = response.text.strip()
-#         insights_text = insights_text.replace('```json', '').replace('```', '').strip()
-#         return json.loads(insights_text)
+        return response.text.strip()
         
-#     except Exception as e:
-#         print(f"Error generating insights: {e}")
-#         return {
-#             "observations": [], "action_items": [], "opportunities": [], "risks": []
-#         }
-
-# # ============================================================================
-# # API ENDPOINTS
-# # ============================================================================
-
-# @app.route('/api/aihealth', methods=['GET'])
-# def health_check_of_agentai():
-#     """Health check endpoint."""
-#     return jsonify({
-#         'status': 'healthy',
-#         'message': f'3Avision SQL Agent API is running (Using {ACTIVE_MODEL_NAME})'
-#     })
+    except Exception as e:
+        print(f"Error generating chat response: {e}")
+        return "I apologize, but I'm having trouble generating a response right now. Please try again."
 
 
-# @app.route('/api/tables', methods=['GET'])
-# def get_tables_for_ai():
-#     """Get list of available tables."""
-#     try:
-#         tables = list_available_tables()
-#         return jsonify({
-#             'success': True,
-#             'tables': tables,
-#             'count': len(tables)
-#         })
-#     except Exception as e:
-#         return jsonify({
-#             'success': False,
-#             'error': str(e)
-#         }), 500
+def generate_kpi_structure_with_ai(table_name, schema, data_profile, sample_data):
+    """Use Gemini to determine the most relevant KPIs for this table."""
+    
+    prompt = f"""You are a data analytics expert. Analyze this database table and determine the most relevant KPIs.
 
+Table Name: {table_name}
+Schema: {schema}
+Data Profile: {json.dumps(data_profile, indent=2)}
+Sample Data: {sample_data}
 
-# # @app.route('/api/schema/<table_name>', methods=['GET'])
-# # def get_schema(table_name):
-# #     """Get schema for a specific table."""
-# #     try:
-# #         schema = get_table_schema(table_name)
+Respond ONLY with valid JSON in this exact structure:
+{{
+  "primary_kpis": [
+    {{
+      "name": "KPI Name",
+      "description": "What it measures",
+      "calculation": "column_name or aggregation",
+      "format": "number|currency|percentage|date",
+      "icon": "icon_name",
+      "category": "category"
+    }}
+  ],
+  "charts": [
+    {{
+      "type": "bar|line|pie|area",
+      "title": "Chart Title",
+      "x_axis": "column_name",
+      "y_axis": "column_name",
+      "aggregation": "sum|count|avg|min|max",
+      "description": "Insight provided",
+      "limit": 10
+    }}
+  ],
+  "trends": [],
+  "segments": []
+}}"""
+    
+    try:
+        model = genai.GenerativeModel(ACTIVE_MODEL_NAME)
+        response = model.generate_content(
+            prompt,
+            generation_config=genai.GenerationConfig(temperature=0.3)
+        )
         
-# #         if schema:
-# #             return jsonify({
-# #                 'success': True,
-# #                 'table_name': table_name,
-# #                 'schema': schema
-# #             })
-# #         else:
-# #             return jsonify({
-# #                 'success': False,
-# #                 'error': f'Table {table_name} not found'
-# #             }), 404
-# #     except Exception as e:
-# #         return jsonify({
-# #             'success': False,
-# #             'error': str(e)
-# #         }), 500
+        kpi_text = response.text.strip()
+        kpi_text = kpi_text.replace('```json', '').replace('```', '').strip()
+        return json.loads(kpi_text)
+        
+    except Exception as e:
+        print(f"Error generating KPI structure: {e}")
+        return generate_default_kpi_structure(data_profile)
+
+
+def generate_kpi_insights_with_ai(table_name, kpi_values, chart_data):
+    """Generate business insights based on KPI values using Gemini."""
+    
+    prompt = f"""You are a business intelligence expert. Analyze these KPI metrics and provide actionable insights.
+
+Table: {table_name}
+KPI Values: {json.dumps(kpi_values, indent=2)}
+Chart Data Summary: {json.dumps([{'title': c['title'], 'type': c['type']} for c in chart_data], indent=2)}
+
+Respond with JSON:
+{{
+  "observations": ["observation 1", ...],
+  "action_items": [
+    {{"title": "Action", "description": "Details", "priority": "high|medium|low"}}
+  ],
+  "opportunities": ["opportunity 1", ...],
+  "risks": ["risk 1", ...]
+}}"""
+    
+    try:
+        model = genai.GenerativeModel(ACTIVE_MODEL_NAME)
+        response = model.generate_content(
+            prompt,
+            generation_config=genai.GenerationConfig(temperature=0.7)
+        )
+        
+        insights_text = response.text.strip()
+        insights_text = insights_text.replace('```json', '').replace('```', '').strip()
+        return json.loads(insights_text)
+        
+    except Exception as e:
+        print(f"Error generating insights: {e}")
+        return {
+            "observations": [], "action_items": [], "opportunities": [], "risks": []
+        }
+
+# ============================================================================
+# API ENDPOINTS
+# ============================================================================
+
+@app.route('/api/aihealth', methods=['GET'])
+def health_check_of_agentai():
+    """Health check endpoint."""
+    return jsonify({
+        'status': 'healthy',
+        'message': f'3Avision SQL Agent API is running (Using {ACTIVE_MODEL_NAME})'
+    })
+
+
+@app.route('/api/tables', methods=['GET'])
+def get_tables_for_ai():
+    """Get list of available tables."""
+    try:
+        tables = list_available_tables()
+        return jsonify({
+            'success': True,
+            'tables': tables,
+            'count': len(tables)
+        })
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
 
 
 # @app.route('/api/schema/<table_name>', methods=['GET'])
@@ -14297,118 +14291,142 @@ def serve_static(filename):
 #     """Get schema for a specific table."""
 #     try:
 #         schema = get_table_schema(table_name)
+        
 #         if schema:
-#             return jsonify({'success': True, 'table_name': table_name, 'schema': schema})
+#             return jsonify({
+#                 'success': True,
+#                 'table_name': table_name,
+#                 'schema': schema
+#             })
 #         else:
-#             return jsonify({'success': False, 'error': f'Table {table_name} not found'}), 404
+#             return jsonify({
+#                 'success': False,
+#                 'error': f'Table {table_name} not found'
+#             }), 404
 #     except Exception as e:
-#         return jsonify({'success': False, 'error': str(e)}), 500
+#         return jsonify({
+#             'success': False,
+#             'error': str(e)
+#         }), 500
 
 
-# # @app.route('/api/query', methods=['POST'])
-# # def process_query():
-# #     try:
-# #         data = request.json
-# #         question = data.get('question')
-# #         table_name = data.get('table_name')
+@app.route('/api/schema/<table_name>', methods=['GET'])
+def get_schema(table_name):
+    """Get schema for a specific table."""
+    try:
+        schema = get_table_schema(table_name)
+        if schema:
+            return jsonify({'success': True, 'table_name': table_name, 'schema': schema})
+        else:
+            return jsonify({'success': False, 'error': f'Table {table_name} not found'}), 404
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+# @app.route('/api/query', methods=['POST'])
+# def process_query():
+#     try:
+#         data = request.json
+#         question = data.get('question')
+#         table_name = data.get('table_name')
         
-# #         if not question or not table_name:
-# #             return jsonify({
-# #                 'success': False,
-# #                 'error': 'Missing question or table_name'
-# #             }), 400
+#         if not question or not table_name:
+#             return jsonify({
+#                 'success': False,
+#                 'error': 'Missing question or table_name'
+#             }), 400
         
-# #         # Get table schema
-# #         schema = get_table_schema(table_name)
-# #         if not schema:
-# #             return jsonify({
-# #                 'success': False,
-# #                 'error': f'Table {table_name} not found'
-# #             }), 404
+#         # Get table schema
+#         schema = get_table_schema(table_name)
+#         if not schema:
+#             return jsonify({
+#                 'success': False,
+#                 'error': f'Table {table_name} not found'
+#             }), 404
         
-# #         # Generate SQL query (USING GEMINI)
-# #         sql_query = generate_sql_with_gemini(question, schema, table_name)
+#         # Generate SQL query (USING GEMINI)
+#         sql_query = generate_sql_with_gemini(question, schema, table_name)
         
-# #         if not sql_query:
-# #             return jsonify({
-# #                 'success': False,
-# #                 'error': 'Failed to generate SQL query'
-# #             }), 500
+#         if not sql_query:
+#             return jsonify({
+#                 'success': False,
+#                 'error': 'Failed to generate SQL query'
+#             }), 500
         
-# #         # Execute query
-# #         results_df, error = execute_sql(sql_query)
+#         # Execute query
+#         results_df, error = execute_sql(sql_query)
         
-# #         if error:
-# #             return jsonify({
-# #                 'success': False,
-# #                 'error': f'SQL execution error: {error}',
-# #                 'sql': sql_query
-# #             }), 400
+#         if error:
+#             return jsonify({
+#                 'success': False,
+#                 'error': f'SQL execution error: {error}',
+#                 'sql': sql_query
+#             }), 400
         
-# #         # Generate natural language answer (USING GEMINI)
-# #         natural_answer = generate_natural_answer(question, sql_query, results_df)
+#         # Generate natural language answer (USING GEMINI)
+#         natural_answer = generate_natural_answer(question, sql_query, results_df)
         
-# #         # Convert DataFrame to list of dicts for JSON response
-# #         results_list = results_df.to_dict('records') if results_df is not None else []
+#         # Convert DataFrame to list of dicts for JSON response
+#         results_list = results_df.to_dict('records') if results_df is not None else []
         
-# #         # Detect if this is a chart query
-# #         chart_keywords = ['chart', 'graph', 'plot', 'visualize', 'bar chart', 'show']
-# #         is_chart_query = any(keyword in question.lower() for keyword in chart_keywords)
+#         # Detect if this is a chart query
+#         chart_keywords = ['chart', 'graph', 'plot', 'visualize', 'bar chart', 'show']
+#         is_chart_query = any(keyword in question.lower() for keyword in chart_keywords)
         
-# #         # Extract filter conditions from SQL query
-# #         filters = extract_filters_from_sql(sql_query)
+#         # Extract filter conditions from SQL query
+#         filters = extract_filters_from_sql(sql_query)
         
-# #         # Prepare chart data if applicable
-# #         chart_data = None
-# #         chart_type = None
+#         # Prepare chart data if applicable
+#         chart_data = None
+#         chart_type = None
         
-# #         if is_chart_query and results_list and len(results_list) > 0:
-# #             # Determine chart type from question
-# #             if 'bar' in question.lower():
-# #                 chart_type = 'bar'
-# #             elif 'line' in question.lower():
-# #                 chart_type = 'line'
-# #             elif 'pie' in question.lower():
-# #                 chart_type = 'pie'
-# #             elif 'scatter' in question.lower():
-# #                 chart_type = 'scatter'
-# #             else:
-# #                 chart_type = 'bar'  # Default to bar chart
+#         if is_chart_query and results_list and len(results_list) > 0:
+#             # Determine chart type from question
+#             if 'bar' in question.lower():
+#                 chart_type = 'bar'
+#             elif 'line' in question.lower():
+#                 chart_type = 'line'
+#             elif 'pie' in question.lower():
+#                 chart_type = 'pie'
+#             elif 'scatter' in question.lower():
+#                 chart_type = 'scatter'
+#             else:
+#                 chart_type = 'bar'  # Default to bar chart
             
-# #             # Split data into categories and values
-# #             if len(results_list[0]) >= 2:
-# #                 first_key = list(results_list[0].keys())[0]
-# #                 second_key = list(results_list[0].keys())[1]
+#             # Split data into categories and values
+#             if len(results_list[0]) >= 2:
+#                 first_key = list(results_list[0].keys())[0]
+#                 second_key = list(results_list[0].keys())[1]
                 
-# #                 chart_data = {
-# #                     'categories': [row[first_key] for row in results_list],
-# #                     'values': [float(row[second_key]) for row in results_list],
-# #                     'xAxis': first_key,
-# #                     'yAxis': second_key,
-# #                     'aggregation': 'sum', # You can detect this from SQL query
-# #                     'chartType': chart_type,
-# #                     'filter_conditions': filters  # Include filter conditions
-# #                 }
+#                 chart_data = {
+#                     'categories': [row[first_key] for row in results_list],
+#                     'values': [float(row[second_key]) for row in results_list],
+#                     'xAxis': first_key,
+#                     'yAxis': second_key,
+#                     'aggregation': 'sum', # You can detect this from SQL query
+#                     'chartType': chart_type,
+#                     'filter_conditions': filters  # Include filter conditions
+#                 }
         
-# #         return jsonify({
-# #             'success': True,
-# #             'question': question,
-# #             'sql': sql_query,
-# #             'answer': natural_answer,
-# #             'results': results_list,
-# #             'row_count': len(results_list),
-# #             'chart_type': chart_type,
-# #             'chart_data': chart_data,
-# #             'filters': filters  # Added filters to response
-# #         })
+#         return jsonify({
+#             'success': True,
+#             'question': question,
+#             'sql': sql_query,
+#             'answer': natural_answer,
+#             'results': results_list,
+#             'row_count': len(results_list),
+#             'chart_type': chart_type,
+#             'chart_data': chart_data,
+#             'filters': filters  # Added filters to response
+#         })
         
-# #     except Exception as e:
-# #         print(f"Error processing query: {e}")
-# #         print(traceback.format_exc())
-# #         return jsonify({
-# #             'success': False,
-# #             'error': str(e)
-# #         }), 500
+#     except Exception as e:
+#         print(f"Error processing query: {e}")
+#         print(traceback.format_exc())
+#         return jsonify({
+#             'success': False,
+#             'error': str(e)
+#         }), 500
 
 
 # @app.route('/api/query', methods=['POST'])
@@ -14531,1350 +14549,1527 @@ def serve_static(filename):
 
 
 
-# def determine_optimal_chart(question, results_df, sql_query):
-#     """
-#     Analyzes the query and data to determine the best visualization.
-#     Returns a dict with chart_type, x_axis, y_axis, etc.
-#     """
-#     try:
-#         # Create a small sample of data so Gemini knows the types (numbers, dates, strings)
-#         # We convert timestamps to strings for JSON serialization in the prompt
-#         data_sample = results_df.head(3).to_dict(orient='records')
-#         for row in data_sample:
-#             for k, v in row.items():
-#                 if isinstance(v, (pd.Timestamp, pd.Timedelta)):
-#                     row[k] = str(v)
-
-#         columns = list(results_df.columns)
-
-#         prompt = f"""
-#         You are a Data Visualization Expert.
-        
-#         User Question: "{question}"
-#         SQL Query: "{sql_query}"
-#         Data Columns Available: {columns}
-#         Data Sample (First 3 rows): {json.dumps(data_sample, default=str)}
-
-#         Task: Decide the best chart type to visualize this data.
-        
-#         Rules:
-#         1. "bar": for comparing categories (e.g., Sales by Product).
-#         2. "line": for trends over time (e.g., Revenue by Month/Year).
-#         3. "pie": for parts of a whole (e.g., Status distribution).
-#         4. "scatter": for correlation between two numbers.
-#         5. "None": If data is a single number, text-only, or too complex.
-
-#         Output JSON only:
-#         {{
-#             "chart_type": "bar" | "line" | "pie" | "scatter" | "None",
-#             "x_axis_column": "exact_column_name_for_labels",
-#             "y_axis_column": "exact_column_name_for_values",
-#             "title": "Short descriptive title"
-#         }}
-#         """
-
-#         model = genai.GenerativeModel(ACTIVE_MODEL_NAME)
-#         response = model.generate_content(
-#             prompt,
-#             generation_config=genai.GenerationConfig(
-#                 response_mime_type="application/json",
-#                 temperature=0.0
-#             )
-#         )
-        
-#         return json.loads(response.text)
-
-#     except Exception as e:
-#         print(f"Error in chart determination: {e}")
-#         return None
-
-# # def extract_filters_from_sql(sql_query):
-# #     """
-# #     Extract filter conditions from WHERE clause in SQL query
-# #     Returns filters in format: {"column_name": ["value1", "value2"]}
-# #     """
-# #     import re
-    
-# #     filters = {}
-    
-# #     try:
-# #         # Convert to uppercase for parsing
-# #         sql_upper = sql_query.upper()
-        
-# #         # Check if WHERE clause exists
-# #         if 'WHERE' not in sql_upper:
-# #             return filters
-        
-# #         # Extract WHERE clause
-# #         where_match = re.search(r'WHERE\s+(.+?)(?:GROUP BY|ORDER BY|LIMIT|$)', sql_query, re.IGNORECASE | re.DOTALL)
-        
-# #         if not where_match:
-# #             return filters
-        
-# #         where_clause = where_match.group(1).strip()
-        
-# #         # Split by AND/OR to get individual conditions
-# #         conditions = re.split(r'\s+(?:AND|OR)\s+', where_clause, flags=re.IGNORECASE)
-        
-# #         for condition in conditions:
-# #             condition = condition.strip()
-            
-# #             # Handle IN clause - multiple values
-# #             in_match = re.match(r'(\w+)\s+(?:NOT\s+)?IN\s*\((.+?)\)', condition, re.IGNORECASE)
-# #             if in_match:
-# #                 column = in_match.group(1)
-# #                 values_str = in_match.group(2)
-# #                 # Extract values from IN clause (handles both quoted and unquoted)
-# #                 values = re.findall(r"'([^']*)'|\"([^\"]*)\"|(\w+)", values_str)
-# #                 # Flatten the tuple results and filter out empty strings
-# #                 values = [v for group in values for v in group if v]
-                
-# #                 if column not in filters:
-# #                     filters[column] = []
-# #                 filters[column].extend(values)
-# #                 continue
-            
-# #             # Handle equality - single value
-# #             eq_match = re.match(r'(\w+)\s*=\s*[\'"]?([^\'"]+)[\'"]?', condition, re.IGNORECASE)
-# #             if eq_match:
-# #                 column = eq_match.group(1)
-# #                 value = eq_match.group(2).strip().strip("'\"")
-                
-# #                 if column not in filters:
-# #                     filters[column] = []
-# #                 if value not in filters[column]:
-# #                     filters[column].append(value)
-# #                 continue
-            
-# #             # Handle LIKE clause
-# #             like_match = re.match(r'(\w+)\s+LIKE\s+[\'"](.+)[\'"]', condition, re.IGNORECASE)
-# #             if like_match:
-# #                 column = like_match.group(1)
-# #                 value = like_match.group(2).strip('%')  # Remove wildcards
-                
-# #                 if column not in filters:
-# #                     filters[column] = []
-# #                 if value not in filters[column]:
-# #                     filters[column].append(value)
-# #                 continue
-            
-# #             # Handle BETWEEN - extract range values
-# #             between_match = re.match(r'(\w+)\s+BETWEEN\s+[\'"]?(.+?)[\'"]?\s+AND\s+[\'"]?(.+?)[\'"]?', condition, re.IGNORECASE)
-# #             if between_match:
-# #                 column = between_match.group(1)
-# #                 start_val = between_match.group(2).strip().strip("'\"")
-# #                 end_val = between_match.group(3).strip().strip("'\"")
-                
-# #                 if column not in filters:
-# #                     filters[column] = []
-# #                 # For BETWEEN, you might want to store as range
-# #                 filters[column].append(f"{start_val} to {end_val}")
-# #                 continue
-    
-# #     except Exception as e:
-# #         print(f"Error extracting filters: {e}")
-# #         import traceback
-# #         print(traceback.format_exc())
-    
-# #     return filters
-
-
-
-# def extract_filters_from_sql(sql_query):
-#     """Extract filter conditions from WHERE clause in SQL query."""
-#     filters = {}
-#     try:
-#         sql_upper = sql_query.upper()
-#         if 'WHERE' not in sql_upper:
-#             return filters
-        
-#         where_match = re.search(r'WHERE\s+(.+?)(?:GROUP BY|ORDER BY|LIMIT|$)', sql_query, re.IGNORECASE | re.DOTALL)
-#         if not where_match:
-#             return filters
-        
-#         where_clause = where_match.group(1).strip()
-#         conditions = re.split(r'\s+(?:AND|OR)\s+', where_clause, flags=re.IGNORECASE)
-        
-#         for condition in conditions:
-#             condition = condition.strip()
-            
-#             # Simple Equality
-#             eq_match = re.match(r'(\w+)\s*=\s*[\'"]?([^\'"]+)[\'"]?', condition, re.IGNORECASE)
-#             if eq_match:
-#                 column = eq_match.group(1)
-#                 value = eq_match.group(2).strip().strip("'\"")
-#                 if column not in filters: filters[column] = []
-#                 if value not in filters[column]: filters[column].append(value)
-#                 continue
-            
-#             # LIKE / ILIKE
-#             like_match = re.match(r'(\w+)\s+I?LIKE\s+[\'"](.+)[\'"]', condition, re.IGNORECASE)
-#             if like_match:
-#                 column = like_match.group(1)
-#                 value = like_match.group(2).strip('%')
-#                 if column not in filters: filters[column] = []
-#                 if value not in filters[column]: filters[column].append(value)
-#                 continue
-
-#     except Exception as e:
-#         print(f"Error extracting filters: {e}")
-    
-#     return filters
-
-
-# @app.route('/api/execute-sql', methods=['POST'])
-# def execute_custom_sql():
-#     """Execute a custom SQL query directly (advanced users)."""
-#     try:
-#         data = request.json
-#         sql_query = data.get('sql')
-        
-#         if not sql_query:
-#             return jsonify({
-#                 'success': False,
-#                 'error': 'Missing SQL query'
-#             }), 400
-        
-#         # Execute query
-#         results_df, error = execute_sql(sql_query)
-        
-#         if error:
-#             return jsonify({
-#                 'success': False,
-#                 'error': f'SQL execution error: {error}'
-#             }), 400
-        
-#         # Convert DataFrame to list of dicts for JSON response
-#         results_list = results_df.to_dict('records') if results_df is not None else []
-#         print("print the data according to the result ",results_list)
-        
-#         return jsonify({
-#             'success': True,
-#             'sql': sql_query,
-#             'results': results_list,
-#             'row_count': len(results_list)
-#         })
-        
-#     except Exception as e:
-#         return jsonify({
-#             'success': False,
-#             'error': str(e)
-#         }), 500
-
-
-# @app.route('/api/dashboard/<table_name>', methods=['GET'])
-# def get_dashboard_datass(table_name):
-#     """Get comprehensive dashboard data for a specific table."""
-#     try:
-#         # Get table schema first
-#         schema = get_table_schema(table_name)
-#         if not schema:
-#             return jsonify({
-#                 'success': False,
-#                 'error': f'Table {table_name} not found'
-#             }), 404
-        
-#         # Get basic statistics
-#         stats_query = f"SELECT COUNT(*) as total_records FROM {table_name}"
-#         stats_df, error = execute_sql(stats_query)
-        
-#         if error:
-#             return jsonify({
-#                 'success': False,
-#                 'error': f'Error fetching statistics: {error}'
-#             }), 500
-        
-#         # Get sample data (first 100 rows)
-#         sample_query = f"SELECT * FROM {table_name} LIMIT 100"
-#         sample_df, error = execute_sql(sample_query)
-        
-#         if error:
-#             return jsonify({
-#                 'success': False,
-#                 'error': f'Error fetching sample data: {error}'
-#             }), 500
-        
-#         # Get column information
-#         columns = list(sample_df.columns) if sample_df is not None else []
-        
-#         # Identify numeric and categorical columns
-#         numeric_cols = []
-#         categorical_cols = []
-#         date_cols = []
-        
-#         if sample_df is not None and not sample_df.empty:
-#             # We make a copy to modify dtypes safely
-#             sample_df = sample_df.copy()
-            
-#             # --- FIX: Convert string/object columns to datetime if possible ---
-#             for col in sample_df.select_dtypes(include=['object']).columns:
-#                 try:
-#                     converted_col = pd.to_datetime(sample_df[col], errors='coerce', infer_datetime_format=True)
-#                     if not converted_col.isnull().all():
-#                         sample_df[col] = converted_col
-#                 except Exception:
-#                     pass
-#             # --- END OF FIX ---
-
-#             for col in sample_df.columns:
-#                 if pd.api.types.is_numeric_dtype(sample_df[col]):
-#                     numeric_cols.append(col)
-#                 elif pd.api.types.is_datetime64_any_dtype(sample_df[col]):
-#                     date_cols.append(col)
-#                 else:
-#                     categorical_cols.append(col)
-        
-#         # Prepare sample data for JSON (convert datetimes to ISO strings)
-#         sample_data_list = []
-#         if sample_df is not None:
-#             json_safe_df = sample_df.head(10).copy()
-#             for col in date_cols:
-#                 if col in json_safe_df.columns:
-#                     json_safe_df[col] = json_safe_df[col].apply(lambda x: x.isoformat() if pd.notnull(x) else None)
-            
-#             sample_data_list = json_safe_df.to_dict('records')
-
-#         return jsonify({
-#             'success': True,
-#             'table_name': table_name,
-#             'total_records': int(stats_df['total_records'].iloc[0]) if stats_df is not None and not stats_df.empty else 0,
-#             'columns': columns,
-#             'numeric_columns': numeric_cols,
-#             'categorical_columns': categorical_cols,
-#             'date_columns': date_cols,
-#             'sample_data': sample_data_list,
-#             'schema': schema
-#         })
-        
-#     except Exception as e:
-#         print(f"Error in dashboard: {e}")
-#         print(traceback.format_exc())
-#         return jsonify({
-#             'success': False,
-#             'error': str(e)
-#         }), 500
-
-
-# def generate_data_summary(df):
-#     """Generate a statistical summary of the DataFrame."""
-#     summary = {
-#         'total_rows': len(df),
-#         'columns': list(df.columns),
-#         'numeric_stats': {},
-#         'categorical_stats': {}
-#     }
-    
-#     # Numeric column statistics
-#     numeric_cols = df.select_dtypes(include=['number']).columns
-#     for col in numeric_cols:
-#         std_val = df[col].std()
-#         summary['numeric_stats'][col] = {
-#             'mean': float(df[col].mean()),
-#             'median': float(df[col].median()),
-#             'min': float(df[col].min()),
-#             'max': float(df[col].max()),
-#             'std': float(std_val) if pd.notna(std_val) else 0.0 
-#         }
-    
-#     # Categorical column statistics
-#     categorical_cols = df.select_dtypes(include=['object']).columns
-#     for col in categorical_cols:
-#         try:
-#             value_counts = df[col].value_counts().head(10)
-#             summary['categorical_stats'][col] = {
-#                 'unique_values': int(df[col].nunique()),
-#                 'top_values': {str(k): int(v) for k, v in value_counts.items()}
-#             }
-#         except Exception as e:
-#             print(f"Warning: Could not summarize column {col}. Error: {e}")
-#             summary['categorical_stats'][col] = {
-#                 'unique_values': 0,
-#                 'top_values': {'Error': 'Could not be summarized'}
-#             }
-    
-#     return summary
-
-
-# @app.route('/api/dashboard/insights/<table_name>', methods=['POST'])
-# def get_ai_insights(table_name):
-#     """Generate AI-powered insights and recommendations for the data."""
-#     try:
-#         data = request.json
-#         focus_area = data.get('focus_area', 'general')
-        
-#         # Get table schema
-#         schema = get_table_schema(table_name)
-#         if not schema:
-#             return jsonify({
-#                 'success': False,
-#                 'error': f'Table {table_name} not found'
-#             }), 404
-        
-#         # Get summary statistics
-#         summary_query = f"SELECT * FROM {table_name} LIMIT 1000"
-#         summary_df, error = execute_sql(summary_query)
-        
-#         if error or summary_df is None or len(summary_df) == 0:
-#             return jsonify({
-#                 'success': False,
-#                 'error': 'Unable to fetch data for analysis'
-#             }), 500
-        
-#         # Generate statistical summary
-#         stats_summary = generate_data_summary(summary_df)
-        
-#         # Generate AI insights using GEMINI
-#         insights = generate_business_insights(
-#             table_name=table_name,
-#             schema=schema,
-#             data_summary=stats_summary,
-#             focus_area=focus_area,
-#             sample_data=summary_df.head(20).to_string()
-#         )
-        
-#         return jsonify({
-#             'success': True,
-#             'table_name': table_name,
-#             'focus_area': focus_area,
-#             'insights': insights,
-#             'data_summary': stats_summary
-#         })
-        
-#     except Exception as e:
-#         print(f"Error generating insights: {e}")
-#         print(traceback.format_exc())
-#         return jsonify({
-#             'success': False,
-#             'error': str(e)
-#         }), 500
-
-
-# @app.route('/api/dashboard/chat', methods=['POST'])
-# def dashboard_chat():
-#     """Dynamic AI chat for dashboard - provides contextual tips and insights."""
-#     try:
-#         data = request.json
-#         user_message = data.get('message')
-#         table_name = data.get('table_name')
-#         context = data.get('context', {})
-        
-#         if not user_message or not table_name:
-#             return jsonify({
-#                 'success': False,
-#                 'error': 'Missing message or table_name'
-#             }), 400
-        
-#         # Get table schema and recent data
-#         schema = get_table_schema(table_name)
-#         sample_query = f"SELECT * FROM {table_name} LIMIT 100"
-#         sample_df, _ = execute_sql(sample_query)
-        
-#         # Generate context-aware response using GEMINI
-#         ai_response = generate_contextual_chat_response(
-#             user_message=user_message,
-#             table_name=table_name,
-#             schema=schema,
-#             context=context,
-#             sample_data=sample_df.head(10).to_string() if sample_df is not None else ""
-#         )
-        
-#         return jsonify({
-#             'success': True,
-#             'message': user_message,
-#             'response': ai_response,
-#             'timestamp': pd.Timestamp.now().isoformat()
-#         })
-        
-#     except Exception as e:
-#         print(f"Error in dashboard chat: {e}")
-#         print(traceback.format_exc())
-#         return jsonify({
-#             'success': False,
-#             'error': str(e)
-#         }), 500
-
-
-# @app.route('/api/dashboard/kpi/<table_name>', methods=['GET'])
-# def generate_kpi_dashboard(table_name):
-#     """Generate intelligent KPI dashboard based on AI analysis of table structure."""
-#     try:
-#         # Get table schema
-#         schema = get_table_schema(table_name)
-#         if not schema:
-#             return jsonify({
-#                 'success': False,
-#                 'error': f'Table {table_name} not found'
-#             }), 404
-        
-#         # Get all data from table
-#         full_data_query = f"SELECT * FROM {table_name}"
-#         full_df, error = execute_sql(full_data_query)
-        
-#         if error or full_df is None or len(full_df) == 0:
-#             return jsonify({
-#                 'success': False,
-#                 'error': 'Unable to fetch data for KPI generation'
-#             }), 500
-        
-#         # Convert datetime columns to string for processing
-#         for col in full_df.columns:
-#             if pd.api.types.is_datetime64_any_dtype(full_df[col]):
-#                 full_df[col] = full_df[col].astype(str)
-        
-#         # Generate comprehensive data profile
-#         data_profile = generate_comprehensive_data_profile(full_df, table_name)
-        
-#         # Use AI to determine appropriate KPIs using GEMINI
-#         kpi_structure = generate_kpi_structure_with_ai(
-#             table_name=table_name,
-#             schema=schema,
-#             data_profile=data_profile,
-#             sample_data=full_df.head(50).to_string()
-#         )
-        
-#         # Calculate actual KPI values based on AI recommendations
-#         kpi_values = calculate_kpis(full_df, kpi_structure)
-        
-#         # Generate visualizations data
-#         chart_data = generate_chart_data(full_df, kpi_structure)
-        
-#         return jsonify({
-#             'success': True,
-#             'table_name': table_name,
-#             'total_records': len(full_df),
-#             'kpi_structure': kpi_structure,
-#             'kpi_values': kpi_values,
-#             'chart_data': chart_data,
-#             'data_profile': data_profile
-#         })
-        
-#     except Exception as e:
-#         print(f"Error generating KPI dashboard: {e}")
-#         print(traceback.format_exc())
-#         return jsonify({
-#             'success': False,
-#             'error': str(e)
-#         }), 500
-
-
-# def generate_comprehensive_data_profile(df, table_name):
-#     """Generate a comprehensive profile of the data."""
-#     profile = {
-#         'table_name': table_name,
-#         'total_rows': len(df),
-#         'total_columns': len(df.columns),
-#         'columns': {},
-#         'relationships': []
-#     }
-    
-#     for col in df.columns:
-#         col_info = {
-#             'name': col,
-#             'type': str(df[col].dtype),
-#             'unique_count': int(df[col].nunique()),
-#             'null_count': int(df[col].isnull().sum()),
-#             'null_percentage': float(df[col].isnull().sum() / len(df) * 100)
-#         }
-        
-#         if pd.api.types.is_numeric_dtype(df[col]):
-#             col_info['data_type'] = 'numeric'
-#             col_info['min'] = float(df[col].min()) if pd.notna(df[col].min()) else None
-#             col_info['max'] = float(df[col].max()) if pd.notna(df[col].max()) else None
-#             col_info['mean'] = float(df[col].mean()) if pd.notna(df[col].mean()) else None
-#             col_info['median'] = float(df[col].median()) if pd.notna(df[col].median()) else None
-#             col_info['std'] = float(df[col].std()) if pd.notna(df[col].std()) else None
-#         elif pd.api.types.is_datetime64_any_dtype(df[col]) or 'date' in col.lower():
-#             col_info['data_type'] = 'date'
-#         else:
-#             col_info['data_type'] = 'categorical'
-#             top_values = df[col].value_counts().head(5)
-#             col_info['top_values'] = {str(k): int(v) for k, v in top_values.items()}
-        
-#         profile['columns'][col] = col_info
-    
-#     return profile
-
-
-# def generate_default_kpi_structure(data_profile):
-#     """Generate a default KPI structure if AI fails."""
-#     primary_kpis = []
-#     charts = []
-    
-#     # Find numeric columns for KPIs
-#     numeric_cols = [col for col, info in data_profile['columns'].items() 
-#                     if info['data_type'] == 'numeric']
-    
-#     categorical_cols = [col for col, info in data_profile['columns'].items() 
-#                         if info['data_type'] == 'categorical']
-    
-#     # Create default KPIs from numeric columns
-#     for col in numeric_cols[:4]:
-#         primary_kpis.append({
-#             'name': col.replace('_', ' ').title(),
-#             'description': f'Total {col}',
-#             'calculation': col,
-#             'format': 'currency' if any(word in col.lower() for word in ['price', 'amount', 'cost', 'revenue']) else 'number',
-#             'icon': 'TrendingUp',
-#             'category': 'operational'
-#         })
-    
-#     # Create default charts
-#     if len(categorical_cols) > 0 and len(numeric_cols) > 0:
-#         charts.append({
-#             'type': 'bar',
-#             'title': f'{categorical_cols[0]} Analysis',
-#             'x_axis': categorical_cols[0],
-#             'y_axis': numeric_cols[0],
-#             'aggregation': 'sum',
-#             'description': f'Distribution by {categorical_cols[0]}',
-#             'limit': 10
-#         })
-    
-#     return {
-#         'primary_kpis': primary_kpis,
-#         'charts': charts,
-#         'trends': [],
-#         'segments': []
-#     }
-
-
-# def calculate_kpis(df, kpi_structure):
-#     """Calculate actual KPI values based on the AI-generated structure."""
-#     kpi_values = []
-    
-#     for kpi in kpi_structure.get('primary_kpis', []):
-#         try:
-#             calculation = kpi['calculation']
-            
-#             # Check if it's a simple column reference
-#             if calculation in df.columns:
-#                 if kpi['format'] == 'number':
-#                     value = float(df[calculation].sum())
-#                 elif kpi['format'] == 'currency':
-#                     value = float(df[calculation].sum())
-#                 elif kpi['format'] == 'percentage':
-#                     value = float(df[calculation].mean() * 100)
-#                 else:
-#                     value = float(df[calculation].sum())
-                
-#                 # Calculate change (mock for now, you can implement actual trend)
-#                 change = 0.0
-                
-#                 kpi_values.append({
-#                     'name': kpi['name'],
-#                     'value': value,
-#                     'format': kpi['format'],
-#                     'icon': kpi.get('icon', 'TrendingUp'),
-#                     'category': kpi.get('category', 'operational'),
-#                     'description': kpi['description'],
-#                     'change': change,
-#                     'change_direction': 'up' if change > 0 else 'down' if change < 0 else 'neutral'
-#                 })
-#             else:
-#                 # Handle aggregations like "count(*)"
-#                 if 'count' in calculation.lower():
-#                     value = len(df)
-#                 else:
-#                     value = 0
-                
-#                 kpi_values.append({
-#                     'name': kpi['name'],
-#                     'value': value,
-#                     'format': kpi['format'],
-#                     'icon': kpi.get('icon', 'TrendingUp'),
-#                     'category': kpi.get('category', 'operational'),
-#                     'description': kpi['description'],
-#                     'change': 0.0,
-#                     'change_direction': 'neutral'
-#                 })
-                
-#         except Exception as e:
-#             print(f"Error calculating KPI {kpi['name']}: {e}")
-#             continue
-    
-#     return kpi_values
-
-
-# def generate_chart_data(df, kpi_structure):
-#     """Generate data for all charts based on KPI structure."""
-#     chart_data_list = []
-    
-#     for chart_config in kpi_structure.get('charts', []):
-#         try:
-#             x_axis = chart_config['x_axis']
-#             y_axis = chart_config['y_axis']
-#             aggregation = chart_config.get('aggregation', 'sum')
-#             limit = chart_config.get('limit', 10)
-            
-#             if x_axis not in df.columns or y_axis not in df.columns:
-#                 continue
-            
-#             # Group and aggregate data
-#             if aggregation == 'sum':
-#                 grouped = df.groupby(x_axis)[y_axis].sum().reset_index()
-#             elif aggregation == 'count':
-#                 grouped = df.groupby(x_axis)[y_axis].count().reset_index()
-#             elif aggregation == 'avg':
-#                 grouped = df.groupby(x_axis)[y_axis].mean().reset_index()
-#             elif aggregation == 'min':
-#                 grouped = df.groupby(x_axis)[y_axis].min().reset_index()
-#             elif aggregation == 'max':
-#                 grouped = df.groupby(x_axis)[y_axis].max().reset_index()
-#             else:
-#                 grouped = df.groupby(x_axis)[y_axis].sum().reset_index()
-            
-#             # Sort and limit
-#             grouped = grouped.nlargest(limit, y_axis)
-            
-#             # Convert to list of dicts
-#             chart_data = grouped.to_dict('records')
-            
-#             chart_data_list.append({
-#                 'type': chart_config['type'],
-#                 'title': chart_config['title'],
-#                 'description': chart_config.get('description', ''),
-#                 'x_axis': x_axis,
-#                 'y_axis': y_axis,
-#                 'data': chart_data
-#             })
-            
-#         except Exception as e:
-#             print(f"Error generating chart data: {e}")
-#             continue
-    
-#     return chart_data_list
-
-
-# @app.route('/api/dashboard/kpi/insights/<table_name>', methods=['POST'])
-# def get_kpi_insights(table_name):
-#     """Generate AI insights specifically for KPI dashboard."""
-#     try:
-#         data = request.json
-#         kpi_values = data.get('kpi_values', [])
-#         chart_data = data.get('chart_data', [])
-        
-#         # Generate contextual insights using GEMINI
-#         insights = generate_kpi_insights_with_ai(table_name, kpi_values, chart_data)
-        
-#         return jsonify({
-#             'success': True,
-#             'insights': insights
-#         })
-        
-#     except Exception as e:
-#         print(f"Error generating KPI insights: {e}")
-#         return jsonify({
-#             'success': False,
-#             'error': str(e)
-#         }), 500
-
-# # if __name__ == '__main__':
-# #     app.run(debug=True, port=5000)
-
-# if __name__ == "__main__":
-#     # Use socketio.run to enable WebSocket support
-#     # socketio.run(app, debug=True, host='0.0.0.0', port=5000)
-
-#      socketio.run(app, host='0.0.0.0', port=5000, debug=True)
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 # ============================================================================
-# OLLAMA INTEGRATION
+# NEW OPTIMIZED HELPER FUNCTION (Replaces the old 2 functions)
 # ============================================================================
 
-
-
-# Load environment variables (For DB credentials only, no Gemini Key needed!)
-load_dotenv()
-
-# ============================================================================
-# CONFIGURATION
-# ============================================================================
-
-
-# OLLAMA CONFIGURATION (Local AI)
-OLLAMA_API_URL = "http://localhost:11434/api/generate"
-OLLAMA_MODEL = "llama3"  # You can change this to 'mistral' or 'sqlcoder'
-
-# ============================================================================
-# OLLAMA HELPER FUNCTION (The Core Replacement)
-# ============================================================================
-
-def query_ollama(prompt, model=OLLAMA_MODEL, temperature=0.3, format_json=False):
+def generate_answer_and_chart(question, sql_query, results_df):
     """
-    Sends a request to the local Ollama instance.
+    COMBINED REQUEST: Generates both the natural language answer AND 
+    determines the best chart visualization in a SINGLE API call.
     """
-    payload = {
-        "model": model,
-        "prompt": prompt,
-        "stream": False,
-        "options": {
-            "temperature": temperature
-        }
-    }
-    
-    # Enforce JSON mode if requested (Supported by Llama3 and others)
-    if format_json:
-        payload["format"] = "json"
-
-    try:
-        response = requests.post(OLLAMA_API_URL, json=payload)
-        response.raise_for_status()
-        result = response.json()
-        return result.get('response', '').strip()
-    except requests.exceptions.ConnectionError:
-        print("❌ Error: Ollama is not running. Please run 'ollama serve' or open the Ollama app.")
-        return None
-    except Exception as e:
-        print(f"❌ Error querying Ollama: {e}")
-        return None
-
-# ============================================================================
-# DATABASE HELPER FUNCTIONS
-# ============================================================================
-
-def list_available_tables():
-    """List all available tables in the database."""
-    try:
-        conn = psycopg2.connect(
-            host=HOST, port=PORT, database="comienzonew", user=USER_NAME, password=PASSWORD
-        )
-        cursor = conn.cursor()
-        cursor.execute("""
-            SELECT table_name 
-            FROM information_schema.tables 
-            WHERE table_schema = 'public' 
-            ORDER BY table_name
-        """)
-        tables = cursor.fetchall()
-        cursor.close()
-        conn.close()
-        return [table[0] for table in tables]
-    except Exception as e:
-        print(f"Error listing tables: {e}")
-        return []
-
-# def get_table_schema(table_name):
-#     """Fetch the schema for a specific table."""
-#     try:
-#         conn = psycopg2.connect(
-#             host=HOST, port=PORT, database=DB_NAME, user=USER_NAME, password=PASSWORD
-#         )
-#         cursor = conn.cursor()
-#         cursor.execute("""
-#             SELECT column_name, data_type, is_nullable
-#             FROM information_schema.columns
-#             WHERE table_name = %s
-#             ORDER BY ordinal_position
-#         """, (table_name,))
-#         columns = cursor.fetchall()
-        
-#         if not columns:
-#             cursor.close(); conn.close()
-#             return None
-        
-#         schema_text = f"Table: {table_name}\nColumns:\n"
-#         for col_name, data_type, is_nullable in columns:
-#             nullable = "NULL" if is_nullable == "YES" else "NOT NULL"
-#             schema_text += f"  - {col_name} ({data_type}) {nullable}\n"
-        
-#         cursor.close(); conn.close()
-#         return schema_text
-#     except Exception as e:
-#         print(f"Error getting schema: {e}")
-#         return None
-
-def get_table_schema(table_name):
-    """Fetch the schema for a specific table with robust error handling."""
-    try:
-        # Clean the input
-        table_name = table_name.strip()
-        
-        conn = psycopg2.connect(
-            host=HOST, port=PORT, database="comienzonew", user=USER_NAME, password=PASSWORD
-        )
-        cursor = conn.cursor()
-        
-        # FIX 1: Explicitly check 'public' schema to match list_available_tables
-        # FIX 2: Use lower() to handle potential case sensitivity issues in input
-        cursor.execute("""
-            SELECT column_name, data_type, is_nullable
-            FROM information_schema.columns
-            WHERE lower(table_name) = lower(%s) 
-            AND table_schema = 'public'
-            ORDER BY ordinal_position
-        """, (table_name,))
-        
-        columns = cursor.fetchall()
-        
-        cursor.close()
-        conn.close()
-        
-        if not columns:
-            print(f"⚠️ Warning: No columns found for table '{table_name}' in public schema.")
-            # Debugging: Check if table exists at all
-            return None
-        
-        # Format schema for the AI
-        schema_text = f"Table: {table_name}\nColumns:\n"
-        for col_name, data_type, is_nullable in columns:
-            nullable = "NULL" if is_nullable == "YES" else "NOT NULL"
-            schema_text += f"  - {col_name} ({data_type}) {nullable}\n"
-        
-        return schema_text
-
-    except Exception as e:
-        print(f"❌ Error getting schema for {table_name}: {e}")
-        return None
-
-
-
-def execute_sql(sql_query):
-    """Execute SQL query and return results."""
-    try:
-        # Security: Basic check to prevent destructive queries
-        if re.search(r'\b(DROP|DELETE|TRUNCATE|INSERT|UPDATE)\b', sql_query, re.IGNORECASE):
-            return None, "Destructive queries are not allowed."
-
-        conn = psycopg2.connect(
-            host=HOST, port=PORT, database="comienzonew", user=USER_NAME, password=PASSWORD
-        )
-        df = pd.read_sql_query(sql_query, conn)
-        conn.close()
-        return df, None
-    except Exception as e:
-        return None, str(e)
-
-# ============================================================================
-# AI BUSINESS LOGIC (REFACTORED FOR OLLAMA)
-# ============================================================================
-
-def generate_sql_with_ollama(question, schema, table_name):
-    """Generate SQL using Local LLM."""
-    prompt = f"""You are an expert PostgreSQL SQL generator.
-
-Database Schema:
-{schema}
-
-User Question: {question}
-
-Instructions:
-1. Generate a valid PostgreSQL query to answer the question.
-2. The table name is '{table_name}'.
-3. Return ONLY the SQL code. Do not wrap it in markdown or backticks.
-4. Do not provide explanations.
-
-SQL Query:"""
-    
-    sql = query_ollama(prompt, temperature=0.1) # Low temp for precision
-    
-    if sql:
-        # Clean up commonly added markdown by LLMs
-        sql = sql.replace('```sql', '').replace('```', '').strip()
-    return sql
-
-def generate_natural_answer(question, sql_query, results_df):
-    """Generate natural language answer using Local LLM."""
     if results_df is None or len(results_df) == 0:
-        return "No results found for your query."
-    
-    row_count = len(results_df)
-    preview = results_df.head(5).to_string(index=False)
-    
-    prompt = f"""You are a data analyst assistant.
-    
-User Question: {question}
-SQL Query Used: {sql_query}
-Data Result ({row_count} rows):
-{preview}
+        return {
+            "answer": "No results found for your query.",
+            "chart": None
+        }
 
-Task: Write a short, friendly 1-2 sentence summary answer for the user based on this data.
-Answer:"""
+    # Prepare data sample for the AI
+    # Convert timestamps to strings for JSON safety
+    data_sample = results_df.head(5).to_dict(orient='records')
+    for row in data_sample:
+        for k, v in row.items():
+            if isinstance(v, (pd.Timestamp, pd.Timedelta)):
+                row[k] = str(v)
+
+    row_count = len(results_df)
+    columns = list(results_df.columns)
+
+    prompt = f"""
+    You are a Data Analyst and Visualization Expert.
     
-    return query_ollama(prompt, temperature=0.6)
+    User Question: "{question}"
+    SQL Query Executed: "{sql_query}"
+    Rows Returned: {row_count}
+    Data Columns: {columns}
+    Data Sample (First 5 rows): {json.dumps(data_sample, default=str)}
+
+    Task 1: Provide a natural language answer summarizing the findings (friendly, non-technical).
+    Task 2: Determine the best chart type to visualize this data (if applicable).
+
+    Chart Rules:
+    - "bar": Comparing categories (e.g., Sales by Product).
+    - "line": Trends over time (e.g., Revenue by Month).
+    - "pie": Parts of a whole (e.g., Status distribution).
+    - "scatter": Correlation between two numbers.
+    - "None": If data is a single number, text-only, or too complex.
+
+    RESPOND ONLY IN VALID JSON FORMAT:
+    {{
+      "answer": "Your natural language summary here...",
+      "chart_config": {{
+          "chart_type": "bar" | "line" | "pie" | "scatter" | "None",
+          "x_axis": "column_name_for_x",
+          "y_axis": "column_name_for_y",
+          "title": "Chart Title"
+      }}
+    }}
+    """
+
+    try:
+        model = genai.GenerativeModel(ACTIVE_MODEL_NAME)
+        response = model.generate_content(
+            prompt,
+            generation_config=genai.GenerationConfig(
+                response_mime_type="application/json",
+                temperature=0.5
+            )
+        )
+        
+        # Parse the JSON response
+        result = json.loads(response.text)
+        return result
+
+    except Exception as e:
+        print(f"Error in combined generation: {e}")
+        # Fallback if AI fails
+        return {
+            "answer": f"I found {row_count} result{'s' if row_count != 1 else ''} for your query.",
+            "chart": None
+        }
+
+# ============================================================================
+# UPDATED API ENDPOINT (Uses the new combined function)
+# ============================================================================
+
+@app.route('/api/query', methods=['POST'])
+def process_query():
+    try:
+        data = request.json
+        question = data.get('question')
+        table_name = data.get('table_name')
+        
+        if not question or not table_name:
+            return jsonify({'success': False, 'error': 'Missing question or table_name'}), 400
+        
+        # 1. Get Schema
+        schema = get_table_schema(table_name)
+        if not schema:
+            return jsonify({'success': False, 'error': f'Table {table_name} not found'}), 404
+        
+        # 2. Generate SQL (REQUEST #1 to Gemini)
+        sql_query = generate_sql_with_gemini(question, schema, table_name)
+        if not sql_query:
+            return jsonify({'success': False, 'error': 'Failed to generate SQL query'}), 500
+        
+        # 3. Execute SQL
+        results_df, error = execute_sql(sql_query)
+        if error:
+            return jsonify({'success': False, 'error': f'SQL error: {error}', 'sql': sql_query}), 400
+        
+        results_list = results_df.to_dict('records') if results_df is not None else []
+        filters = extract_filters_from_sql(sql_query)
+
+        # 4. Generate Answer AND Chart Config (REQUEST #2 to Gemini)
+        # This replaces the two separate calls you had before
+        ai_result = generate_answer_and_chart(question, sql_query, results_df)
+        
+        natural_answer = ai_result.get("answer", "Analysis complete.")
+        chart_config = ai_result.get("chart_config", {})
+        
+        # 5. Process Chart Data if AI suggested one
+        chart_type = chart_config.get("chart_type")
+        chart_data = None
+        
+        if chart_type and chart_type not in ["None", None, "null"]:
+            x_col = chart_config.get("x_axis")
+            y_col = chart_config.get("y_axis")
+            
+            # Validate that AI picked columns that actually exist
+            if results_df is not None and x_col in results_df.columns and y_col in results_df.columns:
+                chart_data = {
+                    'categories': results_df[x_col].tolist(),
+                    'values': [
+                        float(x) if isinstance(x, (int, float)) or (isinstance(x, str) and x.replace('.','',1).isdigit()) 
+                        else 0 
+                        for x in results_df[y_col].tolist()
+                    ],
+                    'xAxis': x_col,
+                    'yAxis': y_col,
+                    'chartType': chart_type,
+                    'title': chart_config.get('title', 'Data Visualization'),
+                    'filter_conditions': filters
+                }
+            else:
+                 # Fallback: Default to first two columns if AI guessed wrong names
+                if results_df is not None and len(results_df.columns) >= 2:
+                    chart_type = 'bar'
+                    chart_data = {
+                        'categories': results_df.iloc[:, 0].tolist(),
+                        'values': results_df.iloc[:, 1].tolist(),
+                        'xAxis': results_df.columns[0],
+                        'yAxis': results_df.columns[1],
+                        'chartType': 'bar',
+                        'title': 'Data Overview',
+                        'filter_conditions': filters
+                    }
+
+        return jsonify({
+            'success': True,
+            'question': question,
+            'sql': sql_query,
+            'answer': natural_answer,
+            'results': results_list,
+            'row_count': len(results_list),
+            'chart_type': chart_type,
+            'chart_data': chart_data,
+            'filters': filters
+        })
+        
+    except Exception as e:
+        print(f"Error processing query: {e}")
+        print(traceback.format_exc())
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+
+
 
 def determine_optimal_chart(question, results_df, sql_query):
-    """Decide best chart type using Local LLM (JSON Mode)."""
+    """
+    Analyzes the query and data to determine the best visualization.
+    Returns a dict with chart_type, x_axis, y_axis, etc.
+    """
     try:
+        # Create a small sample of data so Gemini knows the types (numbers, dates, strings)
+        # We convert timestamps to strings for JSON serialization in the prompt
         data_sample = results_df.head(3).to_dict(orient='records')
-        # Convert timestamps to strings for JSON serialization
         for row in data_sample:
             for k, v in row.items():
                 if isinstance(v, (pd.Timestamp, pd.Timedelta)):
                     row[k] = str(v)
 
+        columns = list(results_df.columns)
+
         prompt = f"""
-        You are a Data Viz Expert. Analyze this data to pick the best chart.
+        You are a Data Visualization Expert.
         
-        Question: "{question}"
-        Data Sample: {json.dumps(data_sample, default=str)}
+        User Question: "{question}"
+        SQL Query: "{sql_query}"
+        Data Columns Available: {columns}
+        Data Sample (First 3 rows): {json.dumps(data_sample, default=str)}
+
+        Task: Decide the best chart type to visualize this data.
         
-        Return a JSON object with this exact format:
+        Rules:
+        1. "bar": for comparing categories (e.g., Sales by Product).
+        2. "line": for trends over time (e.g., Revenue by Month/Year).
+        3. "pie": for parts of a whole (e.g., Status distribution).
+        4. "scatter": for correlation between two numbers.
+        5. "None": If data is a single number, text-only, or too complex.
+
+        Output JSON only:
         {{
-            "chart_type": "bar" or "line" or "pie" or "scatter" or "None",
-            "x_axis_column": "column_name",
-            "y_axis_column": "column_name",
-            "title": "Chart Title"
+            "chart_type": "bar" | "line" | "pie" | "scatter" | "None",
+            "x_axis_column": "exact_column_name_for_labels",
+            "y_axis_column": "exact_column_name_for_values",
+            "title": "Short descriptive title"
         }}
         """
+
+        model = genai.GenerativeModel(ACTIVE_MODEL_NAME)
+        response = model.generate_content(
+            prompt,
+            generation_config=genai.GenerationConfig(
+                response_mime_type="application/json",
+                temperature=0.0
+            )
+        )
         
-        response_text = query_ollama(prompt, temperature=0.1, format_json=True)
-        return json.loads(response_text)
+        return json.loads(response.text)
+
     except Exception as e:
-        print(f"Chart determination error: {e}")
+        print(f"Error in chart determination: {e}")
         return None
 
-def generate_business_insights(table_name, schema, data_summary, focus_area, sample_data):
-    """Generate insights using Local LLM (JSON Mode)."""
+# def extract_filters_from_sql(sql_query):
+#     """
+#     Extract filter conditions from WHERE clause in SQL query
+#     Returns filters in format: {"column_name": ["value1", "value2"]}
+#     """
+#     import re
     
-    # Safe dump of stats
-    stats_str = json.dumps(data_summary.get('numeric_stats', {}), default=str)
+#     filters = {}
     
-    prompt = f"""
-    You are a Senior Business Analyst. Analyze this dataset.
+#     try:
+#         # Convert to uppercase for parsing
+#         sql_upper = sql_query.upper()
+        
+#         # Check if WHERE clause exists
+#         if 'WHERE' not in sql_upper:
+#             return filters
+        
+#         # Extract WHERE clause
+#         where_match = re.search(r'WHERE\s+(.+?)(?:GROUP BY|ORDER BY|LIMIT|$)', sql_query, re.IGNORECASE | re.DOTALL)
+        
+#         if not where_match:
+#             return filters
+        
+#         where_clause = where_match.group(1).strip()
+        
+#         # Split by AND/OR to get individual conditions
+#         conditions = re.split(r'\s+(?:AND|OR)\s+', where_clause, flags=re.IGNORECASE)
+        
+#         for condition in conditions:
+#             condition = condition.strip()
+            
+#             # Handle IN clause - multiple values
+#             in_match = re.match(r'(\w+)\s+(?:NOT\s+)?IN\s*\((.+?)\)', condition, re.IGNORECASE)
+#             if in_match:
+#                 column = in_match.group(1)
+#                 values_str = in_match.group(2)
+#                 # Extract values from IN clause (handles both quoted and unquoted)
+#                 values = re.findall(r"'([^']*)'|\"([^\"]*)\"|(\w+)", values_str)
+#                 # Flatten the tuple results and filter out empty strings
+#                 values = [v for group in values for v in group if v]
+                
+#                 if column not in filters:
+#                     filters[column] = []
+#                 filters[column].extend(values)
+#                 continue
+            
+#             # Handle equality - single value
+#             eq_match = re.match(r'(\w+)\s*=\s*[\'"]?([^\'"]+)[\'"]?', condition, re.IGNORECASE)
+#             if eq_match:
+#                 column = eq_match.group(1)
+#                 value = eq_match.group(2).strip().strip("'\"")
+                
+#                 if column not in filters:
+#                     filters[column] = []
+#                 if value not in filters[column]:
+#                     filters[column].append(value)
+#                 continue
+            
+#             # Handle LIKE clause
+#             like_match = re.match(r'(\w+)\s+LIKE\s+[\'"](.+)[\'"]', condition, re.IGNORECASE)
+#             if like_match:
+#                 column = like_match.group(1)
+#                 value = like_match.group(2).strip('%')  # Remove wildcards
+                
+#                 if column not in filters:
+#                     filters[column] = []
+#                 if value not in filters[column]:
+#                     filters[column].append(value)
+#                 continue
+            
+#             # Handle BETWEEN - extract range values
+#             between_match = re.match(r'(\w+)\s+BETWEEN\s+[\'"]?(.+?)[\'"]?\s+AND\s+[\'"]?(.+?)[\'"]?', condition, re.IGNORECASE)
+#             if between_match:
+#                 column = between_match.group(1)
+#                 start_val = between_match.group(2).strip().strip("'\"")
+#                 end_val = between_match.group(3).strip().strip("'\"")
+                
+#                 if column not in filters:
+#                     filters[column] = []
+#                 # For BETWEEN, you might want to store as range
+#                 filters[column].append(f"{start_val} to {end_val}")
+#                 continue
     
-    Table: {table_name}
-    Schema: {schema}
-    Numeric Stats: {stats_str}
-    Sample Data: {sample_data}
-    Focus Area: {focus_area}
+#     except Exception as e:
+#         print(f"Error extracting filters: {e}")
+#         import traceback
+#         print(traceback.format_exc())
     
-    Return a valid JSON object with these keys:
-    {{
-      "key_findings": ["string", "string"],
-      "recommendations": [{{"title": "string", "description": "string", "priority": "high"}}],
-      "data_quality": ["string"],
-      "suggested_metrics": ["string"],
-      "quick_wins": [{{"action": "string", "outcome": "string"}}]
-    }}
-    """
-    
-    try:
-        response_text = query_ollama(prompt, temperature=0.5, format_json=True)
-        return json.loads(response_text)
-    except Exception as e:
-        print(f"Insights error: {e}")
-        return {"key_findings": ["Could not generate insights locally."], "recommendations": []}
+#     return filters
 
-def generate_contextual_chat_response(user_message, table_name, schema, context, sample_data):
-    """Chat with the dashboard data."""
-    context_str = json.dumps(context, indent=2) if context else "None"
-    
-    prompt = f"""
-    You are an AI Advisor in a dashboard.
-    Table: {table_name}
-    Schema: {schema}
-    Sample Data: {sample_data}
-    Context: {context_str}
-    
-    User says: "{user_message}"
-    
-    Provide a helpful, short (max 3 sentences) response tailored to the data.
-    """
-    return query_ollama(prompt, temperature=0.7)
 
-def generate_kpi_structure_with_ai(table_name, schema, data_profile, sample_data):
-    """Determine KPIs using Local LLM."""
-    prompt = f"""
-    Analyze this table to suggest KPIs.
-    Table: {table_name}
-    Schema: {schema}
-    
-    Return JSON format:
-    {{
-      "primary_kpis": [
-        {{ "name": "string", "description": "string", "calculation": "column name", "format": "number|currency", "icon": "TrendingUp", "category": "operational" }}
-      ],
-      "charts": [
-        {{ "type": "bar", "title": "string", "x_axis": "column", "y_axis": "column", "aggregation": "sum" }}
-      ]
-    }}
-    """
-    try:
-        response_text = query_ollama(prompt, temperature=0.2, format_json=True)
-        return json.loads(response_text)
-    except Exception as e:
-        print(f"KPI Gen error: {e}")
-        return generate_default_kpi_structure(data_profile)
-
-def generate_kpi_insights_with_ai(table_name, kpi_values, chart_data):
-    """Analyze calculated KPIs."""
-    prompt = f"""
-    Analyze these KPI results.
-    KPIs: {json.dumps(kpi_values, default=str)}
-    
-    Return JSON:
-    {{
-      "observations": ["string"],
-      "action_items": [{{"title": "string", "priority": "high"}}],
-      "opportunities": ["string"],
-      "risks": ["string"]
-    }}
-    """
-    try:
-        response_text = query_ollama(prompt, temperature=0.5, format_json=True)
-        return json.loads(response_text)
-    except Exception as e:
-        return {"observations": [], "action_items": []}
-
-# ============================================================================
-# NON-AI HELPERS
-# ============================================================================
 
 def extract_filters_from_sql(sql_query):
+    """Extract filter conditions from WHERE clause in SQL query."""
     filters = {}
     try:
-        if 'WHERE' not in sql_query.upper(): return filters
-        where_clause = re.search(r'WHERE\s+(.+?)(?:GROUP BY|ORDER BY|LIMIT|$)', sql_query, re.IGNORECASE | re.DOTALL)
-        if where_clause:
-            conditions = re.split(r'\s+(?:AND|OR)\s+', where_clause.group(1), flags=re.IGNORECASE)
-            for cond in conditions:
-                match = re.search(r'(\w+)\s*=\s*[\'"]?([^\'"]+)[\'"]?', cond)
-                if match:
-                    col, val = match.group(1), match.group(2)
-                    if col not in filters: filters[col] = []
-                    filters[col].append(val)
-    except: pass
+        sql_upper = sql_query.upper()
+        if 'WHERE' not in sql_upper:
+            return filters
+        
+        where_match = re.search(r'WHERE\s+(.+?)(?:GROUP BY|ORDER BY|LIMIT|$)', sql_query, re.IGNORECASE | re.DOTALL)
+        if not where_match:
+            return filters
+        
+        where_clause = where_match.group(1).strip()
+        conditions = re.split(r'\s+(?:AND|OR)\s+', where_clause, flags=re.IGNORECASE)
+        
+        for condition in conditions:
+            condition = condition.strip()
+            
+            # Simple Equality
+            eq_match = re.match(r'(\w+)\s*=\s*[\'"]?([^\'"]+)[\'"]?', condition, re.IGNORECASE)
+            if eq_match:
+                column = eq_match.group(1)
+                value = eq_match.group(2).strip().strip("'\"")
+                if column not in filters: filters[column] = []
+                if value not in filters[column]: filters[column].append(value)
+                continue
+            
+            # LIKE / ILIKE
+            like_match = re.match(r'(\w+)\s+I?LIKE\s+[\'"](.+)[\'"]', condition, re.IGNORECASE)
+            if like_match:
+                column = like_match.group(1)
+                value = like_match.group(2).strip('%')
+                if column not in filters: filters[column] = []
+                if value not in filters[column]: filters[column].append(value)
+                continue
+
+    except Exception as e:
+        print(f"Error extracting filters: {e}")
+    
     return filters
 
+
+@app.route('/api/execute-sql', methods=['POST'])
+def execute_custom_sql():
+    """Execute a custom SQL query directly (advanced users)."""
+    try:
+        data = request.json
+        sql_query = data.get('sql')
+        
+        if not sql_query:
+            return jsonify({
+                'success': False,
+                'error': 'Missing SQL query'
+            }), 400
+        
+        # Execute query
+        results_df, error = execute_sql(sql_query)
+        
+        if error:
+            return jsonify({
+                'success': False,
+                'error': f'SQL execution error: {error}'
+            }), 400
+        
+        # Convert DataFrame to list of dicts for JSON response
+        results_list = results_df.to_dict('records') if results_df is not None else []
+        print("print the data according to the result ",results_list)
+        
+        return jsonify({
+            'success': True,
+            'sql': sql_query,
+            'results': results_list,
+            'row_count': len(results_list)
+        })
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
+@app.route('/api/dashboard/<table_name>', methods=['GET'])
+def get_dashboard_datass(table_name):
+    """Get comprehensive dashboard data for a specific table."""
+    try:
+        # Get table schema first
+        schema = get_table_schema(table_name)
+        if not schema:
+            return jsonify({
+                'success': False,
+                'error': f'Table {table_name} not found'
+            }), 404
+        
+        # Get basic statistics
+        stats_query = f"SELECT COUNT(*) as total_records FROM {table_name}"
+        stats_df, error = execute_sql(stats_query)
+        
+        if error:
+            return jsonify({
+                'success': False,
+                'error': f'Error fetching statistics: {error}'
+            }), 500
+        
+        # Get sample data (first 100 rows)
+        sample_query = f"SELECT * FROM {table_name} LIMIT 100"
+        sample_df, error = execute_sql(sample_query)
+        
+        if error:
+            return jsonify({
+                'success': False,
+                'error': f'Error fetching sample data: {error}'
+            }), 500
+        
+        # Get column information
+        columns = list(sample_df.columns) if sample_df is not None else []
+        
+        # Identify numeric and categorical columns
+        numeric_cols = []
+        categorical_cols = []
+        date_cols = []
+        
+        if sample_df is not None and not sample_df.empty:
+            # We make a copy to modify dtypes safely
+            sample_df = sample_df.copy()
+            
+            # --- FIX: Convert string/object columns to datetime if possible ---
+            for col in sample_df.select_dtypes(include=['object']).columns:
+                try:
+                    converted_col = pd.to_datetime(sample_df[col], errors='coerce', infer_datetime_format=True)
+                    if not converted_col.isnull().all():
+                        sample_df[col] = converted_col
+                except Exception:
+                    pass
+            # --- END OF FIX ---
+
+            for col in sample_df.columns:
+                if pd.api.types.is_numeric_dtype(sample_df[col]):
+                    numeric_cols.append(col)
+                elif pd.api.types.is_datetime64_any_dtype(sample_df[col]):
+                    date_cols.append(col)
+                else:
+                    categorical_cols.append(col)
+        
+        # Prepare sample data for JSON (convert datetimes to ISO strings)
+        sample_data_list = []
+        if sample_df is not None:
+            json_safe_df = sample_df.head(10).copy()
+            for col in date_cols:
+                if col in json_safe_df.columns:
+                    json_safe_df[col] = json_safe_df[col].apply(lambda x: x.isoformat() if pd.notnull(x) else None)
+            
+            sample_data_list = json_safe_df.to_dict('records')
+
+        return jsonify({
+            'success': True,
+            'table_name': table_name,
+            'total_records': int(stats_df['total_records'].iloc[0]) if stats_df is not None and not stats_df.empty else 0,
+            'columns': columns,
+            'numeric_columns': numeric_cols,
+            'categorical_columns': categorical_cols,
+            'date_columns': date_cols,
+            'sample_data': sample_data_list,
+            'schema': schema
+        })
+        
+    except Exception as e:
+        print(f"Error in dashboard: {e}")
+        print(traceback.format_exc())
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
 def generate_data_summary(df):
-    summary = {'total_rows': len(df), 'numeric_stats': {}, 'categorical_stats': {}}
-    for col in df.select_dtypes(include=['number']).columns:
+    """Generate a statistical summary of the DataFrame."""
+    summary = {
+        'total_rows': len(df),
+        'columns': list(df.columns),
+        'numeric_stats': {},
+        'categorical_stats': {}
+    }
+    
+    # Numeric column statistics
+    numeric_cols = df.select_dtypes(include=['number']).columns
+    for col in numeric_cols:
+        std_val = df[col].std()
         summary['numeric_stats'][col] = {
-            'mean': float(df[col].mean()), 'max': float(df[col].max())
+            'mean': float(df[col].mean()),
+            'median': float(df[col].median()),
+            'min': float(df[col].min()),
+            'max': float(df[col].max()),
+            'std': float(std_val) if pd.notna(std_val) else 0.0 
         }
+    
+    # Categorical column statistics
+    categorical_cols = df.select_dtypes(include=['object']).columns
+    for col in categorical_cols:
+        try:
+            value_counts = df[col].value_counts().head(10)
+            summary['categorical_stats'][col] = {
+                'unique_values': int(df[col].nunique()),
+                'top_values': {str(k): int(v) for k, v in value_counts.items()}
+            }
+        except Exception as e:
+            print(f"Warning: Could not summarize column {col}. Error: {e}")
+            summary['categorical_stats'][col] = {
+                'unique_values': 0,
+                'top_values': {'Error': 'Could not be summarized'}
+            }
+    
     return summary
 
-def generate_comprehensive_data_profile(df, table_name):
-    profile = {'table_name': table_name, 'columns': {}}
-    for col in df.columns:
-        dtype = 'numeric' if pd.api.types.is_numeric_dtype(df[col]) else 'categorical'
-        profile['columns'][col] = {'data_type': dtype}
-    return profile
-
-def generate_default_kpi_structure(data_profile):
-    # Fallback if AI fails
-    numeric = [c for c, i in data_profile['columns'].items() if i['data_type'] == 'numeric']
-    cat = [c for c, i in data_profile['columns'].items() if i['data_type'] == 'categorical']
-    
-    kpis = []
-    if numeric:
-        kpis.append({"name": f"Total {numeric[0]}", "calculation": numeric[0], "format": "number", "icon": "TrendingUp"})
-    
-    charts = []
-    if numeric and cat:
-        charts.append({"type": "bar", "title": "Overview", "x_axis": cat[0], "y_axis": numeric[0], "aggregation": "sum"})
-        
-    return {"primary_kpis": kpis, "charts": charts}
-
-def calculate_kpis(df, kpi_structure):
-    results = []
-    for kpi in kpi_structure.get('primary_kpis', []):
-        col = kpi['calculation']
-        if col in df.columns:
-            val = float(df[col].sum()) # Simple sum for now
-            results.append({**kpi, "value": val, "change": 0})
-    return results
-
-def generate_chart_data(df, kpi_structure):
-    charts = []
-    for cfg in kpi_structure.get('charts', []):
-        x, y = cfg['x_axis'], cfg['y_axis']
-        if x in df.columns and y in df.columns:
-            # Simple aggregation
-            grp = df.groupby(x)[y].sum().reset_index().head(10)
-            charts.append({
-                "type": cfg['type'],
-                "title": cfg['title'],
-                "x_axis": x, "y_axis": y,
-                "data": grp.to_dict('records')
-            })
-    return charts
-
-# ============================================================================
-# API ENDPOINTS
-# ============================================================================
-
-@app.route('/api/aihealth', methods=['GET'])
-def health_check():
-    """Check if Ollama is reachable."""
-    try:
-        requests.get(OLLAMA_API_URL.replace("/api/generate", ""))
-        status = "healthy"
-    except:
-        status = "offline (Ollama not running)"
-        
-    return jsonify({
-        'status': status,
-        'model': OLLAMA_MODEL,
-        'message': f'Local SQL Agent is running.'
-    })
-
-@app.route('/api/tables', methods=['GET'])
-def get_tablessssss():
-    tables = list_available_tables()
-    return jsonify({'success': True, 'tables': tables})
-
-@app.route('/api/schema/<table_name>', methods=['GET'])
-def get_schema(table_name):
-    schema = get_table_schema(table_name)
-    if schema: return jsonify({'success': True, 'schema': schema})
-    return jsonify({'success': False, 'error': 'Not found'}), 404
-
-@app.route('/api/query', methods=['POST'])
-def process_query():
-    data = request.json
-    question = data.get('question')
-    table_name = data.get('table_name')
-    
-    schema = get_table_schema(table_name)
-
-    # print(f"Processing query for table: {table_name}")
-    # print(f"Schema:\n{schema}")
-    # print(f"Question: {question}")
-    if not schema: return jsonify({'error': 'Table not found'}), 404
-    
-    # 1. Generate SQL via Ollama
-    sql_query = generate_sql_with_ollama(question, schema, table_name)
-    if not sql_query: return jsonify({'error': 'Failed to generate SQL'}), 500
-    
-    # 2. Execute
-    df, error = execute_sql(sql_query)
-    if error: return jsonify({'error': error, 'sql': sql_query}), 400
-    
-    # 3. Answer & Visualize via Ollama
-    answer = generate_natural_answer(question, sql_query, df)
-    filters = extract_filters_from_sql(sql_query)
-    
-    chart_config = None
-    chart_data = None
-    
-    if df is not None and not df.empty:
-        chart_config = determine_optimal_chart(question, df, sql_query)
-        if chart_config and chart_config.get('chart_type') != 'None':
-            x, y = chart_config.get('x_axis_column'), chart_config.get('y_axis_column')
-            if x in df.columns and y in df.columns:
-                chart_data = {
-                    'categories': df[x].tolist(),
-                    'values': df[y].tolist(),
-                    'xAxis': x, 'yAxis': y,
-                    'chartType': chart_config['chart_type'],
-                    'title': chart_config.get('title', 'Chart')
-                }
-
-    return jsonify({
-        'success': True,
-        'sql': sql_query,
-        'answer': answer,
-        'results': df.to_dict('records') if df is not None else [],
-        'chart_data': chart_data,
-        'filters': filters
-    })
 
 @app.route('/api/dashboard/insights/<table_name>', methods=['POST'])
-def get_insights(table_name):
-    data = request.json
-    schema = get_table_schema(table_name)
-    summary_df, _ = execute_sql(f"SELECT * FROM {table_name} LIMIT 100")
-    
-    if summary_df is None: return jsonify({'error': 'No data'}), 500
-    
-    stats = generate_data_summary(summary_df)
-    insights = generate_business_insights(
-        table_name, schema, stats, data.get('focus_area', 'general'), 
-        summary_df.head(10).to_string()
-    )
-    
-    return jsonify({'success': True, 'insights': insights})
+def get_ai_insights(table_name):
+    """Generate AI-powered insights and recommendations for the data."""
+    try:
+        data = request.json
+        focus_area = data.get('focus_area', 'general')
+        
+        # Get table schema
+        schema = get_table_schema(table_name)
+        if not schema:
+            return jsonify({
+                'success': False,
+                'error': f'Table {table_name} not found'
+            }), 404
+        
+        # Get summary statistics
+        summary_query = f"SELECT * FROM {table_name} LIMIT 1000"
+        summary_df, error = execute_sql(summary_query)
+        
+        if error or summary_df is None or len(summary_df) == 0:
+            return jsonify({
+                'success': False,
+                'error': 'Unable to fetch data for analysis'
+            }), 500
+        
+        # Generate statistical summary
+        stats_summary = generate_data_summary(summary_df)
+        
+        # Generate AI insights using GEMINI
+        insights = generate_business_insights(
+            table_name=table_name,
+            schema=schema,
+            data_summary=stats_summary,
+            focus_area=focus_area,
+            sample_data=summary_df.head(20).to_string()
+        )
+        
+        return jsonify({
+            'success': True,
+            'table_name': table_name,
+            'focus_area': focus_area,
+            'insights': insights,
+            'data_summary': stats_summary
+        })
+        
+    except Exception as e:
+        print(f"Error generating insights: {e}")
+        print(traceback.format_exc())
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
 
-@app.route('/api/dashboard/kpi/<table_name>', methods=['GET'])
-def get_kpi_dashboard(table_name):
-    schema = get_table_schema(table_name)
-    df, _ = execute_sql(f"SELECT * FROM {table_name} LIMIT 1000")
-    
-    if df is None: return jsonify({'error': 'No data'}), 500
-    
-    profile = generate_comprehensive_data_profile(df, table_name)
-    kpi_struct = generate_kpi_structure_with_ai(table_name, schema, profile, df.head(10).to_string())
-    
-    kpi_vals = calculate_kpis(df, kpi_struct)
-    charts = generate_chart_data(df, kpi_struct)
-    
-    return jsonify({
-        'success': True, 
-        'kpi_structure': kpi_struct, 
-        'kpi_values': kpi_vals, 
-        'chart_data': charts
-    })
 
 @app.route('/api/dashboard/chat', methods=['POST'])
-def chat_endpoint():
-    data = request.json
-    schema = get_table_schema(data.get('table_name'))
-    response = generate_contextual_chat_response(
-        data.get('message'), data.get('table_name'), schema, 
-        data.get('context'), "sample data..."
-    )
+def dashboard_chat():
+    """Dynamic AI chat for dashboard - provides contextual tips and insights."""
+    try:
+        data = request.json
+        user_message = data.get('message')
+        table_name = data.get('table_name')
+        context = data.get('context', {})
+        
+        if not user_message or not table_name:
+            return jsonify({
+                'success': False,
+                'error': 'Missing message or table_name'
+            }), 400
+        
+        # Get table schema and recent data
+        schema = get_table_schema(table_name)
+        sample_query = f"SELECT * FROM {table_name} LIMIT 100"
+        sample_df, _ = execute_sql(sample_query)
+        
+        # Generate context-aware response using GEMINI
+        ai_response = generate_contextual_chat_response(
+            user_message=user_message,
+            table_name=table_name,
+            schema=schema,
+            context=context,
+            sample_data=sample_df.head(10).to_string() if sample_df is not None else ""
+        )
+        
+        return jsonify({
+            'success': True,
+            'message': user_message,
+            'response': ai_response,
+            'timestamp': pd.Timestamp.now().isoformat()
+        })
+        
+    except Exception as e:
+        print(f"Error in dashboard chat: {e}")
+        print(traceback.format_exc())
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
 
-    return jsonify({'success': True, 'response': response})
 
+@app.route('/api/dashboard/kpi/<table_name>', methods=['GET'])
+def generate_kpi_dashboard(table_name):
+    """Generate intelligent KPI dashboard based on AI analysis of table structure."""
+    try:
+        # Get table schema
+        schema = get_table_schema(table_name)
+        if not schema:
+            return jsonify({
+                'success': False,
+                'error': f'Table {table_name} not found'
+            }), 404
+        
+        # Get all data from table
+        full_data_query = f"SELECT * FROM {table_name}"
+        full_df, error = execute_sql(full_data_query)
+        
+        if error or full_df is None or len(full_df) == 0:
+            return jsonify({
+                'success': False,
+                'error': 'Unable to fetch data for KPI generation'
+            }), 500
+        
+        # Convert datetime columns to string for processing
+        for col in full_df.columns:
+            if pd.api.types.is_datetime64_any_dtype(full_df[col]):
+                full_df[col] = full_df[col].astype(str)
+        
+        # Generate comprehensive data profile
+        data_profile = generate_comprehensive_data_profile(full_df, table_name)
+        
+        # Use AI to determine appropriate KPIs using GEMINI
+        kpi_structure = generate_kpi_structure_with_ai(
+            table_name=table_name,
+            schema=schema,
+            data_profile=data_profile,
+            sample_data=full_df.head(50).to_string()
+        )
+        
+        # Calculate actual KPI values based on AI recommendations
+        kpi_values = calculate_kpis(full_df, kpi_structure)
+        
+        # Generate visualizations data
+        chart_data = generate_chart_data(full_df, kpi_structure)
+        
+        return jsonify({
+            'success': True,
+            'table_name': table_name,
+            'total_records': len(full_df),
+            'kpi_structure': kpi_structure,
+            'kpi_values': kpi_values,
+            'chart_data': chart_data,
+            'data_profile': data_profile
+        })
+        
+    except Exception as e:
+        print(f"Error generating KPI dashboard: {e}")
+        print(traceback.format_exc())
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
+def generate_comprehensive_data_profile(df, table_name):
+    """Generate a comprehensive profile of the data."""
+    profile = {
+        'table_name': table_name,
+        'total_rows': len(df),
+        'total_columns': len(df.columns),
+        'columns': {},
+        'relationships': []
+    }
+    
+    for col in df.columns:
+        col_info = {
+            'name': col,
+            'type': str(df[col].dtype),
+            'unique_count': int(df[col].nunique()),
+            'null_count': int(df[col].isnull().sum()),
+            'null_percentage': float(df[col].isnull().sum() / len(df) * 100)
+        }
+        
+        if pd.api.types.is_numeric_dtype(df[col]):
+            col_info['data_type'] = 'numeric'
+            col_info['min'] = float(df[col].min()) if pd.notna(df[col].min()) else None
+            col_info['max'] = float(df[col].max()) if pd.notna(df[col].max()) else None
+            col_info['mean'] = float(df[col].mean()) if pd.notna(df[col].mean()) else None
+            col_info['median'] = float(df[col].median()) if pd.notna(df[col].median()) else None
+            col_info['std'] = float(df[col].std()) if pd.notna(df[col].std()) else None
+        elif pd.api.types.is_datetime64_any_dtype(df[col]) or 'date' in col.lower():
+            col_info['data_type'] = 'date'
+        else:
+            col_info['data_type'] = 'categorical'
+            top_values = df[col].value_counts().head(5)
+            col_info['top_values'] = {str(k): int(v) for k, v in top_values.items()}
+        
+        profile['columns'][col] = col_info
+    
+    return profile
+
+
+def generate_default_kpi_structure(data_profile):
+    """Generate a default KPI structure if AI fails."""
+    primary_kpis = []
+    charts = []
+    
+    # Find numeric columns for KPIs
+    numeric_cols = [col for col, info in data_profile['columns'].items() 
+                    if info['data_type'] == 'numeric']
+    
+    categorical_cols = [col for col, info in data_profile['columns'].items() 
+                        if info['data_type'] == 'categorical']
+    
+    # Create default KPIs from numeric columns
+    for col in numeric_cols[:4]:
+        primary_kpis.append({
+            'name': col.replace('_', ' ').title(),
+            'description': f'Total {col}',
+            'calculation': col,
+            'format': 'currency' if any(word in col.lower() for word in ['price', 'amount', 'cost', 'revenue']) else 'number',
+            'icon': 'TrendingUp',
+            'category': 'operational'
+        })
+    
+    # Create default charts
+    if len(categorical_cols) > 0 and len(numeric_cols) > 0:
+        charts.append({
+            'type': 'bar',
+            'title': f'{categorical_cols[0]} Analysis',
+            'x_axis': categorical_cols[0],
+            'y_axis': numeric_cols[0],
+            'aggregation': 'sum',
+            'description': f'Distribution by {categorical_cols[0]}',
+            'limit': 10
+        })
+    
+    return {
+        'primary_kpis': primary_kpis,
+        'charts': charts,
+        'trends': [],
+        'segments': []
+    }
+
+
+def calculate_kpis(df, kpi_structure):
+    """Calculate actual KPI values based on the AI-generated structure."""
+    kpi_values = []
+    
+    for kpi in kpi_structure.get('primary_kpis', []):
+        try:
+            calculation = kpi['calculation']
+            
+            # Check if it's a simple column reference
+            if calculation in df.columns:
+                if kpi['format'] == 'number':
+                    value = float(df[calculation].sum())
+                elif kpi['format'] == 'currency':
+                    value = float(df[calculation].sum())
+                elif kpi['format'] == 'percentage':
+                    value = float(df[calculation].mean() * 100)
+                else:
+                    value = float(df[calculation].sum())
+                
+                # Calculate change (mock for now, you can implement actual trend)
+                change = 0.0
+                
+                kpi_values.append({
+                    'name': kpi['name'],
+                    'value': value,
+                    'format': kpi['format'],
+                    'icon': kpi.get('icon', 'TrendingUp'),
+                    'category': kpi.get('category', 'operational'),
+                    'description': kpi['description'],
+                    'change': change,
+                    'change_direction': 'up' if change > 0 else 'down' if change < 0 else 'neutral'
+                })
+            else:
+                # Handle aggregations like "count(*)"
+                if 'count' in calculation.lower():
+                    value = len(df)
+                else:
+                    value = 0
+                
+                kpi_values.append({
+                    'name': kpi['name'],
+                    'value': value,
+                    'format': kpi['format'],
+                    'icon': kpi.get('icon', 'TrendingUp'),
+                    'category': kpi.get('category', 'operational'),
+                    'description': kpi['description'],
+                    'change': 0.0,
+                    'change_direction': 'neutral'
+                })
+                
+        except Exception as e:
+            print(f"Error calculating KPI {kpi['name']}: {e}")
+            continue
+    
+    return kpi_values
+
+
+def generate_chart_data(df, kpi_structure):
+    """Generate data for all charts based on KPI structure."""
+    chart_data_list = []
+    
+    for chart_config in kpi_structure.get('charts', []):
+        try:
+            x_axis = chart_config['x_axis']
+            y_axis = chart_config['y_axis']
+            aggregation = chart_config.get('aggregation', 'sum')
+            limit = chart_config.get('limit', 10)
+            
+            if x_axis not in df.columns or y_axis not in df.columns:
+                continue
+            
+            # Group and aggregate data
+            if aggregation == 'sum':
+                grouped = df.groupby(x_axis)[y_axis].sum().reset_index()
+            elif aggregation == 'count':
+                grouped = df.groupby(x_axis)[y_axis].count().reset_index()
+            elif aggregation == 'avg':
+                grouped = df.groupby(x_axis)[y_axis].mean().reset_index()
+            elif aggregation == 'min':
+                grouped = df.groupby(x_axis)[y_axis].min().reset_index()
+            elif aggregation == 'max':
+                grouped = df.groupby(x_axis)[y_axis].max().reset_index()
+            else:
+                grouped = df.groupby(x_axis)[y_axis].sum().reset_index()
+            
+            # Sort and limit
+            grouped = grouped.nlargest(limit, y_axis)
+            
+            # Convert to list of dicts
+            chart_data = grouped.to_dict('records')
+            
+            chart_data_list.append({
+                'type': chart_config['type'],
+                'title': chart_config['title'],
+                'description': chart_config.get('description', ''),
+                'x_axis': x_axis,
+                'y_axis': y_axis,
+                'data': chart_data
+            })
+            
+        except Exception as e:
+            print(f"Error generating chart data: {e}")
+            continue
+    
+    return chart_data_list
+
+
+@app.route('/api/dashboard/kpi/insights/<table_name>', methods=['POST'])
+def get_kpi_insights(table_name):
+    """Generate AI insights specifically for KPI dashboard."""
+    try:
+        data = request.json
+        kpi_values = data.get('kpi_values', [])
+        chart_data = data.get('chart_data', [])
+        
+        # Generate contextual insights using GEMINI
+        insights = generate_kpi_insights_with_ai(table_name, kpi_values, chart_data)
+        
+        return jsonify({
+            'success': True,
+            'insights': insights
+        })
+        
+    except Exception as e:
+        print(f"Error generating KPI insights: {e}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+# if __name__ == '__main__':
+#     app.run(debug=True, port=5000)
 
 if __name__ == "__main__":
     # Use socketio.run to enable WebSocket support
     # socketio.run(app, debug=True, host='0.0.0.0', port=5000)
 
      socketio.run(app, host='0.0.0.0', port=5000, debug=True)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# # ============================================================================
+# # OLLAMA INTEGRATION
+# # ============================================================================
+
+
+
+# # Load environment variables (For DB credentials only, no Gemini Key needed!)
+# load_dotenv()
+
+# # ============================================================================
+# # CONFIGURATION
+# # ============================================================================
+
+
+# # OLLAMA CONFIGURATION (Local AI)
+# OLLAMA_API_URL = "http://localhost:11434/api/generate"
+# OLLAMA_MODEL = "llama3"  # You can change this to 'mistral' or 'sqlcoder'
+
+# # ============================================================================
+# # OLLAMA HELPER FUNCTION (The Core Replacement)
+# # ============================================================================
+
+# def query_ollama(prompt, model=OLLAMA_MODEL, temperature=0.3, format_json=False):
+#     """
+#     Sends a request to the local Ollama instance.
+#     """
+#     payload = {
+#         "model": model,
+#         "prompt": prompt,
+#         "stream": False,
+#         "options": {
+#             "temperature": temperature
+#         }
+#     }
+    
+#     # Enforce JSON mode if requested (Supported by Llama3 and others)
+#     if format_json:
+#         payload["format"] = "json"
+
+#     try:
+#         response = requests.post(OLLAMA_API_URL, json=payload)
+#         response.raise_for_status()
+#         result = response.json()
+#         return result.get('response', '').strip()
+#     except requests.exceptions.ConnectionError:
+#         print("❌ Error: Ollama is not running. Please run 'ollama serve' or open the Ollama app.")
+#         return None
+#     except Exception as e:
+#         print(f"❌ Error querying Ollama: {e}")
+#         return None
+
+# # ============================================================================
+# # DATABASE HELPER FUNCTIONS
+# # ============================================================================
+
+# def list_available_tables():
+#     """List all available tables in the database."""
+#     try:
+#         conn = psycopg2.connect(
+#             host=HOST, port=PORT, database="comienzonew", user=USER_NAME, password=PASSWORD
+#         )
+#         cursor = conn.cursor()
+#         cursor.execute("""
+#             SELECT table_name 
+#             FROM information_schema.tables 
+#             WHERE table_schema = 'public' 
+#             ORDER BY table_name
+#         """)
+#         tables = cursor.fetchall()
+#         cursor.close()
+#         conn.close()
+#         return [table[0] for table in tables]
+#     except Exception as e:
+#         print(f"Error listing tables: {e}")
+#         return []
+
+# # def get_table_schema(table_name):
+# #     """Fetch the schema for a specific table."""
+# #     try:
+# #         conn = psycopg2.connect(
+# #             host=HOST, port=PORT, database=DB_NAME, user=USER_NAME, password=PASSWORD
+# #         )
+# #         cursor = conn.cursor()
+# #         cursor.execute("""
+# #             SELECT column_name, data_type, is_nullable
+# #             FROM information_schema.columns
+# #             WHERE table_name = %s
+# #             ORDER BY ordinal_position
+# #         """, (table_name,))
+# #         columns = cursor.fetchall()
+        
+# #         if not columns:
+# #             cursor.close(); conn.close()
+# #             return None
+        
+# #         schema_text = f"Table: {table_name}\nColumns:\n"
+# #         for col_name, data_type, is_nullable in columns:
+# #             nullable = "NULL" if is_nullable == "YES" else "NOT NULL"
+# #             schema_text += f"  - {col_name} ({data_type}) {nullable}\n"
+        
+# #         cursor.close(); conn.close()
+# #         return schema_text
+# #     except Exception as e:
+# #         print(f"Error getting schema: {e}")
+# #         return None
+
+# def get_table_schema(table_name):
+#     """Fetch the schema for a specific table with robust error handling."""
+#     try:
+#         # Clean the input
+#         table_name = table_name.strip()
+        
+#         conn = psycopg2.connect(
+#             host=HOST, port=PORT, database="comienzonew", user=USER_NAME, password=PASSWORD
+#         )
+#         cursor = conn.cursor()
+        
+#         # FIX 1: Explicitly check 'public' schema to match list_available_tables
+#         # FIX 2: Use lower() to handle potential case sensitivity issues in input
+#         cursor.execute("""
+#             SELECT column_name, data_type, is_nullable
+#             FROM information_schema.columns
+#             WHERE lower(table_name) = lower(%s) 
+#             AND table_schema = 'public'
+#             ORDER BY ordinal_position
+#         """, (table_name,))
+        
+#         columns = cursor.fetchall()
+        
+#         cursor.close()
+#         conn.close()
+        
+#         if not columns:
+#             print(f"⚠️ Warning: No columns found for table '{table_name}' in public schema.")
+#             # Debugging: Check if table exists at all
+#             return None
+        
+#         # Format schema for the AI
+#         schema_text = f"Table: {table_name}\nColumns:\n"
+#         for col_name, data_type, is_nullable in columns:
+#             nullable = "NULL" if is_nullable == "YES" else "NOT NULL"
+#             schema_text += f"  - {col_name} ({data_type}) {nullable}\n"
+        
+#         return schema_text
+
+#     except Exception as e:
+#         print(f"❌ Error getting schema for {table_name}: {e}")
+#         return None
+
+
+
+# def execute_sql(sql_query):
+#     """Execute SQL query and return results."""
+#     try:
+#         # Security: Basic check to prevent destructive queries
+#         if re.search(r'\b(DROP|DELETE|TRUNCATE|INSERT|UPDATE)\b', sql_query, re.IGNORECASE):
+#             return None, "Destructive queries are not allowed."
+
+#         conn = psycopg2.connect(
+#             host=HOST, port=PORT, database="comienzonew", user=USER_NAME, password=PASSWORD
+#         )
+#         df = pd.read_sql_query(sql_query, conn)
+#         conn.close()
+#         return df, None
+#     except Exception as e:
+#         return None, str(e)
+
+# # ============================================================================
+# # AI BUSINESS LOGIC (REFACTORED FOR OLLAMA)
+# # ============================================================================
+
+# def generate_sql_with_ollama(question, schema, table_name):
+#     """Generate SQL using Local LLM."""
+#     prompt = f"""You are an expert PostgreSQL SQL generator.
+
+# Database Schema:
+# {schema}
+
+# User Question: {question}
+
+# Instructions:
+# 1. Generate a valid PostgreSQL query to answer the question.
+# 2. The table name is '{table_name}'.
+# 3. Return ONLY the SQL code. Do not wrap it in markdown or backticks.
+# 4. Do not provide explanations.
+
+# SQL Query:"""
+    
+#     sql = query_ollama(prompt, temperature=0.1) # Low temp for precision
+    
+#     if sql:
+#         # Clean up commonly added markdown by LLMs
+#         sql = sql.replace('```sql', '').replace('```', '').strip()
+#     return sql
+
+# def generate_natural_answer(question, sql_query, results_df):
+#     """Generate natural language answer using Local LLM."""
+#     if results_df is None or len(results_df) == 0:
+#         return "No results found for your query."
+    
+#     row_count = len(results_df)
+#     preview = results_df.head(5).to_string(index=False)
+    
+#     prompt = f"""You are a data analyst assistant.
+    
+# User Question: {question}
+# SQL Query Used: {sql_query}
+# Data Result ({row_count} rows):
+# {preview}
+
+# Task: Write a short, friendly 1-2 sentence summary answer for the user based on this data.
+# Answer:"""
+    
+#     return query_ollama(prompt, temperature=0.6)
+
+# def determine_optimal_chart(question, results_df, sql_query):
+#     """Decide best chart type using Local LLM (JSON Mode)."""
+#     try:
+#         data_sample = results_df.head(3).to_dict(orient='records')
+#         # Convert timestamps to strings for JSON serialization
+#         for row in data_sample:
+#             for k, v in row.items():
+#                 if isinstance(v, (pd.Timestamp, pd.Timedelta)):
+#                     row[k] = str(v)
+
+#         prompt = f"""
+#         You are a Data Viz Expert. Analyze this data to pick the best chart.
+        
+#         Question: "{question}"
+#         Data Sample: {json.dumps(data_sample, default=str)}
+        
+#         Return a JSON object with this exact format:
+#         {{
+#             "chart_type": "bar" or "line" or "pie" or "scatter" or "None",
+#             "x_axis_column": "column_name",
+#             "y_axis_column": "column_name",
+#             "title": "Chart Title"
+#         }}
+#         """
+        
+#         response_text = query_ollama(prompt, temperature=0.1, format_json=True)
+#         return json.loads(response_text)
+#     except Exception as e:
+#         print(f"Chart determination error: {e}")
+#         return None
+
+# def generate_business_insights(table_name, schema, data_summary, focus_area, sample_data):
+#     """Generate insights using Local LLM (JSON Mode)."""
+    
+#     # Safe dump of stats
+#     stats_str = json.dumps(data_summary.get('numeric_stats', {}), default=str)
+    
+#     prompt = f"""
+#     You are a Senior Business Analyst. Analyze this dataset.
+    
+#     Table: {table_name}
+#     Schema: {schema}
+#     Numeric Stats: {stats_str}
+#     Sample Data: {sample_data}
+#     Focus Area: {focus_area}
+    
+#     Return a valid JSON object with these keys:
+#     {{
+#       "key_findings": ["string", "string"],
+#       "recommendations": [{{"title": "string", "description": "string", "priority": "high"}}],
+#       "data_quality": ["string"],
+#       "suggested_metrics": ["string"],
+#       "quick_wins": [{{"action": "string", "outcome": "string"}}]
+#     }}
+#     """
+    
+#     try:
+#         response_text = query_ollama(prompt, temperature=0.5, format_json=True)
+#         return json.loads(response_text)
+#     except Exception as e:
+#         print(f"Insights error: {e}")
+#         return {"key_findings": ["Could not generate insights locally."], "recommendations": []}
+
+# def generate_contextual_chat_response(user_message, table_name, schema, context, sample_data):
+#     """Chat with the dashboard data."""
+#     context_str = json.dumps(context, indent=2) if context else "None"
+    
+#     prompt = f"""
+#     You are an AI Advisor in a dashboard.
+#     Table: {table_name}
+#     Schema: {schema}
+#     Sample Data: {sample_data}
+#     Context: {context_str}
+    
+#     User says: "{user_message}"
+    
+#     Provide a helpful, short (max 3 sentences) response tailored to the data.
+#     """
+#     return query_ollama(prompt, temperature=0.7)
+
+# def generate_kpi_structure_with_ai(table_name, schema, data_profile, sample_data):
+#     """Determine KPIs using Local LLM."""
+#     prompt = f"""
+#     Analyze this table to suggest KPIs.
+#     Table: {table_name}
+#     Schema: {schema}
+    
+#     Return JSON format:
+#     {{
+#       "primary_kpis": [
+#         {{ "name": "string", "description": "string", "calculation": "column name", "format": "number|currency", "icon": "TrendingUp", "category": "operational" }}
+#       ],
+#       "charts": [
+#         {{ "type": "bar", "title": "string", "x_axis": "column", "y_axis": "column", "aggregation": "sum" }}
+#       ]
+#     }}
+#     """
+#     try:
+#         response_text = query_ollama(prompt, temperature=0.2, format_json=True)
+#         return json.loads(response_text)
+#     except Exception as e:
+#         print(f"KPI Gen error: {e}")
+#         return generate_default_kpi_structure(data_profile)
+
+# def generate_kpi_insights_with_ai(table_name, kpi_values, chart_data):
+#     """Analyze calculated KPIs."""
+#     prompt = f"""
+#     Analyze these KPI results.
+#     KPIs: {json.dumps(kpi_values, default=str)}
+    
+#     Return JSON:
+#     {{
+#       "observations": ["string"],
+#       "action_items": [{{"title": "string", "priority": "high"}}],
+#       "opportunities": ["string"],
+#       "risks": ["string"]
+#     }}
+#     """
+#     try:
+#         response_text = query_ollama(prompt, temperature=0.5, format_json=True)
+#         return json.loads(response_text)
+#     except Exception as e:
+#         return {"observations": [], "action_items": []}
+
+# # ============================================================================
+# # NON-AI HELPERS
+# # ============================================================================
+
+# def extract_filters_from_sql(sql_query):
+#     filters = {}
+#     try:
+#         if 'WHERE' not in sql_query.upper(): return filters
+#         where_clause = re.search(r'WHERE\s+(.+?)(?:GROUP BY|ORDER BY|LIMIT|$)', sql_query, re.IGNORECASE | re.DOTALL)
+#         if where_clause:
+#             conditions = re.split(r'\s+(?:AND|OR)\s+', where_clause.group(1), flags=re.IGNORECASE)
+#             for cond in conditions:
+#                 match = re.search(r'(\w+)\s*=\s*[\'"]?([^\'"]+)[\'"]?', cond)
+#                 if match:
+#                     col, val = match.group(1), match.group(2)
+#                     if col not in filters: filters[col] = []
+#                     filters[col].append(val)
+#     except: pass
+#     return filters
+
+# def generate_data_summary(df):
+#     summary = {'total_rows': len(df), 'numeric_stats': {}, 'categorical_stats': {}}
+#     for col in df.select_dtypes(include=['number']).columns:
+#         summary['numeric_stats'][col] = {
+#             'mean': float(df[col].mean()), 'max': float(df[col].max())
+#         }
+#     return summary
+
+# def generate_comprehensive_data_profile(df, table_name):
+#     profile = {'table_name': table_name, 'columns': {}}
+#     for col in df.columns:
+#         dtype = 'numeric' if pd.api.types.is_numeric_dtype(df[col]) else 'categorical'
+#         profile['columns'][col] = {'data_type': dtype}
+#     return profile
+
+# def generate_default_kpi_structure(data_profile):
+#     # Fallback if AI fails
+#     numeric = [c for c, i in data_profile['columns'].items() if i['data_type'] == 'numeric']
+#     cat = [c for c, i in data_profile['columns'].items() if i['data_type'] == 'categorical']
+    
+#     kpis = []
+#     if numeric:
+#         kpis.append({"name": f"Total {numeric[0]}", "calculation": numeric[0], "format": "number", "icon": "TrendingUp"})
+    
+#     charts = []
+#     if numeric and cat:
+#         charts.append({"type": "bar", "title": "Overview", "x_axis": cat[0], "y_axis": numeric[0], "aggregation": "sum"})
+        
+#     return {"primary_kpis": kpis, "charts": charts}
+
+# def calculate_kpis(df, kpi_structure):
+#     results = []
+#     for kpi in kpi_structure.get('primary_kpis', []):
+#         col = kpi['calculation']
+#         if col in df.columns:
+#             val = float(df[col].sum()) # Simple sum for now
+#             results.append({**kpi, "value": val, "change": 0})
+#     return results
+
+# def generate_chart_data(df, kpi_structure):
+#     charts = []
+#     for cfg in kpi_structure.get('charts', []):
+#         x, y = cfg['x_axis'], cfg['y_axis']
+#         if x in df.columns and y in df.columns:
+#             # Simple aggregation
+#             grp = df.groupby(x)[y].sum().reset_index().head(10)
+#             charts.append({
+#                 "type": cfg['type'],
+#                 "title": cfg['title'],
+#                 "x_axis": x, "y_axis": y,
+#                 "data": grp.to_dict('records')
+#             })
+#     return charts
+
+# # ============================================================================
+# # API ENDPOINTS
+# # ============================================================================
+
+# @app.route('/api/aihealth', methods=['GET'])
+# def health_check():
+#     """Check if Ollama is reachable."""
+#     try:
+#         requests.get(OLLAMA_API_URL.replace("/api/generate", ""))
+#         status = "healthy"
+#     except:
+#         status = "offline (Ollama not running)"
+        
+#     return jsonify({
+#         'status': status,
+#         'model': OLLAMA_MODEL,
+#         'message': f'Local SQL Agent is running.'
+#     })
+
+# @app.route('/api/tables', methods=['GET'])
+# def get_tablessssss():
+#     tables = list_available_tables()
+#     return jsonify({'success': True, 'tables': tables})
+
+# @app.route('/api/schema/<table_name>', methods=['GET'])
+# def get_schema(table_name):
+#     schema = get_table_schema(table_name)
+#     if schema: return jsonify({'success': True, 'schema': schema})
+#     return jsonify({'success': False, 'error': 'Not found'}), 404
+
+# @app.route('/api/query', methods=['POST'])
+# def process_query():
+#     data = request.json
+#     question = data.get('question')
+#     table_name = data.get('table_name')
+    
+#     schema = get_table_schema(table_name)
+
+#     # print(f"Processing query for table: {table_name}")
+#     # print(f"Schema:\n{schema}")
+#     # print(f"Question: {question}")
+#     if not schema: return jsonify({'error': 'Table not found'}), 404
+    
+#     # 1. Generate SQL via Ollama
+#     sql_query = generate_sql_with_ollama(question, schema, table_name)
+#     if not sql_query: return jsonify({'error': 'Failed to generate SQL'}), 500
+    
+#     # 2. Execute
+#     df, error = execute_sql(sql_query)
+#     if error: return jsonify({'error': error, 'sql': sql_query}), 400
+    
+#     # 3. Answer & Visualize via Ollama
+#     answer = generate_natural_answer(question, sql_query, df)
+#     filters = extract_filters_from_sql(sql_query)
+    
+#     chart_config = None
+#     chart_data = None
+    
+#     if df is not None and not df.empty:
+#         chart_config = determine_optimal_chart(question, df, sql_query)
+#         if chart_config and chart_config.get('chart_type') != 'None':
+#             x, y = chart_config.get('x_axis_column'), chart_config.get('y_axis_column')
+#             if x in df.columns and y in df.columns:
+#                 chart_data = {
+#                     'categories': df[x].tolist(),
+#                     'values': df[y].tolist(),
+#                     'xAxis': x, 'yAxis': y,
+#                     'chartType': chart_config['chart_type'],
+#                     'title': chart_config.get('title', 'Chart')
+#                 }
+
+#     return jsonify({
+#         'success': True,
+#         'sql': sql_query,
+#         'answer': answer,
+#         'results': df.to_dict('records') if df is not None else [],
+#         'chart_data': chart_data,
+#         'filters': filters
+#     })
+
+# @app.route('/api/dashboard/insights/<table_name>', methods=['POST'])
+# def get_insights(table_name):
+#     data = request.json
+#     schema = get_table_schema(table_name)
+#     summary_df, _ = execute_sql(f"SELECT * FROM {table_name} LIMIT 100")
+    
+#     if summary_df is None: return jsonify({'error': 'No data'}), 500
+    
+#     stats = generate_data_summary(summary_df)
+#     insights = generate_business_insights(
+#         table_name, schema, stats, data.get('focus_area', 'general'), 
+#         summary_df.head(10).to_string()
+#     )
+    
+#     return jsonify({'success': True, 'insights': insights})
+
+# @app.route('/api/dashboard/kpi/<table_name>', methods=['GET'])
+# def get_kpi_dashboard(table_name):
+#     schema = get_table_schema(table_name)
+#     df, _ = execute_sql(f"SELECT * FROM {table_name} LIMIT 1000")
+    
+#     if df is None: return jsonify({'error': 'No data'}), 500
+    
+#     profile = generate_comprehensive_data_profile(df, table_name)
+#     kpi_struct = generate_kpi_structure_with_ai(table_name, schema, profile, df.head(10).to_string())
+    
+#     kpi_vals = calculate_kpis(df, kpi_struct)
+#     charts = generate_chart_data(df, kpi_struct)
+    
+#     return jsonify({
+#         'success': True, 
+#         'kpi_structure': kpi_struct, 
+#         'kpi_values': kpi_vals, 
+#         'chart_data': charts
+#     })
+
+# @app.route('/api/dashboard/chat', methods=['POST'])
+# def chat_endpoint():
+#     data = request.json
+#     schema = get_table_schema(data.get('table_name'))
+#     response = generate_contextual_chat_response(
+#         data.get('message'), data.get('table_name'), schema, 
+#         data.get('context'), "sample data..."
+#     )
+
+#     return jsonify({'success': True, 'response': response})
+
+
+# if __name__ == "__main__":
+#      init_db()
+#     # Use socketio.run to enable WebSocket support
+#     # socketio.run(app, debug=True, host='0.0.0.0', port=5000)
+
+#      socketio.run(app, host='0.0.0.0', port=5000, debug=True)
 
