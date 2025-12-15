@@ -1712,7 +1712,9 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                             #                 GROUPING AFTER GRANULARITY
                             # =========================================================
                             print(f"\nGrouping by: {x_axis[0]}")
-                            grouped_df = df.groupby(x_axis[0]).size().reset_index(name="count")
+                            # grouped_df = df.groupby(x_axis[0]).size().reset_index(name="count")
+                            grouped_df = df.groupby(x_axis[0])[y_axis[0]].nunique().reset_index(name="count")
+
                             
                             
                             # print("Grouped DataFrame after filtering:", grouped_df)

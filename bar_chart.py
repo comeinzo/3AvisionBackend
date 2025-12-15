@@ -1163,7 +1163,11 @@ def fetch_data(table_name, x_axis_columns, filter_options, y_axis_column, aggreg
     elif aggregation == "average":
         grouped_df = filtered_df.groupby(x_axis_columns_str[0])[y_axis_column].mean().reset_index()
     elif aggregation == "count":
-        grouped_df = filtered_df.groupby(x_axis_columns_str[0]).size().reset_index(name="count")
+        # grouped_df = filtered_df.groupby(x_axis_columns_str[0]).size().reset_index(name="count")
+        # Instead of .size(), select the country column and use .nunique()
+        grouped_df = filtered_df.groupby(x_axis_columns_str[0])[y_axis_column].nunique().reset_index(name="count")
+        print("grouped_df:==================================", grouped_df)
+
     elif aggregation == "maximum":
         grouped_df = filtered_df.groupby(x_axis_columns_str[0])[y_axis_column].max().reset_index()
     elif aggregation == "minimum":

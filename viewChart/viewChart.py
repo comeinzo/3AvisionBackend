@@ -1200,7 +1200,8 @@ def filter_chart_data(database_name, table_name, x_axis, y_axis, aggregate, clic
                 expr = f"{agg}(({formula_sql_y})::numeric) AS {aliases[idx]}"
             else:
                 if agg == "count":
-                    expr = f"count({y_col}) AS {aliases[idx]}"
+                    # expr = f"count({y_col}) AS {aliases[idx]}"
+                    expr = f"COUNT(DISTINCT {y_col}) AS {aliases[idx]}" 
                 else:
                     expr = f"{agg}({y_col}::numeric) AS {aliases[idx]}"
 
