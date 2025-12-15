@@ -56,7 +56,7 @@ from email.mime.text import MIMEText
 
 from dotenv import load_dotenv
 import os
-from openai import OpenAI
+# from openai import OpenAI
 import google.generativeai as genai
 # ==============================
 # Local Imports

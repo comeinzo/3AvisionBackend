@@ -2102,6 +2102,19 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                        # =========================================================
                         #     DATE GRANULARITY (NORMAL AGG) — SAME AS COUNT VERSION
                         # =========================================================
+                        if isinstance(filter_options, str):
+                            try:
+                                filter_options = json.loads(filter_options)
+                            except:
+                                filter_options = {}
+
+                        if filter_options:
+                            for col, allowed_values in filter_options.items():
+                                if col in dataframe.columns:
+                                    dataframe = dataframe[dataframe[col].isin(allowed_values)]
+
+                        print("DataFrame after dashboard filtering:")
+                        print(dataframe.head())
                         dateGranularity = selectedFrequency
 
                         # Parse granularity JSON if string
@@ -2182,11 +2195,11 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                         #     if category in filter_options:
                         #         filtered_categories.append(category)
                         #         filtered_values.append(value)
-                        if isinstance(filter_options, str):
-                                try:
-                                    filter_options = json.loads(filter_options)  # Convert JSON string to dict
-                                except json.JSONDecodeError:
-                                    raise ValueError("Invalid JSON format for filter_options")
+                        # if isinstance(filter_options, str):
+                        #         try:
+                        #             filter_options = json.loads(filter_options)  # Convert JSON string to dict
+                        #         except json.JSONDecodeError:
+                        #             raise ValueError("Invalid JSON format for filter_options")
                         if isinstance(selectedFrequency, str):
                             try:
                                 selectedFrequency = json.loads(selectedFrequency)
