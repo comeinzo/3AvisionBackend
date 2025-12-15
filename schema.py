@@ -25,6 +25,9 @@
 # if __name__ == "__main__":
 #     create_schema()
 
+
+
+# schema.py
 import psycopg2
 # Ensure the import matches your actual filename (models.py vs model.py)
 from model import LoginHistoryTable, LicenseManager 
@@ -70,5 +73,6 @@ def create_schema():
             cur.close()
         if conn:
             conn.close()
+
 if __name__ == "__main__":
     create_schema()
