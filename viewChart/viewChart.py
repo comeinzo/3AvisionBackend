@@ -964,6 +964,93 @@ def filter_chart_data(database_name, table_name, x_axis, y_axis, aggregate, clic
         colnames = [desc[0] for desc in cursor.description]
         global_df = pd.DataFrame(columns=colnames)
         print(f"Schema columns loaded: {global_df.columns.tolist()}")
+         # Ensure y_axis is list
+        agg_value = aggregate  # aggregate from DB
+        print("agg_value0", agg_value)
+        print("y_axis:", y_axis)
+        current_y_axis = None
+        # -----------------------------
+        # Normalize y_axis (ALWAYS LIST)
+        # -----------------------------
+        # if isinstance(y_axis, str):
+        #     try:
+        #         y_axis = json.loads(y_axis)
+        #     except:
+        #         y_axis = [y_axis]
+
+        # elif isinstance(y_axis, list):
+        #     pass
+        # else:
+        #     y_axis = []
+        # ALWAYS normalize y_axis into list of columns
+        if isinstance(y_axis, str):
+            if y_axis.startswith("["):
+                y_axis = json.loads(y_axis)
+            else:
+                y_axis = [c.strip() for c in y_axis.split(",")]
+
+        elif isinstance(y_axis, list):
+            y_axis = [c.strip() for c in y_axis]
+
+        else:
+            y_axis = []
+
+
+        print("Normalized y_axis:", y_axis)
+
+        if isinstance(y_axis, list) and y_axis:
+            current_y_axis = y_axis[0]
+        print("current_y_axis:", current_y_axis)
+
+        aggregate = None
+
+                    # CASE 1: Simple direct aggregation string
+        if isinstance(agg_value, str) and agg_value.lower() in ["sum", "count", "avg", "mean", "min", "max"]:
+            aggregate = agg_value.lower()
+            print("✔ Using direct string aggregate:", aggregate)
+
+        else:
+                        # CASE 2: JSON list or incorrect stored string
+            if isinstance(agg_value, str):
+                try:
+                    agg_value = json.loads(agg_value)
+                except:
+                    agg_value = []
+
+                        # CASE 3: Find match based on yAxis
+            if isinstance(agg_value, list):
+                aggregate = next(
+                    (item.get('aggregation') for item in agg_value if item.get('yAxis') == current_y_axis),
+                            None
+                )
+
+                    # Fallback to first aggregation in list if still none
+        if not aggregate and isinstance(agg_value, list) and agg_value:
+            aggregate = agg_value[0].get('aggregation')
+
+                    # Absolute final fallback → default to SUM
+        if not aggregate:
+            aggregate = "sum"
+
+        print("✔ Final Aggregate Used:", aggregate)
+        # -----------------------------
+        # Normalize aggregation names for PostgreSQL
+        # -----------------------------
+        AGGREGATE_MAP = {
+            "average": "avg",
+            "mean": "avg",
+            "minimum": "min",
+            "maximum": "max",
+            "sum": "sum",
+            "count": "count",
+            "min": "min",
+            "max": "max",
+            "avg": "avg"
+        }
+
+        aggregate = AGGREGATE_MAP.get(aggregate.lower(), "sum")
+        print("✔ PostgreSQL Aggregate Used:", aggregate)
+
         
         # **NEW: Handle singleValueChart early**
         if chart_type == "singleValueChart":
@@ -1054,30 +1141,73 @@ def filter_chart_data(database_name, table_name, x_axis, y_axis, aggregate, clic
             X_Axis_group = x_axis
 
         # Handle Y-Axis with proper aggregation logic
-        Y_Axis = y_axis.split(", ")
-        aliases = ['series1', 'series2', 'series3']
+        print("y_axis before split:", y_axis)
+        # Y_Axis = y_axis.split(", ")
+        Y_Axis = y_axis
+        # aliases = ['series1', 'series2', 'series3']
+        # y_axis_aggregate_parts = []
+
+        # for idx, y_col in enumerate(Y_Axis):
+        #     matched_calc_y = None
+        #     if calculationData:
+        #         matched_calc_y = next((calc for calc in calculationData if calc.get("columnName").lower() == y_col.lower() and calc.get("calculation")), None)
+        
+        #     if matched_calc_y:
+        #         formula_sql_y = convert_calculation_to_sql(matched_calc_y["calculation"].strip())
+        #         if aggregate.upper() in ['COUNT']:
+        #             y_expr = f"{aggregate}({formula_sql_y}) AS {aliases[idx]}"
+        #         else:
+        #             y_expr = f"{aggregate}(({formula_sql_y})::numeric) AS {aliases[idx]}"
+        #     else:
+        #         if aggregate.upper() in ['COUNT']:
+        #             y_expr = f"{aggregate}({y_col}) AS {aliases[idx]}"
+        #         else:
+        #             y_expr = f"{aggregate}({y_col}::numeric) AS {aliases[idx]}"
+            
+        #     y_axis_aggregate_parts.append(y_expr)
+
+        # y_axis_aggregate = ", ".join(y_axis_aggregate_parts)
+        aliases = ['series1', 'series2', 'series3', 'series4']
         y_axis_aggregate_parts = []
 
-        for idx, y_col in enumerate(Y_Axis):
+        for idx, y_col in enumerate(y_axis):
+
+            # 🔹 Find aggregation for THIS y-axis
+            agg = "sum"  # default
+            if isinstance(agg_value, list):
+                match = next(
+                    (item for item in agg_value if item.get("yAxis") == y_col),
+                    None
+                )
+                if match:
+                    agg = match.get("aggregation", "sum")
+
+            agg = AGGREGATE_MAP.get(agg.lower(), "sum")
+
+            # 🔹 Handle calculation if exists
             matched_calc_y = None
             if calculationData:
-                matched_calc_y = next((calc for calc in calculationData if calc.get("columnName").lower() == y_col.lower() and calc.get("calculation")), None)
-        
+                matched_calc_y = next(
+                    (calc for calc in calculationData if calc.get("columnName").lower() == y_col.lower()),
+                    None
+                )
+
             if matched_calc_y:
-                formula_sql_y = convert_calculation_to_sql(matched_calc_y["calculation"].strip())
-                if aggregate.upper() in ['COUNT']:
-                    y_expr = f"{aggregate}({formula_sql_y}) AS {aliases[idx]}"
-                else:
-                    y_expr = f"{aggregate}(({formula_sql_y})::numeric) AS {aliases[idx]}"
+                formula_sql_y = convert_calculation_to_sql(
+                    matched_calc_y["calculation"].strip(),
+                    dataframe_columns=global_df.columns.tolist()
+                )
+                expr = f"{agg}(({formula_sql_y})::numeric) AS {aliases[idx]}"
             else:
-                if aggregate.upper() in ['COUNT']:
-                    y_expr = f"{aggregate}({y_col}) AS {aliases[idx]}"
+                if agg == "count":
+                    expr = f"count({y_col}) AS {aliases[idx]}"
                 else:
-                    y_expr = f"{aggregate}({y_col}::numeric) AS {aliases[idx]}"
-            
-            y_axis_aggregate_parts.append(y_expr)
+                    expr = f"{agg}({y_col}::numeric) AS {aliases[idx]}"
+
+            y_axis_aggregate_parts.append(expr)
 
         y_axis_aggregate = ", ".join(y_axis_aggregate_parts)
+
         
         if category:
             # Handle category filtering
@@ -1094,7 +1224,7 @@ def filter_chart_data(database_name, table_name, x_axis, y_axis, aggregate, clic
                 GROUP BY {X_Axis_group};
             """
             cursor.execute(query, (category,))
-            print("query", query)
+            print("query", query,category)
 
         else:
             # Handle general filtering
@@ -1126,6 +1256,7 @@ def filter_chart_data(database_name, table_name, x_axis, y_axis, aggregate, clic
             cursor.execute(query)
 
         result = cursor.fetchall()
+        print("result:", result)
         categories = [row.get(X_Axis_group) for row in result]
 
         if len(Y_Axis) == 1:
