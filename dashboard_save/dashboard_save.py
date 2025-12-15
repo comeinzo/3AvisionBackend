@@ -816,6 +816,10 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                     yAxisTitle =chart_data[25]
                     agg_value = chart_data[5]  # aggregate from DB
                     print("agg_value0", agg_value)
+                    # Clean agg_value from quotes
+                    if isinstance(agg_value, str):
+                        agg_value = agg_value.replace('"', '').replace("'", '').strip().lower()
+                        print("agg_value1", agg_value)
 
                     # Ensure y_axis is list
                     current_y_axis = None
@@ -830,7 +834,7 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                     aggregate = None
 
                     # CASE 1: Simple direct aggregation string
-                    if isinstance(agg_value, str) and agg_value.lower() in ["sum", "count", "avg", "mean", "min", "max"]:
+                    if isinstance(agg_value, str) and agg_value.lower() in ["minimum","maximum","sum", "count", "avg", "mean", "min", "max","average"]:
                         aggregate = agg_value.lower()
                         print("✔ Using direct string aggregate:", aggregate)
 
@@ -1252,7 +1256,16 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                     # Handle singleValueChart type separately
                     elif chart_type == "singleValueChart":
                         print("sv")
-                        single_value_result = fetchText_data(database_name, table_name, x_axis[0], aggregate,selected_user)
+                        print("aggregate5",aggregate)
+                        aggregate_py = {
+                            'count': 'count',
+                            'sum': 'sum',
+                            'average': 'avg',
+                            'minimum': 'min',
+                            'maximum': 'max'
+                        }.get(aggregate, 'sum') 
+                        
+                        single_value_result = fetchText_data(database_name, table_name, x_axis[0], aggregate_py,selected_user)
                         print("Single Value Result for Chart ID", chart_id, ":", single_value_result)
                         # Append single value chart data
                         chart_data_list.append({
