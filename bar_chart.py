@@ -1163,7 +1163,11 @@ def fetch_data(table_name, x_axis_columns, filter_options, y_axis_column, aggreg
     elif aggregation == "average":
         grouped_df = filtered_df.groupby(x_axis_columns_str[0])[y_axis_column].mean().reset_index()
     elif aggregation == "count":
-        grouped_df = filtered_df.groupby(x_axis_columns_str[0]).size().reset_index(name="count")
+        # grouped_df = filtered_df.groupby(x_axis_columns_str[0]).size().reset_index(name="count")
+        # Instead of .size(), select the country column and use .nunique()
+        grouped_df = filtered_df.groupby(x_axis_columns_str[0])[y_axis_column].nunique().reset_index(name="count")
+        print("grouped_df:==================================", grouped_df)
+
     elif aggregation == "maximum":
         grouped_df = filtered_df.groupby(x_axis_columns_str[0])[y_axis_column].max().reset_index()
     elif aggregation == "minimum":
@@ -3451,16 +3455,16 @@ def perform_calculation(dataframe, columnName, calculation):
         raise ValueError(f"Failed to evaluate general expression: {str(e)}")
 
 
-def fetchText_data(databaseName, table_Name, x_axis, aggregate,selectedUser):
-    # print("aggregate===========================>>>>", aggregate_py)   
+def fetchText_data(databaseName, table_Name, x_axis, aggregate_py,selectedUser):
+    print("aggregate===========================>>>>", aggregate_py)   
     print(table_Name)
-    aggregate_py = {
-    'count': 'count',
-    'sum': 'sum',
-    'average': 'mean',
-    'minimum': 'min',
-    'maximum': 'max'
-}.get(aggregate, 'sum')  # Default to 'sum' if no match
+#     aggregate_py = {
+#     'count': 'count',
+#     'sum': 'sum',
+#     'average': 'mean',
+#     'minimum': 'min',
+#     'maximum': 'max'
+# }.get(aggregate, 'sum')  # Default to 'sum' if no match
 
     
     conn = get_db_connection_or_path(selectedUser, databaseName)
@@ -3490,10 +3494,11 @@ def fetchText_data(databaseName, table_Name, x_axis, aggregate,selectedUser):
         FROM {table_Name}
         """
 
-    # print("Query:", query)
+    print("Query:", query)
     
     cur.execute(query)
     result = cur.fetchone()  # Fetch only one row since the query returns a single value
+    print("result",result)
     
     # Close the cursor and connection
     cur.close()

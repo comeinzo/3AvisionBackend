@@ -386,7 +386,7 @@ def get_Edit_dashboard_names(user_id, database_name):
                 cursor.execute("""
                     SELECT user_id, file_name 
                     FROM table_dashboard 
-                    WHERE user_id = %s AND company_name = %s
+                    WHERE user_id = %s AND company_name = %s ORDER BY updated_at DESC
                 """, (str(user_id), database_name))
 
                 dashboards = cursor.fetchall()
@@ -644,6 +644,7 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
     conn = create_connection()  # Initial connection to your main database
     print("Chart areacolour:", areacolour)
     print("Chart opacity received:", opacity)
+    print("positions",positions)
     if conn:
         try:
             print("chart_ids",chart_ids)
@@ -756,7 +757,7 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                     chart_areacolour[chart_id] = None  # Or some default color
           
 
-
+            print("chart_positions",chart_positions)
             print("Chart Filters:", chart_filters)
             print("Processed chart_areacolour:", chart_areacolour)
             for chart_id, position in chart_positions.items():
@@ -815,6 +816,10 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                     yAxisTitle =chart_data[25]
                     agg_value = chart_data[5]  # aggregate from DB
                     print("agg_value0", agg_value)
+                    # Clean agg_value from quotes
+                    if isinstance(agg_value, str):
+                        agg_value = agg_value.replace('"', '').replace("'", '').strip().lower()
+                        print("agg_value1", agg_value)
 
                     # Ensure y_axis is list
                     current_y_axis = None
@@ -829,7 +834,7 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                     aggregate = None
 
                     # CASE 1: Simple direct aggregation string
-                    if isinstance(agg_value, str) and agg_value.lower() in ["sum", "count", "avg", "mean", "min", "max"]:
+                    if isinstance(agg_value, str) and agg_value.lower() in ["minimum","maximum","sum", "count", "avg", "mean", "min", "max","average"]:
                         aggregate = agg_value.lower()
                         print("✔ Using direct string aggregate:", aggregate)
 
@@ -1251,7 +1256,16 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                     # Handle singleValueChart type separately
                     elif chart_type == "singleValueChart":
                         print("sv")
-                        single_value_result = fetchText_data(database_name, table_name, x_axis[0], aggregate,selected_user)
+                        print("aggregate5",aggregate)
+                        aggregate_py = {
+                            'count': 'count',
+                            'sum': 'sum',
+                            'average': 'avg',
+                            'minimum': 'min',
+                            'maximum': 'max'
+                        }.get(aggregate, 'sum') 
+                        
+                        single_value_result = fetchText_data(database_name, table_name, x_axis[0], aggregate_py,selected_user)
                         print("Single Value Result for Chart ID", chart_id, ":", single_value_result)
                         # Append single value chart data
                         chart_data_list.append({
@@ -1279,7 +1293,15 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                         continue  # Skip further processing for this chart ID
                     elif chart_type == "meterGauge":
                         print("meterGauge")
-                        single_value_result = fetchText_data(database_name, table_name, x_axis[0], aggregate,selected_user)
+                        print("aggregate5",aggregate)
+                        aggregate_py = {
+                            'count': 'count',
+                            'sum': 'sum',
+                            'average': 'avg',
+                            'minimum': 'min',
+                            'maximum': 'max'
+                        }.get(aggregate, 'sum') 
+                        single_value_result = fetchText_data(database_name, table_name, x_axis[0], aggregate_py,selected_user)
                         print("Single Value Result for Chart ID", chart_id, ":", single_value_result)
                         # Append single value chart data
                         chart_data_list.append({
@@ -1690,7 +1712,9 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                             #                 GROUPING AFTER GRANULARITY
                             # =========================================================
                             print(f"\nGrouping by: {x_axis[0]}")
-                            grouped_df = df.groupby(x_axis[0]).size().reset_index(name="count")
+                            # grouped_df = df.groupby(x_axis[0]).size().reset_index(name="count")
+                            grouped_df = df.groupby(x_axis[0])[y_axis[0]].nunique().reset_index(name="count")
+
                             
                             
                             # print("Grouped DataFrame after filtering:", grouped_df)
@@ -2101,6 +2125,19 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                        # =========================================================
                         #     DATE GRANULARITY (NORMAL AGG) — SAME AS COUNT VERSION
                         # =========================================================
+                        if isinstance(filter_options, str):
+                            try:
+                                filter_options = json.loads(filter_options)
+                            except:
+                                filter_options = {}
+
+                        if filter_options:
+                            for col, allowed_values in filter_options.items():
+                                if col in dataframe.columns:
+                                    dataframe = dataframe[dataframe[col].isin(allowed_values)]
+
+                        print("DataFrame after dashboard filtering:")
+                        print(dataframe.head())
                         dateGranularity = selectedFrequency
 
                         # Parse granularity JSON if string
@@ -2181,12 +2218,16 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                         #     if category in filter_options:
                         #         filtered_categories.append(category)
                         #         filtered_values.append(value)
-                        if isinstance(filter_options, str):
-                                try:
-                                    filter_options = json.loads(filter_options)  # Convert JSON string to dict
-                                except json.JSONDecodeError:
-                                    raise ValueError("Invalid JSON format for filter_options")
-                           
+                        # if isinstance(filter_options, str):
+                        #         try:
+                        #             filter_options = json.loads(filter_options)  # Convert JSON string to dict
+                        #         except json.JSONDecodeError:
+                        #             raise ValueError("Invalid JSON format for filter_options")
+                        if isinstance(selectedFrequency, str):
+                            try:
+                                selectedFrequency = json.loads(selectedFrequency)
+                            except json.JSONDecodeError:
+                                selectedFrequency = {}
                         print("selectedFrequency",selectedFrequency)
                         # if selectedFrequency:
                         #     filtered_categories = categories
@@ -2210,6 +2251,9 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                             filtered_values = []
                             for category, value in zip(categories, values):
                                 print("filter_options",filter_options,axis_col)
+                                if not filter_options or axis_col not in filter_options:
+                                    filtered_categories = categories
+                                    filtered_values = values
 
                                 if axis_col in filter_options and category in filter_options[axis_col]:
                                     

@@ -1471,12 +1471,17 @@ def update_filters():
             index = chart_ids_list.index(chart_id)
             existing_filter_at_position = filters_list[index]
 
-            if column_name in existing_filter_at_position:
-                filters_list[index][column_name] = selected_values
-                updated_charts.append(f"Chart {chart_id} is updated.")
-                print(f"Updated chart at position {index} with column {column_name}")
-            else:
-                skipped_charts.append(f"Chart {chart_id} is skipped because column '{column_name}' was not found.")
+            # if column_name in existing_filter_at_position:
+            #     filters_list[index][column_name] = selected_values
+            #     updated_charts.append(f"Chart {chart_id} is updated.")
+            #     print(f"Updated chart at position {index} with column {column_name}")
+            # else:
+            #     skipped_charts.append(f"Chart {chart_id} is skipped because column '{column_name}' was not found.")
+            # Always set / overwrite the filter
+            filters_list[index][column_name] = selected_values
+            updated_charts.append(f"Chart {chart_id} is updated.")
+            print(f"Updated chart {chart_id} with filter {column_name}: {selected_values}")
+
         else:
             return jsonify({"error": f"Chart ID {chart_id} not found in chart_ids_list"}), 404
 
@@ -5112,12 +5117,14 @@ def receive_single_value_chart_data():
                     'minimum': 'min',
                     'maximum': 'max'
                 }.get(aggregate, 'sum') 
+    print("aggregate_py====================",aggregate_py)
+                
     fetched_data = fetchText_data(databaseName, table_Name, x_axis,aggregate_py,selectedUser)
     print("Fetched Data:", fetched_data)
     print(f"Received x_axis: {x_axis}")
     print(f"Received databaseName: {databaseName}")
     print(f"Received table_Name: {table_Name}")
-    print(f"aggregate====================",{aggregate})
+    print(f"aggregate====================",{aggregate_py})
     return jsonify({"data": fetched_data,
                     "chart_id": chart_id,
                      "message": "Data received successfully!"})
@@ -5139,8 +5146,16 @@ def receive_chart_data():
     print("table_Name====================",table_Name)
     print("aggregate====================",aggregate)
     print("selectedUser====================",selectedUser)
+    aggregate_py = {
+                    'count': 'count',
+                    'sum': 'sum',
+                    'average': 'avg',
+                    'minimum': 'min',
+                    'maximum': 'max'
+                }.get(aggregate, 'sum') 
+    print("aggregate_py====================",aggregate_py)
     
-    fetched_data = fetchText_data(databaseName, table_Name, x_axis,aggregate,selectedUser)
+    fetched_data = fetchText_data(databaseName, table_Name, x_axis,aggregate_py,selectedUser)
     print("Fetched Data:", fetched_data)
     print(f"Received x_axis: {x_axis}")
     print(f"Received databaseName: {databaseName}")
@@ -5151,45 +5166,88 @@ def receive_chart_data():
                     "chart_id": chart_id,
                      "message": "Data received successfully!"})
 
-@app.route('/api/text_chart_view', methods=['POST'])
+# @app.route('/api/text_chart_view', methods=['POST'])
+# @token_required
+# def receive_view_chart_data():
+#     data = request.get_json()
+#     print("data====================",data)
+#     chart_id=data.get('chart_id')
+#     x_axis = data.get('text_y_xis')[0]
+#     databaseName = data.get('text_y_database')
+#     table_Name = data.get('text_y_table')
+#     aggregate=data.get('text_y_aggregate')
+    
+    
+#     print("x_axis====================",x_axis)  
+#     print("databaseName====================",databaseName)  
+#     print("table_Name====================",table_Name)
+#     print("aggregate====================",aggregate)
+#     connection =get_db_connection()
+        
+#         # Fetch selectedUser from the database based on chart_id
+#     query = "SELECT selectedUser FROM table_chart_save WHERE id = %s"
+#     cursor = connection.cursor()
+#     cursor.execute(query, (chart_id,))  # Ensure chart_id is passed as a tuple
+#     selectedUser = cursor.fetchone()
+#     print("selectedUser",selectedUser)
+#     if not selectedUser:
+#             print("No selectedUser found for chart_id:", chart_id)
+#             return {"error": "No user found for the given chart ID"}
+        
+#     selectedUser = selectedUser[0]  # Extract value from tuple
+#     print("Fetched selectedUser:", selectedUser)
+#     fetched_data = fetchText_data(databaseName, table_Name, x_axis,aggregate,selectedUser)
+#     print("Fetched Data:", fetched_data)
+#     print(f"Received x_axis: {x_axis}")
+#     print(f"Received databaseName: {databaseName}")
+#     print(f"Received table_Name: {table_Name}")
+#     print(f"aggregate====================",{aggregate})
+
+#     return jsonify({"data": fetched_data,
+#                     "chart_id": chart_id,
+#                      "message": "Data received successfully!"})
+@app.route('/api/text_chart', methods=['POST'])
 @token_required
 def receive_view_chart_data():
     data = request.get_json()
-    print("data====================",data)
-    chart_id=data.get('chart_id')
+    print("data====================", data)
+
+    chart_id = data.get('chart_id')
     x_axis = data.get('text_y_xis')[0]
     databaseName = data.get('text_y_database')
-    table_Name = data.get('text_y_table')
-    aggregate=data.get('text_y_aggregate')
-    
-    print("x_axis====================",x_axis)  
-    print("databaseName====================",databaseName)  
-    print("table_Name====================",table_Name)
-    print("aggregate====================",aggregate)
-    connection =get_db_connection()
-        
-        # Fetch selectedUser from the database based on chart_id
-    query = "SELECT selectedUser FROM table_chart_save WHERE id = %s"
-    cursor = connection.cursor()
-    cursor.execute(query, (chart_id,))  # Ensure chart_id is passed as a tuple
-    selectedUser = cursor.fetchone()
-    print("selectedUser",selectedUser)
-    if not selectedUser:
-            print("No selectedUser found for chart_id:", chart_id)
-            return {"error": "No user found for the given chart ID"}
-        
-    selectedUser = selectedUser[0]  # Extract value from tuple
-    print("Fetched selectedUser:", selectedUser)
-    fetched_data = fetchText_data(databaseName, table_Name, x_axis,aggregate,selectedUser)
-    print("Fetched Data:", fetched_data)
-    print(f"Received x_axis: {x_axis}")
-    print(f"Received databaseName: {databaseName}")
-    print(f"Received table_Name: {table_Name}")
-    print(f"aggregate====================",{aggregate})
+    table_Name = data.get('text_y_table')[0]
+    aggregate = data.get('text_y_aggregate')
+    selectedUser = data.get("selectedUser")
 
-    return jsonify({"data": fetched_data,
-                    "chart_id": chart_id,
-                     "message": "Data received successfully!"})
+   
+
+    print("aggregate (normalized) ====================", aggregate)
+
+    # 🔹 PostgreSQL-safe aggregation
+    aggregate_py = {
+        'count': 'count',
+        'sum': 'sum',
+        'average': 'avg',
+        'minimum': 'min',
+        'maximum': 'max'
+    }.get(aggregate.lower(), 'sum')
+
+    print("aggregate_py====================", aggregate_py)
+
+    fetched_data = fetchText_data(
+        databaseName,
+        table_Name,
+        x_axis,
+        aggregate_py,
+        selectedUser
+    )
+
+    return jsonify({
+        "data": fetched_data,
+        "chart_id": chart_id,
+        "message": "Data received successfully!"
+    })
+
 
 
 @app.route('/api/handle-clicked-category',methods=['POST'])
@@ -6248,35 +6306,79 @@ def receive_chart_details():
                     original_date_col = None
                     if isinstance(dateGranularity, dict) and len(dateGranularity) > 0:
                         original_date_col = list(dateGranularity.keys())[0]
+                        print("original_date_col",original_date_col)
 
                     allowed_categories = []
 
                     if original_date_col:
                         raw_dates = filter_options.get(original_date_col, [])
+                        print("raw_dates",raw_dates)
                         gran = dateGranularity.get(original_date_col, "").lower()
-
+                        print("gran",gran)
                         for d in raw_dates:
-                            dt = pd.to_datetime(d, errors='coerce')
-                            if pd.isna(dt):
-                                continue
 
+                            # ✅ HANDLE YEAR INT / STRING DIRECTLY
                             if gran == "year":
-                                key = dt.to_period("Y").to_timestamp().strftime("%Y-%m-%d")
-                            elif gran == "quarter":
-                                key = dt.to_period("Q").to_timestamp().strftime("%Y-%m-%d")
-                            elif gran == "month":
-                                key = dt.to_period("M").to_timestamp().strftime("%Y-%m-%d")
-                            elif gran == "week":
-                                key = dt.to_period("W").to_timestamp().strftime("%Y-%m-%d")
+                                key = str(d)
+                            
                             else:
-                                key = dt.date().strftime("%Y-%m-%d")
+                                dt = pd.to_datetime(d, errors='coerce')
+                                if pd.isna(dt):
+                                    continue
+
+                                if gran == "quarter":
+                                    key = f"{dt.year}-Q{dt.quarter}"
+
+                                elif gran == "month":
+                                    key = dt.strftime("%Y-%m")
+
+                                elif gran == "week":
+                                    key = f"{dt.year}-W{dt.isocalendar().week}"
+
+                                else:
+                                    key = dt.strftime("%Y-%m-%d")
 
                             if key not in allowed_categories:
                                 allowed_categories.append(key)
+                                print("allowed_categories1", allowed_categories, key)
+
+
+                        # for d in raw_dates:
+                            
+
+                        #     # if gran == "year":
+                        #     #     key = dt.to_period("Y").to_timestamp().strftime("%Y-%m-%d")
+                        #     # elif gran == "quarter":
+                        #     #     key = dt.to_period("Q").to_timestamp().strftime("%Y-%m-%d")
+                        #     # elif gran == "month":
+                        #     #     key = dt.to_period("M").to_timestamp().strftime("%Y-%m-%d")
+                        #     # elif gran == "week":
+                        #     #     key = dt.to_period("W").to_timestamp().strftime("%Y-%m-%d")
+                        #     # else:
+                        #     #     key = dt.date().strftime("%Y-%m-%d")
+                        #     if gran == "year":
+                        #         key = str(dt.year)
+
+                        #     elif gran == "quarter":
+                        #         key = f"{dt.year}-Q{dt.quarter}"
+
+                        #     elif gran == "month":
+                        #         key = dt.strftime("%Y-%m")
+
+                        #     elif gran == "week":
+                        #         key = f"{dt.year}-W{dt.isocalendar().week}"
+
+                        #     else:
+                        #         key = dt.strftime("%Y-%m-%d")
+
+
+                        #     if key not in allowed_categories:
+                        #         allowed_categories.append(key)
+                        #         print("allowed_categories1",allowed_categories,key)
 
                     else:
                         allowed_categories = list(map(str, filter_options.get(x_axis[0], [])))
-
+                        print("allowed_categories2",allowed_categories)
                     # ---------- FINAL FILTER ----------
                     if not allowed_categories:
                         filtered_categories = categories
