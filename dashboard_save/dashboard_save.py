@@ -1293,7 +1293,15 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                         continue  # Skip further processing for this chart ID
                     elif chart_type == "meterGauge":
                         print("meterGauge")
-                        single_value_result = fetchText_data(database_name, table_name, x_axis[0], aggregate,selected_user)
+                        print("aggregate5",aggregate)
+                        aggregate_py = {
+                            'count': 'count',
+                            'sum': 'sum',
+                            'average': 'avg',
+                            'minimum': 'min',
+                            'maximum': 'max'
+                        }.get(aggregate, 'sum') 
+                        single_value_result = fetchText_data(database_name, table_name, x_axis[0], aggregate_py,selected_user)
                         print("Single Value Result for Chart ID", chart_id, ":", single_value_result)
                         # Append single value chart data
                         chart_data_list.append({
