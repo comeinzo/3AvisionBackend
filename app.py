@@ -5112,12 +5112,14 @@ def receive_single_value_chart_data():
                     'minimum': 'min',
                     'maximum': 'max'
                 }.get(aggregate, 'sum') 
+    print("aggregate_py====================",aggregate_py)
+                
     fetched_data = fetchText_data(databaseName, table_Name, x_axis,aggregate_py,selectedUser)
     print("Fetched Data:", fetched_data)
     print(f"Received x_axis: {x_axis}")
     print(f"Received databaseName: {databaseName}")
     print(f"Received table_Name: {table_Name}")
-    print(f"aggregate====================",{aggregate})
+    print(f"aggregate====================",{aggregate_py})
     return jsonify({"data": fetched_data,
                     "chart_id": chart_id,
                      "message": "Data received successfully!"})
@@ -5139,8 +5141,16 @@ def receive_chart_data():
     print("table_Name====================",table_Name)
     print("aggregate====================",aggregate)
     print("selectedUser====================",selectedUser)
+    aggregate_py = {
+                    'count': 'count',
+                    'sum': 'sum',
+                    'average': 'avg',
+                    'minimum': 'min',
+                    'maximum': 'max'
+                }.get(aggregate, 'sum') 
+    print("aggregate_py====================",aggregate_py)
     
-    fetched_data = fetchText_data(databaseName, table_Name, x_axis,aggregate,selectedUser)
+    fetched_data = fetchText_data(databaseName, table_Name, x_axis,aggregate_py,selectedUser)
     print("Fetched Data:", fetched_data)
     print(f"Received x_axis: {x_axis}")
     print(f"Received databaseName: {databaseName}")
@@ -5151,45 +5161,88 @@ def receive_chart_data():
                     "chart_id": chart_id,
                      "message": "Data received successfully!"})
 
-@app.route('/api/text_chart_view', methods=['POST'])
+# @app.route('/api/text_chart_view', methods=['POST'])
+# @token_required
+# def receive_view_chart_data():
+#     data = request.get_json()
+#     print("data====================",data)
+#     chart_id=data.get('chart_id')
+#     x_axis = data.get('text_y_xis')[0]
+#     databaseName = data.get('text_y_database')
+#     table_Name = data.get('text_y_table')
+#     aggregate=data.get('text_y_aggregate')
+    
+    
+#     print("x_axis====================",x_axis)  
+#     print("databaseName====================",databaseName)  
+#     print("table_Name====================",table_Name)
+#     print("aggregate====================",aggregate)
+#     connection =get_db_connection()
+        
+#         # Fetch selectedUser from the database based on chart_id
+#     query = "SELECT selectedUser FROM table_chart_save WHERE id = %s"
+#     cursor = connection.cursor()
+#     cursor.execute(query, (chart_id,))  # Ensure chart_id is passed as a tuple
+#     selectedUser = cursor.fetchone()
+#     print("selectedUser",selectedUser)
+#     if not selectedUser:
+#             print("No selectedUser found for chart_id:", chart_id)
+#             return {"error": "No user found for the given chart ID"}
+        
+#     selectedUser = selectedUser[0]  # Extract value from tuple
+#     print("Fetched selectedUser:", selectedUser)
+#     fetched_data = fetchText_data(databaseName, table_Name, x_axis,aggregate,selectedUser)
+#     print("Fetched Data:", fetched_data)
+#     print(f"Received x_axis: {x_axis}")
+#     print(f"Received databaseName: {databaseName}")
+#     print(f"Received table_Name: {table_Name}")
+#     print(f"aggregate====================",{aggregate})
+
+#     return jsonify({"data": fetched_data,
+#                     "chart_id": chart_id,
+#                      "message": "Data received successfully!"})
+@app.route('/api/text_chart', methods=['POST'])
 @token_required
 def receive_view_chart_data():
     data = request.get_json()
-    print("data====================",data)
-    chart_id=data.get('chart_id')
+    print("data====================", data)
+
+    chart_id = data.get('chart_id')
     x_axis = data.get('text_y_xis')[0]
     databaseName = data.get('text_y_database')
-    table_Name = data.get('text_y_table')
-    aggregate=data.get('text_y_aggregate')
-    
-    print("x_axis====================",x_axis)  
-    print("databaseName====================",databaseName)  
-    print("table_Name====================",table_Name)
-    print("aggregate====================",aggregate)
-    connection =get_db_connection()
-        
-        # Fetch selectedUser from the database based on chart_id
-    query = "SELECT selectedUser FROM table_chart_save WHERE id = %s"
-    cursor = connection.cursor()
-    cursor.execute(query, (chart_id,))  # Ensure chart_id is passed as a tuple
-    selectedUser = cursor.fetchone()
-    print("selectedUser",selectedUser)
-    if not selectedUser:
-            print("No selectedUser found for chart_id:", chart_id)
-            return {"error": "No user found for the given chart ID"}
-        
-    selectedUser = selectedUser[0]  # Extract value from tuple
-    print("Fetched selectedUser:", selectedUser)
-    fetched_data = fetchText_data(databaseName, table_Name, x_axis,aggregate,selectedUser)
-    print("Fetched Data:", fetched_data)
-    print(f"Received x_axis: {x_axis}")
-    print(f"Received databaseName: {databaseName}")
-    print(f"Received table_Name: {table_Name}")
-    print(f"aggregate====================",{aggregate})
+    table_Name = data.get('text_y_table')[0]
+    aggregate = data.get('text_y_aggregate')
+    selectedUser = data.get("selectedUser")
 
-    return jsonify({"data": fetched_data,
-                    "chart_id": chart_id,
-                     "message": "Data received successfully!"})
+   
+
+    print("aggregate (normalized) ====================", aggregate)
+
+    # 🔹 PostgreSQL-safe aggregation
+    aggregate_py = {
+        'count': 'count',
+        'sum': 'sum',
+        'average': 'avg',
+        'minimum': 'min',
+        'maximum': 'max'
+    }.get(aggregate.lower(), 'sum')
+
+    print("aggregate_py====================", aggregate_py)
+
+    fetched_data = fetchText_data(
+        databaseName,
+        table_Name,
+        x_axis,
+        aggregate_py,
+        selectedUser
+    )
+
+    return jsonify({
+        "data": fetched_data,
+        "chart_id": chart_id,
+        "message": "Data received successfully!"
+    })
+
 
 
 @app.route('/api/handle-clicked-category',methods=['POST'])
