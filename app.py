@@ -6248,35 +6248,79 @@ def receive_chart_details():
                     original_date_col = None
                     if isinstance(dateGranularity, dict) and len(dateGranularity) > 0:
                         original_date_col = list(dateGranularity.keys())[0]
+                        print("original_date_col",original_date_col)
 
                     allowed_categories = []
 
                     if original_date_col:
                         raw_dates = filter_options.get(original_date_col, [])
+                        print("raw_dates",raw_dates)
                         gran = dateGranularity.get(original_date_col, "").lower()
-
+                        print("gran",gran)
                         for d in raw_dates:
-                            dt = pd.to_datetime(d, errors='coerce')
-                            if pd.isna(dt):
-                                continue
 
+                            # ✅ HANDLE YEAR INT / STRING DIRECTLY
                             if gran == "year":
-                                key = dt.to_period("Y").to_timestamp().strftime("%Y-%m-%d")
-                            elif gran == "quarter":
-                                key = dt.to_period("Q").to_timestamp().strftime("%Y-%m-%d")
-                            elif gran == "month":
-                                key = dt.to_period("M").to_timestamp().strftime("%Y-%m-%d")
-                            elif gran == "week":
-                                key = dt.to_period("W").to_timestamp().strftime("%Y-%m-%d")
+                                key = str(d)
+                            
                             else:
-                                key = dt.date().strftime("%Y-%m-%d")
+                                dt = pd.to_datetime(d, errors='coerce')
+                                if pd.isna(dt):
+                                    continue
+
+                                if gran == "quarter":
+                                    key = f"{dt.year}-Q{dt.quarter}"
+
+                                elif gran == "month":
+                                    key = dt.strftime("%Y-%m")
+
+                                elif gran == "week":
+                                    key = f"{dt.year}-W{dt.isocalendar().week}"
+
+                                else:
+                                    key = dt.strftime("%Y-%m-%d")
 
                             if key not in allowed_categories:
                                 allowed_categories.append(key)
+                                print("allowed_categories1", allowed_categories, key)
+
+
+                        # for d in raw_dates:
+                            
+
+                        #     # if gran == "year":
+                        #     #     key = dt.to_period("Y").to_timestamp().strftime("%Y-%m-%d")
+                        #     # elif gran == "quarter":
+                        #     #     key = dt.to_period("Q").to_timestamp().strftime("%Y-%m-%d")
+                        #     # elif gran == "month":
+                        #     #     key = dt.to_period("M").to_timestamp().strftime("%Y-%m-%d")
+                        #     # elif gran == "week":
+                        #     #     key = dt.to_period("W").to_timestamp().strftime("%Y-%m-%d")
+                        #     # else:
+                        #     #     key = dt.date().strftime("%Y-%m-%d")
+                        #     if gran == "year":
+                        #         key = str(dt.year)
+
+                        #     elif gran == "quarter":
+                        #         key = f"{dt.year}-Q{dt.quarter}"
+
+                        #     elif gran == "month":
+                        #         key = dt.strftime("%Y-%m")
+
+                        #     elif gran == "week":
+                        #         key = f"{dt.year}-W{dt.isocalendar().week}"
+
+                        #     else:
+                        #         key = dt.strftime("%Y-%m-%d")
+
+
+                        #     if key not in allowed_categories:
+                        #         allowed_categories.append(key)
+                        #         print("allowed_categories1",allowed_categories,key)
 
                     else:
                         allowed_categories = list(map(str, filter_options.get(x_axis[0], [])))
-
+                        print("allowed_categories2",allowed_categories)
                     # ---------- FINAL FILTER ----------
                     if not allowed_categories:
                         filtered_categories = categories

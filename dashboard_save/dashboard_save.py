@@ -386,7 +386,7 @@ def get_Edit_dashboard_names(user_id, database_name):
                 cursor.execute("""
                     SELECT user_id, file_name 
                     FROM table_dashboard 
-                    WHERE user_id = %s AND company_name = %s
+                    WHERE user_id = %s AND company_name = %s ORDER BY updated_at DESC
                 """, (str(user_id), database_name))
 
                 dashboards = cursor.fetchall()
@@ -644,6 +644,7 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
     conn = create_connection()  # Initial connection to your main database
     print("Chart areacolour:", areacolour)
     print("Chart opacity received:", opacity)
+    print("positions",positions)
     if conn:
         try:
             print("chart_ids",chart_ids)
@@ -756,7 +757,7 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                     chart_areacolour[chart_id] = None  # Or some default color
           
 
-
+            print("chart_positions",chart_positions)
             print("Chart Filters:", chart_filters)
             print("Processed chart_areacolour:", chart_areacolour)
             for chart_id, position in chart_positions.items():
@@ -2186,7 +2187,11 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                                     filter_options = json.loads(filter_options)  # Convert JSON string to dict
                                 except json.JSONDecodeError:
                                     raise ValueError("Invalid JSON format for filter_options")
-                           
+                        if isinstance(selectedFrequency, str):
+                            try:
+                                selectedFrequency = json.loads(selectedFrequency)
+                            except json.JSONDecodeError:
+                                selectedFrequency = {}
                         print("selectedFrequency",selectedFrequency)
                         # if selectedFrequency:
                         #     filtered_categories = categories
@@ -2210,6 +2215,9 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                             filtered_values = []
                             for category, value in zip(categories, values):
                                 print("filter_options",filter_options,axis_col)
+                                if not filter_options or axis_col not in filter_options:
+                                    filtered_categories = categories
+                                    filtered_values = values
 
                                 if axis_col in filter_options and category in filter_options[axis_col]:
                                     
