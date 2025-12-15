@@ -1471,12 +1471,17 @@ def update_filters():
             index = chart_ids_list.index(chart_id)
             existing_filter_at_position = filters_list[index]
 
-            if column_name in existing_filter_at_position:
-                filters_list[index][column_name] = selected_values
-                updated_charts.append(f"Chart {chart_id} is updated.")
-                print(f"Updated chart at position {index} with column {column_name}")
-            else:
-                skipped_charts.append(f"Chart {chart_id} is skipped because column '{column_name}' was not found.")
+            # if column_name in existing_filter_at_position:
+            #     filters_list[index][column_name] = selected_values
+            #     updated_charts.append(f"Chart {chart_id} is updated.")
+            #     print(f"Updated chart at position {index} with column {column_name}")
+            # else:
+            #     skipped_charts.append(f"Chart {chart_id} is skipped because column '{column_name}' was not found.")
+            # Always set / overwrite the filter
+            filters_list[index][column_name] = selected_values
+            updated_charts.append(f"Chart {chart_id} is updated.")
+            print(f"Updated chart {chart_id} with filter {column_name}: {selected_values}")
+
         else:
             return jsonify({"error": f"Chart ID {chart_id} not found in chart_ids_list"}), 404
 
