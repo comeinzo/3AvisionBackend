@@ -5206,47 +5206,81 @@ def receive_chart_data():
 #     return jsonify({"data": fetched_data,
 #                     "chart_id": chart_id,
 #                      "message": "Data received successfully!"})
-@app.route('/api/text_chart', methods=['POST'])
+@app.route('/api/text_chart_view', methods=['POST'])
 @token_required
 def receive_view_chart_data():
     data = request.get_json()
-    print("data====================", data)
-
-    chart_id = data.get('chart_id')
+    print("data====================",data)
+    chart_id=data.get('chart_id')
     x_axis = data.get('text_y_xis')[0]
     databaseName = data.get('text_y_database')
-    table_Name = data.get('text_y_table')[0]
-    aggregate = data.get('text_y_aggregate')
-    selectedUser = data.get("selectedUser")
+    table_Name = data.get('text_y_table')
+    print("table_Name====================", table_Name)
+    aggregate=data.get('text_y_aggregate')
+    selectedUser=data.get("selectedUser")
+    aggregate = aggregate.replace('"', '').replace("'", '').strip().lower()
+    print("x_axis====================",x_axis)  
+    print("databaseName====================",databaseName)  
+    print("table_Name====================",table_Name)
+    print("aggregate====================",aggregate)
+    print("selectedUser====================",selectedUser)
+    aggregate_py = {
+                    'count': 'count',
+                    'sum': 'sum',
+                    'average': 'avg',
+                    'minimum': 'min',
+                    'maximum': 'max'
+                }.get(aggregate, 'sum') 
+    print("aggregate_py====================",aggregate_py)
+    
+    fetched_data = fetchText_data(databaseName, table_Name, x_axis,aggregate_py,selectedUser)
+    print("Fetched Data:", fetched_data)
+    print(f"Received x_axis: {x_axis}")
+    print(f"Received databaseName: {databaseName}")
+    print(f"Received table_Name: {table_Name}")
+    print(f"aggregate====================",{aggregate})
+
+    return jsonify({"data": fetched_data,
+                    "chart_id": chart_id,
+                     "message": "Data received successfully!"})
+    # data = request.get_json()
+    # print("data====================", data)
+
+    # chart_id = data.get('chart_id')
+    # x_axis = data.get('text_y_xis')[0]
+    # databaseName = data.get('text_y_database')
+    # table_Name = data.get('text_y_table')[0]
+    # aggregate = data.get('text_y_aggregate')
+    # selectedUser = data.get("selectedUser")
 
    
 
-    print("aggregate (normalized) ====================", aggregate)
+    # print("aggregate (normalized) ====================", aggregate)
 
-    # 🔹 PostgreSQL-safe aggregation
-    aggregate_py = {
-        'count': 'count',
-        'sum': 'sum',
-        'average': 'avg',
-        'minimum': 'min',
-        'maximum': 'max'
-    }.get(aggregate.lower(), 'sum')
+    # # 🔹 PostgreSQL-safe aggregation
+    # aggregate_py = {
+    #     'count': 'count',
+    #     'sum': 'sum',
+    #     'average': 'avg',
+    #     'minimum': 'min',
+    #     'maximum': 'max'
+    # }.get(aggregate.lower(), 'sum')
 
-    print("aggregate_py====================", aggregate_py)
+    # print("aggregate_py====================", aggregate_py)
 
-    fetched_data = fetchText_data(
-        databaseName,
-        table_Name,
-        x_axis,
-        aggregate_py,
-        selectedUser
-    )
+    # fetched_data = fetchText_data(
+    #     databaseName,
+    #     table_Name,
+    #     x_axis,
+    #     aggregate_py,
+    #     selectedUser
+    # )
 
-    return jsonify({
-        "data": fetched_data,
-        "chart_id": chart_id,
-        "message": "Data received successfully!"
-    })
+    # return jsonify({
+    #     "data": fetched_data,
+    #     "chart_id": chart_id,
+    #     "message": "Data received successfully!"
+    # })
 
 
 
