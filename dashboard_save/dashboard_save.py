@@ -817,9 +817,14 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                     agg_value = chart_data[5]  # aggregate from DB
                     print("agg_value0", agg_value)
                     # Clean agg_value from quotes
-                    if isinstance(agg_value, str):
-                        agg_value = agg_value.replace('"', '').replace("'", '').strip().lower()
-                        print("agg_value1", agg_value)
+                    # if isinstance(agg_value, str):
+                    #     agg_value = agg_value.replace('"', '').replace("'", '').strip().lower()
+                    #     print("agg_value1", agg_value)
+
+                    if chart_type in ["singleValueChart", "meterGauge"]:
+                        if isinstance(agg_value, str):
+                            agg_value = agg_value.replace('"', '').replace("'", '').strip().lower()
+                            print("agg_value1", agg_value)
 
                     # Ensure y_axis is list
                     current_y_axis = None
