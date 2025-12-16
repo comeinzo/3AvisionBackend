@@ -5916,12 +5916,13 @@ def receive_chart_details():
                 print(f"Filtered dataframe rows: {len(filtered_df)}")
 
                 # Now group the filtered dataframe (all rows)
-                grouped_df = filtered_df.groupby(x_axis[0]).size().reset_index(name="count")
+                # grouped_df = filtered_df.groupby(x_axis[0])[y_axis[0]].count().reset_index(name="count")
+                grouped_df = filtered_df.groupby(x_axis[0])[y_axis[0]].nunique().reset_index(name="count")
                 print("Grouped DataFrame with all rows:", grouped_df)
 
                 # For valid rows (non-null y_axis values)
                 filtered_df_valid = filtered_df[filtered_df[y_axis[0]].notnull()]
-                grouped_df_valid = filtered_df_valid.groupby(x_axis[0])[y_axis[0]].count().reset_index(name="count")
+                grouped_df_valid = filtered_df_valid.groupby(x_axis[0])[y_axis[0]].nunique().reset_index(name="count")
                 print("Grouped DataFrame with valid rows:", grouped_df_valid)
 
                 chosen_grouped_df = grouped_df_valid
