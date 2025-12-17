@@ -2899,6 +2899,7 @@ def fetch_column_name(table_name, x_axis_columns, db_name, calculation_expr, cal
                     
                     date_parts_data = {
                         "is_date": True,
+                        "all_values": [],  
                         "years": [],
                         "quarters": [],
                         "months": [],       # Numeric (1-12)
@@ -2908,7 +2909,23 @@ def fetch_column_name(table_name, x_axis_columns, db_name, calculation_expr, cal
                         "month_names": [],  # e.g., {"num": 1, "name": "January"}
                         "day_names": []     # e.g., {"num": 0, "name": "Sunday"}
                     }
-                    
+                    try:
+                        raw_query = sql.SQL(
+                            "SELECT DISTINCT {col} FROM {table} WHERE {col} IS NOT NULL ORDER BY 1"
+                        ).format(
+                            col=sql.Identifier(col),
+                            table=sql.Identifier(table_name)
+                        )
+
+                        cur.execute(raw_query)
+                        rows = cur.fetchall()
+
+                        # Convert to ISO string for frontend safety
+                        date_parts_data["all_values"] = [
+                            row[0].isoformat() if row[0] else None for row in rows
+                        ]
+                    except Exception as e:
+                        print(f"Error fetching raw date values for {col}: {e}")
                     # (dictionary_key, sql_extract_part)
                     parts_to_query = [
                         ('years', 'YEAR'),

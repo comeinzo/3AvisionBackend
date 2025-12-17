@@ -1552,46 +1552,130 @@ def update_filters():
         if "conn" in locals() and conn:
             conn.close()
 
+# @app.route('/join-tables', methods=['POST'])
+# @token_required
+
+# def join_tables():
+#     data = request.json
+#     print("data__________",data)
+#     tables = data.get('tables')  
+#     selected_columns = data.get('selectedColumns') 
+#     join_columns = data.get('joinColumns')  
+#     join_type = data.get('joinType', 'INNER JOIN') 
+#     database_name = data.get('databaseName')
+#     view_name = data.get('joinedTableName')  
+#     user_email = data.get('email', 'system')
+
+#     query = f"CREATE OR REPLACE VIEW {view_name} AS SELECT {', '.join(selected_columns)} FROM {tables[0]}"
+
+#     for table in tables[1:]:
+#         join_column = join_columns.get(table)
+#         query += f" {join_type} {table} ON {tables[0]}.{join_column} = {table}.{join_column}"
+
+#     print("Executing query:", query)
+
+#     # Connect to the database
+#     connection = None
+#     try:
+#         # Use your database connection method
+#         connection = connect_db(database_name)
+#         cursor = connection.cursor()
+#         cursor.execute(query)
+#         connection.commit()  # Commit to save the view in the database
+#         log_activity(
+#             user_email=user_email,
+#             action_type="JOIN_TABLES",
+#             description=f"Created joined view '{view_name}' using tables: {', '.join(tables)}",
+#             table_name=view_name,
+#             company_name=database_name,
+            
+#         )
+        
+#         print("View created successfully")
+#     except Exception as e:
+#         print("Error executing query:", e)
+#         log_activity(
+#             user_email=user_email,
+#             action_type="ERROR",
+#             description=f"Failed to create joined view '{view_name}': {str(e)}",
+#             table_name=view_name,
+#             company_name=database_name,
+            
+#         )
+#         return jsonify({"error": str(e)}), 500
+#     finally:
+#         if connection:
+#             cursor.close()
+#             connection.close()
+
+#     return jsonify({"message": f"View '{view_name}' created successfully"})
 @app.route('/join-tables', methods=['POST'])
 @token_required
-
 def join_tables():
     data = request.json
-    print("data__________",data)
-    tables = data.get('tables')  
-    selected_columns = data.get('selectedColumns') 
-    join_columns = data.get('joinColumns')  
-    join_type = data.get('joinType', 'INNER JOIN') 
+    print("data__________", data)
+
+    joins = data.get('joins', [])
+    selected_columns = data.get('selectedColumns', {})
     database_name = data.get('databaseName')
-    view_name = data.get('joinedTableName')  
+    view_name = data.get('joinedTableName')
     user_email = data.get('email', 'system')
 
-    query = f"CREATE OR REPLACE VIEW {view_name} AS SELECT {', '.join(selected_columns)} FROM {tables[0]}"
+    if not joins:
+        return jsonify({"error": "No join configuration provided"}), 400
 
-    for table in tables[1:]:
-        join_column = join_columns.get(table)
-        query += f" {join_type} {table} ON {tables[0]}.{join_column} = {table}.{join_column}"
+    # ----------------------------------
+    # Build SELECT columns
+    # ----------------------------------
+    if selected_columns:
+        select_clause = []
+        for table, cols in selected_columns.items():
+            for col in cols:
+                select_clause.append(f'{table}."{col}"')
+        select_sql = ", ".join(select_clause)
+    else:
+        select_sql = "*"
+
+    # ----------------------------------
+    # Build JOIN query
+    # ----------------------------------
+    base_table = joins[0]['leftTable']
+    query = f'CREATE OR REPLACE VIEW {view_name} AS SELECT {select_sql} FROM {base_table}'
+
+    for j in joins:
+        join_type = j.get('joinType', 'INNER JOIN')
+        left_table = j['leftTable']
+        right_table = j['rightTable']
+        left_key = j['leftKey']
+        right_key = j['rightKey']
+
+        query += f'''
+ {join_type} {right_table}
+ ON {left_table}."{left_key}" = {right_table}."{right_key}"
+'''
 
     print("Executing query:", query)
 
-    # Connect to the database
+    # ----------------------------------
+    # Execute query
+    # ----------------------------------
     connection = None
     try:
-        # Use your database connection method
         connection = connect_db(database_name)
         cursor = connection.cursor()
         cursor.execute(query)
-        connection.commit()  # Commit to save the view in the database
+        connection.commit()
+
         log_activity(
             user_email=user_email,
             action_type="JOIN_TABLES",
-            description=f"Created joined view '{view_name}' using tables: {', '.join(tables)}",
+            description=f"Created joined view '{view_name}'",
             table_name=view_name,
             company_name=database_name,
-            
         )
-        
+
         print("View created successfully")
+
     except Exception as e:
         print("Error executing query:", e)
         log_activity(
@@ -1600,15 +1684,16 @@ def join_tables():
             description=f"Failed to create joined view '{view_name}': {str(e)}",
             table_name=view_name,
             company_name=database_name,
-            
         )
         return jsonify({"error": str(e)}), 500
+
     finally:
         if connection:
             cursor.close()
             connection.close()
 
     return jsonify({"message": f"View '{view_name}' created successfully"})
+
 
 DB_CONFIG = {
     'user':USER_NAME,
@@ -2702,7 +2787,15 @@ def get_bar_chart_route():
                 categories[category] = initial_value(aggregation)
             update_category(categories, category, y_axis_value, aggregation)
 
-        labels = [', '.join(category) for category in categories.keys()]
+        # labels = [', '.join(category) for category in categories.keys()]
+        labels = [
+            ', '.join(
+                str(item.strftime('%Y-%m-%d') if hasattr(item, 'strftime') else item)
+                for item in category
+            )
+            for category in categories.keys()
+        ]
+
         values = list(categories.values())
         
         # Apply data limiting if specified
