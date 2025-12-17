@@ -19,11 +19,29 @@ def get_database_table_names(db_name, username, password, host='localhost', port
         )
         cursor = conn.cursor()
         # cursor.execute("SELECT table_name FROM information_schema.tables WHERE table_schema='public' AND table_name != 'datasource'")
+        # cursor.execute("""
+        #     SELECT table_name 
+        #     FROM information_schema.tables 
+        #     WHERE table_schema = 'public'
+        #     AND table_name NOT IN ('employee_list', 'datasource','category','role','role_permission','user',"user_management_logs",'activity_log','external_db_connections')
+        # """)
         cursor.execute("""
-            SELECT table_name 
-            FROM information_schema.tables 
+            SELECT table_name
+            FROM information_schema.tables
             WHERE table_schema = 'public'
-            AND table_name NOT IN ('employee_list', 'datasource','category','role','role_permission','user')
+              AND table_type IN ('BASE TABLE', 'VIEW')
+              AND table_name NOT IN (
+                  'employee_list',
+                  'datasource',
+                  'category',
+                  'role',
+                  'role_permission',
+                  'user',
+                  'user_management_logs',
+                  'activity_log',
+                  'external_db_connections'
+              )
+            ORDER BY table_name
         """)
                            
 
