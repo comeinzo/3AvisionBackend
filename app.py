@@ -3991,6 +3991,8 @@ def save_data():
     except Exception as e:
         print("Error:iiiiiiiiiiiii", e)
         return jsonify({'error': str(e)})
+
+
     
 @app.route('/update_data', methods=['POST'])
 @token_required
@@ -4081,6 +4083,139 @@ def update_data():
         chart_name = chart_name_result[0] if chart_name_result else "Unknown Chart"
 
         cur.close()
+        conn.close()
+
+        # ✅ Fetch user email and username
+        company_name = data.get("company_name")
+        user_id = data.get("user_id")
+
+        if company_name and user_id:
+            email_conn = connect_db(company_name)
+            email_cur = email_conn.cursor()
+            email_cur.execute("SELECT email, username FROM employee_list WHERE employee_id = %s;", (user_id,))
+            result = email_cur.fetchone()
+            user_email = result[0] if result else None
+            username = result[1] if result else "Unknown User"
+            email_cur.close()
+            email_conn.close()
+        else:
+            user_email = None
+            username = "Unknown User"
+
+        # ✅ Log activity with chart name and ID
+        log_activity(
+            user_email=user_email or "Unknown",
+            action_type="Chart Updated",
+            description=(
+                f"User '{username}' ({user_email}) updated chart '{chart_name}' "
+                f"(ID: {data.get('chartId')}) successfully with new configurations."
+            ),
+            table_name="table_chart_save",
+            company_name=company_name,
+            dashboard_name=chart_name
+        )
+        
+        return jsonify({'message': 'Data updated successfully'})
+    except Exception as e:
+        print("Error:", e)
+        return jsonify({'error': str(e)})
+
+@app.route('/update_data_chart', methods=['POST'])
+@token_required
+
+def update_data_chart():
+    data = request.json
+    print("Received data for update:", data)
+    def clean_int(value):
+        try:
+            if value is None or value == "" or str(value).lower() == "null":
+                return None
+            return int(value)
+        except Exception:
+            return None
+
+    
+    try:
+        conn = connect_to_db()
+        cur = conn.cursor()
+        chart_heading_json = json.dumps(data.get('chart_heading'))
+        chart_color_json = json.dumps(data.get('chart_color'))  # ✅ FIX: Convert to JSON
+        filter_options_json = json.dumps(data.get('checkedOptions')) 
+        xAxisTitle = json.dumps(data.get('xAxisTitle'))  # '{"x1": "region", "x2": "product"}'
+        yAxisTitle = json.dumps(data.get('yAxisTitle'))  # '{"y1": ["unit_cost"]}'
+
+        
+        
+        # Update data in the table
+        cur.execute("""
+            UPDATE table_chart_save
+            SET
+
+                selected_table = %s,
+                x_axis = %s,
+                y_axis = %s,
+                aggregate = %s,
+                chart_type = %s,
+                chart_color = %s,
+                chart_heading = %s,
+                drilldown_chart_color = %s,
+                filter_options = %s,
+                xFontSize= %s,         
+                fontStyle= %s,          
+                categoryColor= %s,   
+                yFontSize= %s,          
+                valueColor= %s,
+                headingColor=%s,
+                ClickedTool=%s,Bgcolour=%s,xAxisTitle=%s,
+                yAxisTitle =%s
+            WHERE
+                chart_name = %s And User_id=%s
+        """, (
+
+            data.get('selectedTable'),
+            data.get('xAxis'),
+            data.get('yAxis'),
+            json.dumps(data.get('aggregate')),
+            data.get('chartType'),
+            chart_color_json,
+            chart_heading_json,
+            data.get('drillDownChartColor'),
+            # data.get('filterOptions'),
+            filter_options_json,
+
+            # Assuming there's an 'id' field in the data
+            # data.get('xFontSize'),
+            clean_int(data.get('xFontSize')),
+            data.get('fontStyle'),
+            data.get('categoryColor'),
+            # data.get('yFontSize'),
+            clean_int(data.get('yFontSize')),
+            data.get('valueColor'),
+            data.get('headingColor'),
+            data.get('ClickedTool') ,
+            data.get('areaColor'),
+            xAxisTitle,
+            yAxisTitle, 
+            data.get('saveName'),data.get('user_id')
+           
+        ))
+        
+
+        conn.commit()
+        if cur.rowcount > 0:
+            print(f"✅ Chart '{data.get('saveName')}' updated successfully for user_id {data.get('user_id')}")
+        else:
+            print(f"⚠️ No rows updated! Check chart_name and user_id.")
+
+        cur.close()
+
+
+        # ✅ Fetch chart_name from table_chart_save using chartId
+        # cur.execute("SELECT chart_name FROM table_chart_save WHERE id = %s;", (data.get('chartId'),))
+        # chart_name_result = cur.fetchone()
+        chart_name = data.get('saveName')
+
+        # cur.close()
         conn.close()
 
         # ✅ Fetch user email and username
@@ -16348,6 +16483,195 @@ def get_kpi_insights(table_name):
             'success': False,
             'error': str(e)
         }), 500
+
+
+# @app.route("/api/get-source-data", methods=["POST"])
+# def get_source_data():
+#     payload = request.json
+
+#     # db_details = get_company_db_connection(payload["databaseName"])
+#     database_name = payload["databaseName"]
+#     conn = get_company_db_connection(database_name)
+#     table_name = payload["tableName"]
+#     x_axis = payload.get("xAxis")
+#     y_axis = payload.get("yAxis")
+#     filter_options= payload.get("filter_options", {})
+
+#     data = fetch_source_data_from_table(
+#         db_details=conn,
+#         table_name=table_name,
+#         x_axis=x_axis,
+#         y_axis=y_axis,
+#         limit=1000
+#     )
+
+#     return jsonify(data)
+
+# def fetch_source_data_from_table(db_details, table_name, x_axis=None, y_axis=None, limit=1000):
+#     conn = None
+#     try:
+#         conn = db_details
+
+#         # ----------------------------
+#         # ✅ SQL Execution (ALL COLUMNS)
+#         # ----------------------------
+#         cursor = conn.cursor()
+
+#         query = f"SELECT * FROM {table_name}"
+#         cursor.execute(query)
+
+#         rows = cursor.fetchall()
+#         columns = [desc[0] for desc in cursor.description]
+
+#         print(f"✅ Source data fetched: {len(rows)} rows")
+
+#         return {
+#             "columns": columns,
+#             "rows": [dict(zip(columns, row)) for row in rows]
+#         }
+
+#     except Exception as e:
+#         raise Exception(f"❌ Error fetching source data: {str(e)}")
+
+#     finally:
+#         if conn:
+#             conn.close()
+       
+@app.route("/api/get-source-data", methods=["POST"])
+def get_source_data():
+    payload = request.json
+
+    database_name = payload["databaseName"]
+    conn = get_company_db_connection(database_name)
+    table_name = payload["tableName"]
+    # x_axis = payload.get("xAxis")
+    # y_axis = payload.get("yAxis")
+    filter_options = payload.get("filter_options", {})
+
+    data = fetch_source_data_from_table(
+        db_details=conn,
+        table_name=table_name,
+        filter_options=filter_options,
+        limit=1000
+    )
+
+    return jsonify(data)
+
+
+# def fetch_source_data_from_table(db_details, table_name, filter_options=None, limit=1000):
+#     conn = None
+#     try:
+#         conn = db_details
+#         cursor = conn.cursor()
+#         print("Filter options received:", filter_options)
+
+#         # Base query
+#         query = f"SELECT * FROM {table_name}"
+
+#         # ----------------------------
+#         # ✅ Add filter conditions dynamically
+#         # ----------------------------
+#         where_clauses = []
+#         params = []
+
+#         if filter_options:
+#             for col, values in filter_options.items():
+#                 if isinstance(values, list) and values:
+#                     placeholders = ", ".join(["%s"] * len(values))
+#                     where_clauses.append(f"{col} IN ({placeholders})")
+#                     params.extend(values)
+
+#         if where_clauses:
+#             query += " WHERE " + " AND ".join(where_clauses)
+
+#         query += f" LIMIT {limit}"
+
+#         cursor.execute(query, tuple(params))
+#         rows = cursor.fetchall()
+#         columns = [desc[0] for desc in cursor.description]
+
+#         print(f"✅ Source data fetched: {len(rows)} rows with filters {filter_options}")
+
+#         return {
+#             "columns": columns,
+#             "rows": [dict(zip(columns, row)) for row in rows]
+#         }
+
+#     except Exception as e:
+#         raise Exception(f"❌ Error fetching source data: {str(e)}")
+
+#     finally:
+#         if conn:
+#             conn.close()
+from datetime import datetime, date
+def fetch_source_data_from_table(db_details, table_name, filter_options=None, limit=1000):
+    conn = None
+    try:
+        conn = db_details
+        cursor = conn.cursor()
+
+        # Ensure filter_options is a dictionary
+        if isinstance(filter_options, str):
+            try:
+                filter_options = json.loads(filter_options)
+            except Exception:
+                filter_options = {}
+
+        print("Filter options received:", filter_options)
+
+        # Base query
+        query = f"SELECT * FROM {table_name}"
+
+        # ----------------------------
+        # ✅ Add filter conditions dynamically
+        # ----------------------------
+        where_clauses = []
+        params = []
+
+        if filter_options and isinstance(filter_options, dict):
+            for col, values in filter_options.items():
+                if isinstance(values, list) and values:
+                    placeholders = ", ".join(["%s"] * len(values))
+                    where_clauses.append(f"{col} IN ({placeholders})")
+                    params.extend(values)
+
+        if where_clauses:
+            query += " WHERE " + " AND ".join(where_clauses)
+
+        query += f" LIMIT {limit}"
+        print("Final SQL Query:", query)
+
+        cursor.execute(query, tuple(params))
+        rows = cursor.fetchall()
+        columns = [desc[0] for desc in cursor.description]
+        formatted_rows = []
+        for row in rows:
+            row_dict = {}
+            for idx, col in enumerate(columns):
+                value = row[idx]
+                if isinstance(value, (datetime, date)):
+                    row_dict[col] = value.strftime("%Y-%m-%d")
+                else:
+                    row_dict[col] = value
+            formatted_rows.append(row_dict)
+
+        print(f"✅ Source data fetched: {len(formatted_rows)} rows with filters {filter_options}")
+
+        # print(f"✅ Source data fetched: {len(rows)} rows with filters {filter_options}")
+
+        return {
+            "columns": columns,
+            "rows": formatted_rows
+        }
+
+    except Exception as e:
+        raise Exception(f"❌ Error fetching source data: {str(e)}")
+
+    finally:
+        if conn:
+            conn.close()
+
+
 
 # if __name__ == '__main__':
 #     app.run(debug=True, port=5000)
