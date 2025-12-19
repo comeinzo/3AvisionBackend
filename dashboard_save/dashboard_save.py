@@ -2136,12 +2136,69 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                             except:
                                 filter_options = {}
 
+                        print("DataFrame after dashboard filtering}}}}}}}}-----")
+                        print(dataframe.head())
+
+                        # if filter_options:
+                        #     for col, allowed_values in filter_options.items():
+                        #         if col in dataframe.columns:
+                        #             print("Applying filter on column:", col)
+                        #             print("Allowed values:", allowed_values)
+                        #             dataframe = dataframe[dataframe[col].isin(allowed_values)]
+
+
+                        # if filter_options:
+                        #     for col, allowed_values in filter_options.items():
+                        #         if col in dataframe.columns:
+                        #             print(f"Applying filter on column: {col}")
+                                    
+                        #             # CHECK: If the column is a date column and we are filtering by years
+                        #             # we need to extract the year before using .isin()
+                        #             is_date_col = pd.api.types.is_datetime64_any_dtype(dataframe[col]) or "date" in col.lower()
+                                    
+                        #             if is_date_col:
+                        #                 # Ensure it's datetime format to extract the year
+                        #                 temp_dates = pd.to_datetime(dataframe[col], errors='coerce')
+                        #                 # Filter rows where the year of the date is in our allowed_values list
+                        #                 dataframe = dataframe[temp_dates.dt.year.isin(allowed_values)]
+                        #             else:
+                        #                 # Normal filtering for non-date columns (like 'region' or 'product')
+                        #                 dataframe = dataframe[dataframe[col].isin(allowed_values)]
                         if filter_options:
                             for col, allowed_values in filter_options.items():
                                 if col in dataframe.columns:
-                                    dataframe = dataframe[dataframe[col].isin(allowed_values)]
+                                    print(f"Applying filter on column: {col}")
+                                    
+                                    is_date_col = pd.api.types.is_datetime64_any_dtype(dataframe[col]) or "date" in col.lower()
+                                    
+                                    if is_date_col:
+                                        # 1. Convert column to datetime for extraction
+                                        temp_dates = pd.to_datetime(dataframe[col], errors='coerce')
+                                        
+                                        # 2. Check the nature of the filter values
+                                        sample_val = str(allowed_values[0]) if allowed_values else ""
+                                        
+                                        if sample_val.isdigit():
+                                            # Filter by YEAR (e.g., [2010, 2011])
+                                            years = [int(v) for v in allowed_values]
+                                            dataframe = dataframe[temp_dates.dt.year.isin(years)]
+                                            
+                                        elif sample_val.startswith('Q') and len(sample_val) <= 2:
+                                            # Filter by QUARTER (e.g., ["Q1", "Q2"])
+                                            # Extract '1' from 'Q1' and compare
+                                            quarters = [int(v.replace('Q', '')) for v in allowed_values]
+                                            dataframe = dataframe[temp_dates.dt.quarter.isin(quarters)]
+                                            
+                                        else:
+                                            # Filter by MONTH NAME (e.g., ["January", "February"])
+                                            # We compare month names (case-insensitive)
+                                            allowed_months = [v.strip().capitalize() for v in allowed_values]
+                                            dataframe = dataframe[temp_dates.dt.month_name().isin(allowed_months)]
+                                    else:
+                                        # Normal filtering for non-date columns
+                                        dataframe = dataframe[dataframe[col].isin(allowed_values)]
 
-                        print("DataFrame after dashboard filtering:")
+                        print("DataFrame after dashboard filtering:-----")
                         print(dataframe.head())
                         dateGranularity = selectedFrequency
 
@@ -2161,11 +2218,15 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                                     dataframe[date_col] = pd.to_datetime(dataframe[date_col], errors='coerce')
                                     g = granularity.lower()
 
-                                    granularity_col = f"{date_col}_{g}"
+                                    granularity_col = f"{date_col}"
+                                    print("=============================================(dataframe[date_col]dataframe[date_col])===================================")
+                                    print("dataframe[date_col]",dataframe[date_col])
 
                                     # Apply correct granularity
                                     if g == "year":
                                         dataframe[granularity_col] = dataframe[date_col].dt.year.astype(str)
+                                        print("=============================================year===================================")
+                                        print("dataframe[granularity_col]",dataframe[granularity_col])
 
                                     elif g == "quarter":
                                         dataframe[granularity_col] = "Q" + dataframe[date_col].dt.quarter.astype(str)

@@ -1208,15 +1208,54 @@ def filter_chart_data(database_name, table_name, x_axis, y_axis, aggregate, clic
             y_axis_aggregate_parts.append(expr)
 
         y_axis_aggregate = ", ".join(y_axis_aggregate_parts)
+        # Around line 1320 in your filter_chart_data function
+        # if category:
+        #     # Handle category filtering
+        #     if matched_calc_x and clicked_category_Xaxis.lower() == x_axis.lower():
+        #         formula_sql_click = convert_calculation_to_sql(matched_calc_x["calculation"].strip(), dataframe_columns=global_df.columns.tolist())
+        #         where_expr = f"({formula_sql_click}) = %s"
+        #     else:
+        #         # CHECK IF THE COLUMN IS A DATE AND THE CATEGORY IS A YEAR
+        #         if "date" in clicked_category_Xaxis.lower() and len(str(category)) == 4:
+        #             where_expr = f"EXTRACT(YEAR FROM \"{clicked_category_Xaxis}\") = %s"
+        #         else:
+        #             where_expr = f'"{clicked_category_Xaxis}" = %s'
 
-        
+        #     query = f"""
+        #         SELECT {X_Axis}, {y_axis_aggregate}
+        #         FROM "{table_name}"
+        #         WHERE {where_expr}
+        #         GROUP BY {X_Axis_group};
+        #     """
+        #     # If using EXTRACT(YEAR...), ensure category is an integer
+
+        #     print("query", query)
+        #     param = int(category) if "YEAR" in where_expr else category
+        #     cursor.execute(query, (param,))
+
+
+        # Locate the block: if category: (around line 1320)
         if category:
             # Handle category filtering
             if matched_calc_x and clicked_category_Xaxis.lower() == x_axis.lower():
                 formula_sql_click = convert_calculation_to_sql(matched_calc_x["calculation"].strip(), dataframe_columns=global_df.columns.tolist())
                 where_expr = f"({formula_sql_click}) = %s"
             else:
-                where_expr = f'"{clicked_category_Xaxis}" = %s'
+                # --- NEW DATE LOGIC START ---
+                # List of months to identify if the category clicked is a month
+                months = ["January", "February", "March", "April", "May", "June", 
+                        "July", "August", "September", "October", "November", "December"]
+                
+                if clicked_category_Xaxis.lower() == "ship_date" and category in months:
+                    # Convert the date column to Month name for comparison
+                    where_expr = f"TRIM(TO_CHAR(\"{clicked_category_Xaxis}\", 'Month')) = %s"
+                elif clicked_category_Xaxis.lower() == "ship_date" and len(str(category)) == 4 and str(category).isdigit():
+                    # Handle Year clicks (from your previous error)
+                    where_expr = f"EXTRACT(YEAR FROM \"{clicked_category_Xaxis}\")::text = %s"
+                else:
+                    # Default behavior for non-date columns (region, country, etc.)
+                    where_expr = f'"{clicked_category_Xaxis}" = %s'
+                # --- NEW DATE LOGIC END ---
 
             query = f"""
                 SELECT {X_Axis}, {y_axis_aggregate}
@@ -1224,8 +1263,25 @@ def filter_chart_data(database_name, table_name, x_axis, y_axis, aggregate, clic
                 WHERE {where_expr}
                 GROUP BY {X_Axis_group};
             """
+            print("Executing query:", query, "with param:", category)
             cursor.execute(query, (category,))
-            print("query", query,category)
+                
+        # if category:
+        #     # Handle category filtering
+        #     if matched_calc_x and clicked_category_Xaxis.lower() == x_axis.lower():
+        #         formula_sql_click = convert_calculation_to_sql(matched_calc_x["calculation"].strip(), dataframe_columns=global_df.columns.tolist())
+        #         where_expr = f"({formula_sql_click}) = %s"
+        #     else:
+        #         where_expr = f'"{clicked_category_Xaxis}" = %s'
+
+        #     query = f"""
+        #         SELECT {X_Axis}, {y_axis_aggregate}
+        #         FROM "{table_name}"
+        #         WHERE {where_expr}
+        #         GROUP BY {X_Axis_group};
+        #     """
+        #     cursor.execute(query, (category,))
+        #     print("query", query,category)
 
         else:
             # Handle general filtering
