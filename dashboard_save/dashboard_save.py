@@ -2135,7 +2135,7 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                                 filter_options = json.loads(filter_options)
                             except:
                                 filter_options = {}
-
+                        print("Initial DataFrame:", dataframe.head())
                         if filter_options:
                             for col, allowed_values in filter_options.items():
                                 if col in dataframe.columns:
