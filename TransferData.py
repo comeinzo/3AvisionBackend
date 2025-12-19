@@ -95,6 +95,27 @@ def fetch_table_columns(db_config, table_name):
             cursor = conn.cursor()
             cursor.execute(f"SELECT column_name FROM user_tab_cols WHERE table_name = '{table_name.upper()}'")
             columns = [row[0] for row in cursor.fetchall()]
+        elif db_config['dbType'] in ['MSSQL', 'SQLServer', 'sqlserver', 'mssql']:
+            import pyodbc
+            server = db_config['provider'] or 'localhost'
+            sql_port = db_config['port'] or '1433'
+            conn_str = (
+                "DRIVER={ODBC Driver 17 for SQL Server};"
+                f"SERVER={server},{sql_port};"
+                f"DATABASE={db_config['dbName']};"
+                f"UID={db_config['dbUsername']};"
+                f"PWD={db_config['dbPassword']};"
+                "TrustServerCertificate=yes;"
+            )
+            conn = pyodbc.connect(conn_str, timeout=10)
+            cursor = conn.cursor()
+            cursor.execute(f"""
+                SELECT COLUMN_NAME 
+                FROM INFORMATION_SCHEMA.COLUMNS 
+                WHERE TABLE_NAME = '{table_name}'
+            """)
+            columns = [row[0] for row in cursor.fetchall()]
+
         else:
             error_message = f"Unsupported database type: {db_config['dbType']}"
     except Exception as e:
@@ -215,6 +236,61 @@ def fetch_data_with_columns(db_config, table_name, selected_columns=None, chunk_
 
                 all_data_chunks.append(chunk_df)
                 offset += chunk_size
+        # MSSQL
+        elif db_config['dbType'] in ['MSSQL', 'SQLServer', 'sqlserver', 'mssql']:
+            print("MSSQL")
+            import pyodbc
+
+            server = db_config['provider'] or 'localhost'
+            sql_port = db_config['port'] or '1433'
+            conn_str = (
+                "DRIVER={ODBC Driver 17 for SQL Server};"
+                f"SERVER={server},{sql_port};"
+                f"DATABASE={db_config['dbName']};"
+                f"UID={db_config['dbUsername']};"
+                f"PWD={db_config['dbPassword']};"
+                "TrustServerCertificate=yes;"
+            )
+            conn = pyodbc.connect(conn_str, timeout=10)
+
+            # Determine primary key or fallback
+            cursor = conn.cursor()
+            cursor.execute(f"""
+                SELECT COLUMN_NAME 
+                FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS TC
+                JOIN INFORMATION_SCHEMA.KEY_COLUMN_USAGE KCU
+                ON TC.CONSTRAINT_NAME = KCU.CONSTRAINT_NAME
+                WHERE TC.TABLE_NAME = '{table_name}' AND TC.CONSTRAINT_TYPE = 'PRIMARY KEY'
+            """)
+            primary_keys = [row[0] for row in cursor.fetchall()]
+            print("primary_keys",primary_keys)
+            primary_key = primary_keys[0] if primary_keys else None
+
+            if selected_columns:
+                if primary_key and primary_key not in selected_columns:
+                    selected_columns.insert(0, primary_key)
+            else:
+                selected_columns = [primary_key] if primary_key else ['*']
+
+            columns_str = ", ".join([f"[{col}]" for col in selected_columns])
+
+            while True:
+                # SQL Server OFFSET-FETCH pagination
+                if primary_key:
+                    sql_query = f"SELECT {columns_str} FROM [{table_name}] ORDER BY [{primary_key}] ASC OFFSET {offset} ROWS FETCH NEXT {chunk_size} ROWS ONLY"
+                else:
+                    # fallback if no PK
+                    sql_query = f"SELECT {columns_str} FROM [{table_name}]"
+
+                print(f"Executing query: {sql_query}")
+                chunk_df = pd.read_sql_query(sql_query, conn)
+
+                if chunk_df.empty:
+                    break
+
+                all_data_chunks.append(chunk_df)
+                offset += chunk_size
+
 
         else:
             error_message = f"Unsupported database type: {db_config['dbType']}"
@@ -294,6 +370,33 @@ def get_primary_key_columns_dest(db_config, table_name):
             print("sql",sql)
             cur.execute(sql, (table_name,))
             primary_keys = [row[0] for row in cur.fetchall()]
+        elif db_config['dbType'].lower() in ['mssql', 'sqlserver']:
+            import pyodbc
+            server = db_config['provider'] or 'localhost'
+            sql_port = db_config['port'] or '1433'
+            conn_str = (
+                "DRIVER={ODBC Driver 17 for SQL Server};"
+                f"SERVER={server},{sql_port};"
+                f"DATABASE={db_config['dbName']};"
+                f"UID={db_config['dbUsername']};"
+                f"PWD={db_config['dbPassword']};"
+                "TrustServerCertificate=yes;"
+            )
+            conn = pyodbc.connect(conn_str, timeout=10)
+            cursor = conn.cursor()
+            sql = f"""
+                SELECT k.COLUMN_NAME
+                FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS t
+                JOIN INFORMATION_SCHEMA.KEY_COLUMN_USAGE k
+                ON t.CONSTRAINT_NAME = k.CONSTRAINT_NAME
+                WHERE t.TABLE_NAME = '{table_name}' 
+                AND t.CONSTRAINT_TYPE = 'PRIMARY KEY'
+                AND t.TABLE_SCHEMA = 'dbo';
+            """
+            print("MSSQL primary key SQL:", sql)
+            cursor.execute(sql)
+            primary_keys = [row[0] for row in cursor.fetchall()]
+           
             print("primary_keys",primary_keys)
     except Exception as e:
         print(f"Error getting primary key columns: {e}")
@@ -570,6 +673,28 @@ def fetch_table_details(db_config, table_name):
             conn = cx_Oracle.connect(user=db_config['dbUsername'], password=db_config['dbPassword'], dsn_tns=dsn_tns)
             cursor = conn.cursor()
             cursor.execute(f"SELECT column_name FROM user_tab_cols WHERE table_name = '{table_name.upper()}'")
+            columns = [row[0] for row in cursor.fetchall()]
+        elif db_config['dbType'].lower() in ['mssql', 'sqlserver']:
+            print("mssql")
+            import pyodbc
+            server = db_config['provider'] or 'localhost'
+            sql_port = db_config['port'] or '1433'
+            conn_str = (
+                "DRIVER={ODBC Driver 17 for SQL Server};"
+                f"SERVER={server},{sql_port};"
+                f"DATABASE={db_config['dbName']};"
+                f"UID={db_config['dbUsername']};"
+                f"PWD={db_config['dbPassword']};"
+                "TrustServerCertificate=yes;"
+            )
+            conn = pyodbc.connect(conn_str, timeout=10)
+            cursor = conn.cursor()
+            print("msconnection",conn)
+            cursor.execute(f"""
+                SELECT COLUMN_NAME 
+                FROM INFORMATION_SCHEMA.COLUMNS 
+                WHERE TABLE_NAME = '{table_name}'
+            """)
             columns = [row[0] for row in cursor.fetchall()]
         else:
             error_message = f"Unsupported database type: {db_config['dbType']}"

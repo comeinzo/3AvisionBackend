@@ -8,6 +8,7 @@ import pandas as pd
 import paramiko
 import socket
 import threading
+import pyodbc
 def get_database_table_names(db_name, username, password, host='localhost', port='5432'):
     try:
         conn = psycopg2.connect(
@@ -193,7 +194,8 @@ def get_db_connection_or_path(selected_user, company_name, return_path=False):
 
         if not connection_details:
             raise Exception(f"❌ Unable to fetch external database connection details for user '{selected_user}'")
-
+        use_ssh = bool(connection_details[8])
+        db_type = str(connection_details[2]).upper()
         db_details = {
             "name": connection_details[1],
             "dbType": connection_details[2],
@@ -202,11 +204,15 @@ def get_db_connection_or_path(selected_user, company_name, return_path=False):
             "password": connection_details[5],
             "port": int(connection_details[6]),
             "database": connection_details[7],
-            "use_ssh": connection_details[8],
-            "ssh_host": connection_details[9],
-            "ssh_port": int(connection_details[10]),
-            "ssh_username": connection_details[11],
-            "ssh_key_path": connection_details[12],
+            "use_ssh": use_ssh,
+            "ssh_host": connection_details[9] if use_ssh else None,
+            "ssh_port": int(connection_details[10] or 22) if use_ssh else None,
+            "ssh_username": connection_details[11] if use_ssh else None,
+            "ssh_key_path": connection_details[12] if use_ssh else None,
+            # "ssh_host": connection_details[9],
+            # "ssh_port": int(connection_details[10]),
+            # "ssh_username": connection_details[11],
+            # "ssh_key_path": connection_details[12],
         }
 
         print(f"🔹 External DB Connection Details: {db_details}")
@@ -280,10 +286,22 @@ def get_db_connection_or_path(selected_user, company_name, return_path=False):
             port = db_details["port"]
 
         # ✅ Create connection path
-        connection_path = (
-            f"dbname={db_details['database']} user={db_details['user']} "
-            f"password={db_details['password']} host={host} port={port}"
-        )
+        # connection_path = (
+        #     f"dbname={db_details['database']} user={db_details['user']} "
+        #     f"password={db_details['password']} host={host} port={port}"
+        # )
+        if db_type == 'MSSQL':
+            connection_path = (
+                f"DRIVER={{ODBC Driver 17 for SQL Server}};"
+                f"SERVER={host},{port};DATABASE={db_details['database']};"
+                f"UID={db_details['user']};PWD={db_details['password']}"
+            )
+        else:
+            connection_path = (
+                f"dbname={db_details['database']} user={db_details['user']} "
+                f"password={db_details['password']} host={host} port={port}"
+            )
+       
 
         if return_path:
             print(f"🔗 External Connection Path: {connection_path}")
@@ -291,13 +309,40 @@ def get_db_connection_or_path(selected_user, company_name, return_path=False):
 
         print(f"🧩 Connecting to external PostgreSQL at {host}:{port} ...")
 
-        connection = psycopg2.connect(
-            dbname=db_details["database"],
-            user=db_details["user"],
-            password=db_details["password"],
-            host=host,
-            port=port,
-        )
+        # connection = psycopg2.connect(
+        #     dbname=db_details["database"],
+        #     user=db_details["user"],
+        #     password=db_details["password"],
+        #     host=host,
+        #     port=port,
+        # )
+        if db_type == 'MSSQL':
+            print(f"🧩 Connecting to external MSSQL at {host}:{port} ...")
+
+            connection = pyodbc.connect(
+                f"DRIVER={{ODBC Driver 17 for SQL Server}};"
+                f"SERVER={host},{port};"
+                f"DATABASE={db_details['database']};"
+                f"UID={db_details['user']};"
+                f"PWD={db_details['password']};"
+                "TrustServerCertificate=yes;"
+            )
+
+            print("✅ External MSSQL connection established successfully!")
+            return connection
+
+        else:
+            print(f"🧩 Connecting to external PostgreSQL at {host}:{port} ...")
+
+            connection = psycopg2.connect(
+                dbname=db_details["database"],
+                user=db_details["user"],
+                password=db_details["password"],
+                host=host,
+                port=port,
+            )
+
+
 
         print("✅ External PostgreSQL connection established successfully!")
         return connection

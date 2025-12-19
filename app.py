@@ -2351,7 +2351,9 @@ def get_bar_chart_route():
     selectedFrequency=data.get('selectedFrequency')
     connection_path = get_db_connection_or_path(selectedUser, db_nameeee, return_path=True)
     print("Connection path:", connection_path)
-    database_con = psycopg2.connect(connection_path)
+    database_con = get_db_connection_or_path(selectedUser, db_nameeee, return_path=False)
+    print("Connection path:", database_con)
+    # database_con = psycopg2.connect(connection_path)
     # print("database_con", connection_path)
     
     # Fetch chart data
@@ -2494,6 +2496,7 @@ def get_bar_chart_route():
         """
         try:
             connection = get_db_connection_or_path(selectedUser, db_nameeee)
+            print("connection established for WordCloud",connection)
 
             cursor = connection.cursor()
             cursor.execute(query)
@@ -8296,7 +8299,7 @@ def save_connection():
     dbUsername = data.get('dbUsername')
     dbPassword = data.get('dbPassword')
     saveName = data.get('saveName')
-    port = data.get('port')
+    port1 = data.get('port')
     dbName = data.get('dbName')
     company_name = data.get('company_name')
     user_id=data.get("user_id")
@@ -8317,7 +8320,7 @@ def save_connection():
             provider,
             dbUsername,
             dbPassword,
-            port,
+            port1,
             dbName,
             saveName,
             use_ssh,
@@ -8374,7 +8377,7 @@ def save_connection():
         return jsonify(success=False, error=f"Failed to save connection details: {str(e)}")
 
 
-def save_connection_details(company_name, dbType, provider, dbUsername, dbPassword, port, dbName,
+def save_connection_details(company_name, dbType, provider, dbUsername, dbPassword, port1, dbName,
                             saveName, use_ssh, ssh_host, ssh_port, ssh_username, ssh_key_path, created_at):
     try:
         conn = psycopg2.connect(
@@ -8417,7 +8420,7 @@ def save_connection_details(company_name, dbType, provider, dbUsername, dbPasswo
         cursor.execute(
             insert_query,
             (
-                saveName, dbType, provider, dbUsername, dbPassword, port, dbName,
+                saveName, dbType, provider, dbUsername, dbPassword, port1, dbName,
                 use_ssh, ssh_host, ssh_port, ssh_username, ssh_key_path, created_at
             )
         )
@@ -8446,6 +8449,8 @@ import paramiko
 from sshtunnel import SSHTunnelForwarder
 import socket
 import paramiko
+import pyodbc
+
 
 
 @app.route('/connect', methods=['POST'])
@@ -8575,6 +8580,46 @@ def connect_and_fetch_tables():
             db = client[db_name]
             tables = db.list_collection_names()
             client.close()
+        # ✅ MSSQL (SQL Server)
+        elif dbType.lower() in ["mssql", "sqlserver", "sql_server"]:
+            print(f"🧩 Connecting to MSSQL {host}:{port} ...")
+
+            # If user passes host like "localhost\SQLEXPRESS"
+            if "\\" in host:
+                server = host  # named instance
+            else:
+                server = f"{host},{port}"  # default/fixed port
+            
+
+            conn_str = (
+                "DRIVER={ODBC Driver 17 for SQL Server};"
+                f"SERVER={server};"
+                f"DATABASE={db_name};"
+                f"UID={username};"
+                f"PWD={password};"
+                "TrustServerCertificate=yes;"
+            )
+            # conn_str = (
+            #     "DRIVER={ODBC Driver 17 for SQL Server};"
+            #     "SERVER=192.168.18.11,1433;"
+            #     "DATABASE=comienzo;"
+            #     "UID=sa;"
+            #     "PWD=Gayu@123;"
+            #     "TrustServerCertificate=yes;"
+            # )
+
+            print("Connection String:", conn_str)
+
+            conn = pyodbc.connect(conn_str, timeout=30)
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT TABLE_NAME
+                FROM INFORMATION_SCHEMA.TABLES
+                WHERE TABLE_TYPE = 'BASE TABLE'
+            """)
+            tables = [row[0] for row in cursor.fetchall()]
+            conn.close()
+
         else:
             return jsonify(success=False, error="Unsupported database type.")
 
@@ -8633,7 +8678,9 @@ def fetch_table_names_from_external_db(db_details):
         ssh_host = db_details.get('ssh_host')
         ssh_username = db_details.get('ssh_username')
         ssh_key_path = db_details.get('ssh_key_path')
-        ssh_port = int(db_details.get('ssh_port', 22))
+        # ssh_port = int(db_details.get('ssh_port', 22))
+        ssh_port = int(db_details.get('ssh_port') or 22)
+
 
         # ✅ If SSH is enabled, start manual tunnel
         # ✅ If SSH is enabled, start manual tunnel
@@ -8740,6 +8787,30 @@ def fetch_table_names_from_external_db(db_details):
             cursor.execute("SELECT table_name FROM all_tables")
             table_names = [table[0] for table in cursor.fetchall()]
             conn.close()
+        elif db_type in ["MSSQL", "SQLServer", "sqlserver", "mssql"]:
+            print(f"🧩 Connecting to MSSQL {host}:{port} ...")
+
+            conn_str = (
+                "DRIVER={ODBC Driver 17 for SQL Server};"
+                f"SERVER={host},{port};"
+                f"DATABASE={db_name};"
+                f"UID={username};"
+                f"PWD={password};"
+                "TrustServerCertificate=yes;"
+            )
+            print("Connection String:", conn_str)
+            conn = pyodbc.connect(conn_str, timeout=10)
+            cursor = conn.cursor()
+
+            cursor.execute("""
+                SELECT TABLE_NAME
+                FROM INFORMATION_SCHEMA.TABLES
+                WHERE TABLE_TYPE = 'BASE TABLE'
+            """)
+
+            table_names = [row[0] for row in cursor.fetchall()]
+            conn.close()
+
 
         else:
             raise ValueError("Unsupported database type.")
@@ -8812,7 +8883,8 @@ def get_externaltable_data(table_name):
         "database": external_db_connection[7],
         "use_ssh": external_db_connection[8],
         "ssh_host": external_db_connection[9],
-        "ssh_port": int(external_db_connection[10]),
+        # "ssh_port": int(external_db_connection[10]),
+        "ssh_port": int(external_db_connection[10] or 22),
         "ssh_username": external_db_connection[11],
         "ssh_key_path": external_db_connection[12],
     }
@@ -8931,6 +9003,79 @@ def fetch_data_from_table(db_details, table_name):
                 database=db_details["database"],
                 port=db_details["port"]
             )
+        # ✅ MSSQL (SQL Server) Connection
+        elif dbType in ["MSSQL", "SQLServer", "sqlserver", "mssql"]:
+            if db_details.get("use_ssh"):
+                print("🔐 Establishing SSH tunnel for MSSQL connection...")
+
+                private_key = paramiko.RSAKey.from_private_key_file(db_details["ssh_key_path"])
+                ssh_client = paramiko.SSHClient()
+                ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+                ssh_client.connect(
+                    db_details["ssh_host"],
+                    username=db_details["ssh_username"],
+                    pkey=private_key,
+                    port=db_details["ssh_port"],
+                    timeout=10
+                )
+
+                local_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                local_sock.bind(('127.0.0.1', 0))
+                local_port = local_sock.getsockname()[1]
+                local_sock.listen(1)
+                print(f"✅ Local forwarder listening on 127.0.0.1:{local_port}")
+
+                transport = ssh_client.get_transport()
+
+                def pipe(src, dst):
+                    try:
+                        while True:
+                            data = src.recv(1024)
+                            if not data:
+                                break
+                            dst.sendall(data)
+                    except Exception:
+                        pass
+                    finally:
+                        src.close()
+                        dst.close()
+
+                def forward_tunnel():
+                    while not stop_event.is_set():
+                        try:
+                            client_sock, _ = local_sock.accept()
+                            chan = transport.open_channel(
+                                "direct-tcpip",
+                                ("127.0.0.1", db_details["port"]),  # ✅ MSSQL port (1433)
+                                client_sock.getsockname()
+                            )
+                            threading.Thread(target=pipe, args=(client_sock, chan), daemon=True).start()
+                            threading.Thread(target=pipe, args=(chan, client_sock), daemon=True).start()
+                        except Exception as e:
+                            print(f"❌ Channel open failed: {e}")
+
+                tunnel_thread = threading.Thread(target=forward_tunnel, daemon=True)
+                tunnel_thread.start()
+
+                host = "127.0.0.1"
+                port = local_port
+            else:
+                host = db_details["host"]
+                port = db_details["port"]
+
+            print(f"🧩 Connecting to MSSQL at {host}:{port} ...")
+
+            conn_str = (
+                "DRIVER={ODBC Driver 17 for SQL Server};"
+                f"SERVER={host},{port};"
+                f"DATABASE={db_details['database']};"
+                f"UID={db_details['user']};"
+                f"PWD={db_details['password']};"
+                "TrustServerCertificate=yes;"
+            )
+
+            conn = pyodbc.connect(conn_str, timeout=10)
+
 
         # ✅ Oracle Connection
         elif dbType == "Oracle":
@@ -8952,7 +9097,14 @@ def fetch_data_from_table(db_details, table_name):
 
         # ✅ Execute query and return first 10 rows
         cursor = conn.cursor()
-        query = f"SELECT * FROM {table_name} FETCH FIRST 10 ROWS ONLY" if dbType == "Oracle" else f"SELECT * FROM {table_name} LIMIT 10;"
+        if dbType == "Oracle":
+            query = f"SELECT * FROM {table_name} FETCH FIRST 10 ROWS ONLY"
+        elif dbType in ["MSSQL", "SQLServer", "sqlserver", "mssql"]:
+            query = f"SELECT TOP 10 * FROM {table_name}"
+        else:
+            query = f"SELECT * FROM {table_name} LIMIT 10"
+
+        # query = f"SELECT * FROM {table_name} FETCH FIRST 10 ROWS ONLY" if dbType == "Oracle" else f"SELECT * FROM {table_name} LIMIT 10;"
         cursor.execute(query)
         rows = cursor.fetchall()
         columns = [desc[0] for desc in cursor.description]
@@ -9790,6 +9942,30 @@ def connect_and_fetch_dbtables():
             cursor.execute("SHOW TABLES;")
             tables = [row[0] for row in cursor.fetchall()]
             conn.close()
+        elif db_type in ["MSSQL", "SQLServer", "sqlserver", "mssql"]:
+            print("🧩 Connecting to MSSQL...")
+
+            conn_str = (
+                "DRIVER={ODBC Driver 17 for SQL Server};"
+                f"SERVER={host},{port};"
+                f"DATABASE={db_name};"
+                f"UID={username};"
+                f"PWD={password};"
+                "TrustServerCertificate=yes;"
+            )
+
+            conn = pyodbc.connect(conn_str, timeout=10)
+            cursor = conn.cursor()
+
+            cursor.execute("""
+                SELECT TABLE_NAME
+                FROM INFORMATION_SCHEMA.TABLES
+                WHERE TABLE_TYPE = 'BASE TABLE'
+            """)
+
+            tables = [row[0] for row in cursor.fetchall()]
+            conn.close()
+
 
         else:
             return jsonify(success=False, error="Unsupported database type.")
@@ -10339,6 +10515,34 @@ def get_tables():
             tables = [row[0] for row in cursor.fetchall()]
             cursor.close()
             conn.close()
+        elif db_type in ['MSSQL', 'SQLServer', 'sqlserver', 'mssql']:
+            print("🧩 Connecting to MSSQL...")
+
+            server = host or 'localhost'
+            sql_port = port or '1433'
+
+            conn_str = (
+                "DRIVER={ODBC Driver 17 for SQL Server};"
+                f"SERVER={server},{sql_port};"
+                f"DATABASE={dbName};"
+                f"UID={username};"
+                f"PWD={password};"
+                "TrustServerCertificate=yes;"
+            )
+
+            conn = pyodbc.connect(conn_str, timeout=10)
+            cursor = conn.cursor()
+
+            cursor.execute("""
+                SELECT TABLE_NAME
+                FROM INFORMATION_SCHEMA.TABLES
+                WHERE TABLE_TYPE = 'BASE TABLE'
+            """)
+
+            tables = [row[0] for row in cursor.fetchall()]
+            cursor.close()
+            conn.close()
+
         else:
             return jsonify({"success": False, "error": f"Unsupported database type: {db_type}"}), 400
         return jsonify({"success": True, "tables": tables})
