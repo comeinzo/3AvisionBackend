@@ -541,6 +541,7 @@ from config import USER_NAME, DB_NAME, PASSWORD, HOST, PORT
 from bar_chart import fetch_external_db_connection,convert_calculation_to_sql
 from user_upload import get_db_connection
 import json
+import pyodbc
 
 def get_db_connection_view(database_name):
     connection = psycopg2.connect(
@@ -552,28 +553,79 @@ def get_db_connection_view(database_name):
     )
     return connection
 
+# def fetch_chart_data(connection, tableName):
+#     try:
+#         cursor = connection.cursor()
+
+#         # Use SQL composition to safely query using dynamic table and column names
+#         query = sql.SQL("SELECT * FROM {table}")
+#         query = query.format(
+#             table=sql.Identifier(tableName)
+#         )
+#         cursor.execute(query)
+#         results = cursor.fetchall()
+#         # Fetch the column names from the cursor
+#         column_names = [desc[0] for desc in cursor.description]
+#         # Convert the results to a DataFrame with the column names
+#         df = pd.DataFrame(results, columns=column_names)
+#         cursor.close()
+
+#         return df
+
+#     except Exception as e:
+#         raise Exception(f"Error fetching data from {tableName}: {str(e)}")
+
 def fetch_chart_data(connection, tableName):
     try:
         cursor = connection.cursor()
 
-        # Use SQL composition to safely query using dynamic table and column names
-        query = sql.SQL("SELECT * FROM {table}")
-        query = query.format(
-            table=sql.Identifier(tableName)
-        )
-        cursor.execute(query)
-        results = cursor.fetchall()
-        # Fetch the column names from the cursor
-        column_names = [desc[0] for desc in cursor.description]
-        # Convert the results to a DataFrame with the column names
-        df = pd.DataFrame(results, columns=column_names)
-        cursor.close()
+        # 🔍 Detect DB type by connection class
+        is_postgres = isinstance(connection, psycopg2.extensions.connection)
+        is_mssql = isinstance(connection, pyodbc.Connection)
+        print("is_postgres",is_postgres)
+        print("is_mssql",is_mssql)
 
+        if is_postgres:
+            # ✅ PostgreSQL safe identifier handling
+            query = sql.SQL("SELECT * FROM {}").format(
+                sql.Identifier(tableName)
+            )
+            cursor.execute(query)
+
+        elif is_mssql:
+            # ✅ MSSQL safe table name (QUOTENAME equivalent)
+            query = f"SELECT * FROM [{tableName}]"
+            cursor.execute(query)
+
+        else:
+            raise Exception("Unsupported database connection type")
+
+        if is_postgres:
+            query = sql.SQL("SELECT * FROM {}").format(
+                sql.Identifier(tableName)
+            )
+            cursor.execute(query)
+
+        elif is_mssql:
+            query = f"SELECT * FROM [{tableName}]"
+            cursor.execute(query)
+
+        else:
+            raise Exception("Unsupported database connection type")
+
+        # 🔥 IMPORTANT FIX HERE
+        rows = cursor.fetchall()
+        results = [tuple(row) for row in rows]  # ✅ normalize pyodbc rows
+
+        column_names = [desc[0] for desc in cursor.description]
+
+        df = pd.DataFrame(results, columns=column_names)
+
+        cursor.close()
         return df
 
     except Exception as e:
         raise Exception(f"Error fetching data from {tableName}: {str(e)}")
-
 def fetch_ai_saved_chart_data(connection, tableName, chart_id):
     try:
         cursor = connection.cursor()

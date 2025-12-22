@@ -192,12 +192,40 @@ def get_table_columns_with_typesdb(company_name, table_name,selected_user=None):
         cursor = connection.cursor()
 
         # Query to get all column names and types from the table
-        cursor.execute("""
-            SELECT column_name, data_type 
-            FROM information_schema.columns 
-            WHERE table_name = %s 
-            ORDER BY ordinal_position
-        """, (table_name,))
+        # cursor.execute("""
+        #     SELECT column_name, data_type 
+        #     FROM information_schema.columns 
+        #     WHERE table_name = %s 
+        #     ORDER BY ordinal_position
+        # """, (table_name,))
+        is_mssql = connection.__class__.__module__.startswith("pyodbc")
+
+        if is_mssql:
+            print("🟡 Fetching MSSQL column metadata")
+
+            query = """
+                SELECT COLUMN_NAME, DATA_TYPE
+                FROM INFORMATION_SCHEMA.COLUMNS
+                WHERE TABLE_NAME = ?
+                  AND TABLE_SCHEMA = 'dbo'
+                ORDER BY ORDINAL_POSITION
+            """
+            cursor.execute(query, (table_name,))
+
+        else:
+            print("🟢 Fetching PostgreSQL column metadata")
+
+            query = """
+                SELECT column_name, data_type
+                FROM information_schema.columns
+                WHERE table_name = %s
+                ORDER BY ordinal_position
+            """
+            cursor.execute(query, (table_name,))
+
+        columns = {row[0]: row[1] for row in cursor.fetchall()}
+        print("✅ Columns with types:", columns)
+
         
         columns = {row[0]: row[1] for row in cursor.fetchall()}
 

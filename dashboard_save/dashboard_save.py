@@ -14,7 +14,7 @@ import numpy as np
 import paramiko
 import socket
 import threading
-
+import pyodbc
 from statsmodels.tsa.seasonal import seasonal_decompose
 
 def create_connection():
@@ -989,7 +989,8 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
 
                         if not connection_details:
                             raise Exception(f"❌ Unable to fetch external database connection details for user '{selected_user}'")
-
+                        use_ssh = bool(connection_details[8])
+                        db_type = str(connection_details[2]).upper()
                         db_details = {
                             "name": connection_details[1],
                             "dbType": connection_details[2],
@@ -998,11 +999,16 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                             "password": connection_details[5],
                             "port": int(connection_details[6]),
                             "database": connection_details[7],
-                            "use_ssh": connection_details[8],
-                            "ssh_host": connection_details[9],
-                            "ssh_port": int(connection_details[10]),
-                            "ssh_username": connection_details[11],
-                            "ssh_key_path": connection_details[12],
+                            "use_ssh": use_ssh,
+                            "ssh_host": connection_details[9] if use_ssh else None,
+                            "ssh_port": int(connection_details[10] or 22) if use_ssh else None,
+                            "ssh_username": connection_details[11] if use_ssh else None,
+                            "ssh_key_path": connection_details[12] if use_ssh else None,
+                            # "use_ssh": connection_details[8],
+                            # "ssh_host": connection_details[9],
+                            # "ssh_port": int(connection_details[10]),
+                            # "ssh_username": connection_details[11],
+                            # "ssh_key_path": connection_details[12],
                         }
 
                         print(f"🔹 External DB Connection Details: {db_details}")
@@ -1078,13 +1084,38 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
 
                         print(f"🧩 Connecting to external PostgreSQL at {host}:{port} ...")
 
-                        connection = psycopg2.connect(
-                            dbname=db_details["database"],
-                            user=db_details["user"],
-                            password=db_details["password"],
-                            host=host,
-                            port=port
-                        )
+                        # connection = psycopg2.connect(
+                        #     dbname=db_details["database"],
+                        #     user=db_details["user"],
+                        #     password=db_details["password"],
+                        #     host=host,
+                        #     port=port
+                        # )
+                        if db_type == 'MSSQL':
+                            print(f"🧩 Connecting to external MSSQL at {host}:{port} ...")
+
+                            connection = pyodbc.connect(
+                                f"DRIVER={{ODBC Driver 17 for SQL Server}};"
+                                f"SERVER={host},{port};"
+                                f"DATABASE={db_details['database']};"
+                                f"UID={db_details['user']};"
+                                f"PWD={db_details['password']};"
+                                "TrustServerCertificate=yes;"
+                            )
+
+                            print("✅ External MSSQL connection established successfully!")
+                            
+
+                        else:
+                            print(f"🧩 Connecting to external PostgreSQL at {host}:{port} ...")
+
+                            connection = psycopg2.connect(
+                                dbname=db_details["database"],
+                                user=db_details["user"],
+                                password=db_details["password"],
+                                host=host,
+                                port=port,
+                            )
 
                         print("✅ External PostgreSQL connection established successfully!")
 
