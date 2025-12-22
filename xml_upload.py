@@ -9,12 +9,19 @@ import numpy as np
 from tqdm import tqdm  # For progress bars during batch operations
 from psycopg2.extras import execute_values
 
-def sanitize_column_name(name):
-    """Sanitizes column names to be SQL-friendly."""
-    if isinstance(name, str):
-        # Remove non-alphanumeric (except underscore), replace spaces with underscore, convert to lowercase
-        return re.sub(r'\W+', '_', name).lower()
-    return name
+# def sanitize_column_name(name):
+#     """Sanitizes column names to be SQL-friendly."""
+#     if isinstance(name, str):
+#         # Remove non-alphanumeric (except underscore), replace spaces with underscore, convert to lowercase
+#         return re.sub(r'\W+', '_', name).lower()
+#     return name
+def sanitize_column_name(header):
+    """Sanitize column names to lowercase, replace non-alphanumeric with _, collapse multiple _"""
+    sanitized = str(header).lower().strip()
+    sanitized = re.sub(r'[^a-z0-9]+', '_', sanitized)  # replace non-alphanumeric with _
+    sanitized = re.sub(r'_+', '_', sanitized)           # collapse multiple underscores
+    sanitized = sanitized.strip('_')                    # remove leading/trailing _
+    return sanitized
 
 def determine_sql_data_type(series):
     """

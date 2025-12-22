@@ -1552,46 +1552,130 @@ def update_filters():
         if "conn" in locals() and conn:
             conn.close()
 
+# @app.route('/join-tables', methods=['POST'])
+# @token_required
+
+# def join_tables():
+#     data = request.json
+#     print("data__________",data)
+#     tables = data.get('tables')  
+#     selected_columns = data.get('selectedColumns') 
+#     join_columns = data.get('joinColumns')  
+#     join_type = data.get('joinType', 'INNER JOIN') 
+#     database_name = data.get('databaseName')
+#     view_name = data.get('joinedTableName')  
+#     user_email = data.get('email', 'system')
+
+#     query = f"CREATE OR REPLACE VIEW {view_name} AS SELECT {', '.join(selected_columns)} FROM {tables[0]}"
+
+#     for table in tables[1:]:
+#         join_column = join_columns.get(table)
+#         query += f" {join_type} {table} ON {tables[0]}.{join_column} = {table}.{join_column}"
+
+#     print("Executing query:", query)
+
+#     # Connect to the database
+#     connection = None
+#     try:
+#         # Use your database connection method
+#         connection = connect_db(database_name)
+#         cursor = connection.cursor()
+#         cursor.execute(query)
+#         connection.commit()  # Commit to save the view in the database
+#         log_activity(
+#             user_email=user_email,
+#             action_type="JOIN_TABLES",
+#             description=f"Created joined view '{view_name}' using tables: {', '.join(tables)}",
+#             table_name=view_name,
+#             company_name=database_name,
+            
+#         )
+        
+#         print("View created successfully")
+#     except Exception as e:
+#         print("Error executing query:", e)
+#         log_activity(
+#             user_email=user_email,
+#             action_type="ERROR",
+#             description=f"Failed to create joined view '{view_name}': {str(e)}",
+#             table_name=view_name,
+#             company_name=database_name,
+            
+#         )
+#         return jsonify({"error": str(e)}), 500
+#     finally:
+#         if connection:
+#             cursor.close()
+#             connection.close()
+
+#     return jsonify({"message": f"View '{view_name}' created successfully"})
 @app.route('/join-tables', methods=['POST'])
 @token_required
-
 def join_tables():
     data = request.json
-    print("data__________",data)
-    tables = data.get('tables')  
-    selected_columns = data.get('selectedColumns') 
-    join_columns = data.get('joinColumns')  
-    join_type = data.get('joinType', 'INNER JOIN') 
+    print("data__________", data)
+
+    joins = data.get('joins', [])
+    selected_columns = data.get('selectedColumns', {})
     database_name = data.get('databaseName')
-    view_name = data.get('joinedTableName')  
+    view_name = data.get('joinedTableName')
     user_email = data.get('email', 'system')
 
-    query = f"CREATE OR REPLACE VIEW {view_name} AS SELECT {', '.join(selected_columns)} FROM {tables[0]}"
+    if not joins:
+        return jsonify({"error": "No join configuration provided"}), 400
 
-    for table in tables[1:]:
-        join_column = join_columns.get(table)
-        query += f" {join_type} {table} ON {tables[0]}.{join_column} = {table}.{join_column}"
+    # ----------------------------------
+    # Build SELECT columns
+    # ----------------------------------
+    if selected_columns:
+        select_clause = []
+        for table, cols in selected_columns.items():
+            for col in cols:
+                select_clause.append(f'{table}."{col}"')
+        select_sql = ", ".join(select_clause)
+    else:
+        select_sql = "*"
+
+    # ----------------------------------
+    # Build JOIN query
+    # ----------------------------------
+    base_table = joins[0]['leftTable']
+    query = f'CREATE OR REPLACE VIEW {view_name} AS SELECT {select_sql} FROM {base_table}'
+
+    for j in joins:
+        join_type = j.get('joinType', 'INNER JOIN')
+        left_table = j['leftTable']
+        right_table = j['rightTable']
+        left_key = j['leftKey']
+        right_key = j['rightKey']
+
+        query += f'''
+ {join_type} {right_table}
+ ON {left_table}."{left_key}" = {right_table}."{right_key}"
+'''
 
     print("Executing query:", query)
 
-    # Connect to the database
+    # ----------------------------------
+    # Execute query
+    # ----------------------------------
     connection = None
     try:
-        # Use your database connection method
         connection = connect_db(database_name)
         cursor = connection.cursor()
         cursor.execute(query)
-        connection.commit()  # Commit to save the view in the database
+        connection.commit()
+
         log_activity(
             user_email=user_email,
             action_type="JOIN_TABLES",
-            description=f"Created joined view '{view_name}' using tables: {', '.join(tables)}",
+            description=f"Created joined view '{view_name}'",
             table_name=view_name,
             company_name=database_name,
-            
         )
-        
+
         print("View created successfully")
+
     except Exception as e:
         print("Error executing query:", e)
         log_activity(
@@ -1600,15 +1684,16 @@ def join_tables():
             description=f"Failed to create joined view '{view_name}': {str(e)}",
             table_name=view_name,
             company_name=database_name,
-            
         )
         return jsonify({"error": str(e)}), 500
+
     finally:
         if connection:
             cursor.close()
             connection.close()
 
     return jsonify({"message": f"View '{view_name}' created successfully"})
+
 
 DB_CONFIG = {
     'user':USER_NAME,
@@ -2266,7 +2351,9 @@ def get_bar_chart_route():
     selectedFrequency=data.get('selectedFrequency')
     connection_path = get_db_connection_or_path(selectedUser, db_nameeee, return_path=True)
     print("Connection path:", connection_path)
-    database_con = psycopg2.connect(connection_path)
+    database_con = get_db_connection_or_path(selectedUser, db_nameeee, return_path=False)
+    print("Connection path:", database_con)
+    # database_con = psycopg2.connect(connection_path)
     # print("database_con", connection_path)
     
     # Fetch chart data
@@ -2409,6 +2496,7 @@ def get_bar_chart_route():
         """
         try:
             connection = get_db_connection_or_path(selectedUser, db_nameeee)
+            print("connection established for WordCloud",connection)
 
             cursor = connection.cursor()
             cursor.execute(query)
@@ -2702,7 +2790,15 @@ def get_bar_chart_route():
                 categories[category] = initial_value(aggregation)
             update_category(categories, category, y_axis_value, aggregation)
 
-        labels = [', '.join(category) for category in categories.keys()]
+        # labels = [', '.join(category) for category in categories.keys()]
+        labels = [
+            ', '.join(
+                str(item.strftime('%Y-%m-%d') if hasattr(item, 'strftime') else item)
+                for item in category
+            )
+            for category in categories.keys()
+        ]
+
         values = list(categories.values())
         
         # Apply data limiting if specified
@@ -3898,6 +3994,8 @@ def save_data():
     except Exception as e:
         print("Error:iiiiiiiiiiiii", e)
         return jsonify({'error': str(e)})
+
+
     
 @app.route('/update_data', methods=['POST'])
 @token_required
@@ -3988,6 +4086,139 @@ def update_data():
         chart_name = chart_name_result[0] if chart_name_result else "Unknown Chart"
 
         cur.close()
+        conn.close()
+
+        # ✅ Fetch user email and username
+        company_name = data.get("company_name")
+        user_id = data.get("user_id")
+
+        if company_name and user_id:
+            email_conn = connect_db(company_name)
+            email_cur = email_conn.cursor()
+            email_cur.execute("SELECT email, username FROM employee_list WHERE employee_id = %s;", (user_id,))
+            result = email_cur.fetchone()
+            user_email = result[0] if result else None
+            username = result[1] if result else "Unknown User"
+            email_cur.close()
+            email_conn.close()
+        else:
+            user_email = None
+            username = "Unknown User"
+
+        # ✅ Log activity with chart name and ID
+        log_activity(
+            user_email=user_email or "Unknown",
+            action_type="Chart Updated",
+            description=(
+                f"User '{username}' ({user_email}) updated chart '{chart_name}' "
+                f"(ID: {data.get('chartId')}) successfully with new configurations."
+            ),
+            table_name="table_chart_save",
+            company_name=company_name,
+            dashboard_name=chart_name
+        )
+        
+        return jsonify({'message': 'Data updated successfully'})
+    except Exception as e:
+        print("Error:", e)
+        return jsonify({'error': str(e)})
+
+@app.route('/update_data_chart', methods=['POST'])
+@token_required
+
+def update_data_chart():
+    data = request.json
+    print("Received data for update:", data)
+    def clean_int(value):
+        try:
+            if value is None or value == "" or str(value).lower() == "null":
+                return None
+            return int(value)
+        except Exception:
+            return None
+
+    
+    try:
+        conn = connect_to_db()
+        cur = conn.cursor()
+        chart_heading_json = json.dumps(data.get('chart_heading'))
+        chart_color_json = json.dumps(data.get('chart_color'))  # ✅ FIX: Convert to JSON
+        filter_options_json = json.dumps(data.get('checkedOptions')) 
+        xAxisTitle = json.dumps(data.get('xAxisTitle'))  # '{"x1": "region", "x2": "product"}'
+        yAxisTitle = json.dumps(data.get('yAxisTitle'))  # '{"y1": ["unit_cost"]}'
+
+        
+        
+        # Update data in the table
+        cur.execute("""
+            UPDATE table_chart_save
+            SET
+
+                selected_table = %s,
+                x_axis = %s,
+                y_axis = %s,
+                aggregate = %s,
+                chart_type = %s,
+                chart_color = %s,
+                chart_heading = %s,
+                drilldown_chart_color = %s,
+                filter_options = %s,
+                xFontSize= %s,         
+                fontStyle= %s,          
+                categoryColor= %s,   
+                yFontSize= %s,          
+                valueColor= %s,
+                headingColor=%s,
+                ClickedTool=%s,Bgcolour=%s,xAxisTitle=%s,
+                yAxisTitle =%s
+            WHERE
+                chart_name = %s And User_id=%s
+        """, (
+
+            data.get('selectedTable'),
+            data.get('xAxis'),
+            data.get('yAxis'),
+            json.dumps(data.get('aggregate')),
+            data.get('chartType'),
+            chart_color_json,
+            chart_heading_json,
+            data.get('drillDownChartColor'),
+            # data.get('filterOptions'),
+            filter_options_json,
+
+            # Assuming there's an 'id' field in the data
+            # data.get('xFontSize'),
+            clean_int(data.get('xFontSize')),
+            data.get('fontStyle'),
+            data.get('categoryColor'),
+            # data.get('yFontSize'),
+            clean_int(data.get('yFontSize')),
+            data.get('valueColor'),
+            data.get('headingColor'),
+            data.get('ClickedTool') ,
+            data.get('areaColor'),
+            xAxisTitle,
+            yAxisTitle, 
+            data.get('saveName'),data.get('user_id')
+           
+        ))
+        
+
+        conn.commit()
+        if cur.rowcount > 0:
+            print(f"✅ Chart '{data.get('saveName')}' updated successfully for user_id {data.get('user_id')}")
+        else:
+            print(f"⚠️ No rows updated! Check chart_name and user_id.")
+
+        cur.close()
+
+
+        # ✅ Fetch chart_name from table_chart_save using chartId
+        # cur.execute("SELECT chart_name FROM table_chart_save WHERE id = %s;", (data.get('chartId'),))
+        # chart_name_result = cur.fetchone()
+        chart_name = data.get('saveName')
+
+        # cur.close()
         conn.close()
 
         # ✅ Fetch user email and username
@@ -5206,47 +5437,81 @@ def receive_chart_data():
 #     return jsonify({"data": fetched_data,
 #                     "chart_id": chart_id,
 #                      "message": "Data received successfully!"})
-@app.route('/api/text_chart', methods=['POST'])
+@app.route('/api/text_chart_view', methods=['POST'])
 @token_required
 def receive_view_chart_data():
     data = request.get_json()
-    print("data====================", data)
-
-    chart_id = data.get('chart_id')
+    print("data====================",data)
+    chart_id=data.get('chart_id')
     x_axis = data.get('text_y_xis')[0]
     databaseName = data.get('text_y_database')
-    table_Name = data.get('text_y_table')[0]
-    aggregate = data.get('text_y_aggregate')
-    selectedUser = data.get("selectedUser")
+    table_Name = data.get('text_y_table')
+    print("table_Name====================", table_Name)
+    aggregate=data.get('text_y_aggregate')
+    selectedUser=data.get("selectedUser")
+    aggregate = aggregate.replace('"', '').replace("'", '').strip().lower()
+    print("x_axis====================",x_axis)  
+    print("databaseName====================",databaseName)  
+    print("table_Name====================",table_Name)
+    print("aggregate====================",aggregate)
+    print("selectedUser====================",selectedUser)
+    aggregate_py = {
+                    'count': 'count',
+                    'sum': 'sum',
+                    'average': 'avg',
+                    'minimum': 'min',
+                    'maximum': 'max'
+                }.get(aggregate, 'sum') 
+    print("aggregate_py====================",aggregate_py)
+    
+    fetched_data = fetchText_data(databaseName, table_Name, x_axis,aggregate_py,selectedUser)
+    print("Fetched Data:", fetched_data)
+    print(f"Received x_axis: {x_axis}")
+    print(f"Received databaseName: {databaseName}")
+    print(f"Received table_Name: {table_Name}")
+    print(f"aggregate====================",{aggregate})
+
+    return jsonify({"data": fetched_data,
+                    "chart_id": chart_id,
+                     "message": "Data received successfully!"})
+    # data = request.get_json()
+    # print("data====================", data)
+
+    # chart_id = data.get('chart_id')
+    # x_axis = data.get('text_y_xis')[0]
+    # databaseName = data.get('text_y_database')
+    # table_Name = data.get('text_y_table')[0]
+    # aggregate = data.get('text_y_aggregate')
+    # selectedUser = data.get("selectedUser")
 
    
 
-    print("aggregate (normalized) ====================", aggregate)
+    # print("aggregate (normalized) ====================", aggregate)
 
-    # 🔹 PostgreSQL-safe aggregation
-    aggregate_py = {
-        'count': 'count',
-        'sum': 'sum',
-        'average': 'avg',
-        'minimum': 'min',
-        'maximum': 'max'
-    }.get(aggregate.lower(), 'sum')
+    # # 🔹 PostgreSQL-safe aggregation
+    # aggregate_py = {
+    #     'count': 'count',
+    #     'sum': 'sum',
+    #     'average': 'avg',
+    #     'minimum': 'min',
+    #     'maximum': 'max'
+    # }.get(aggregate.lower(), 'sum')
 
-    print("aggregate_py====================", aggregate_py)
+    # print("aggregate_py====================", aggregate_py)
 
-    fetched_data = fetchText_data(
-        databaseName,
-        table_Name,
-        x_axis,
-        aggregate_py,
-        selectedUser
-    )
+    # fetched_data = fetchText_data(
+    #     databaseName,
+    #     table_Name,
+    #     x_axis,
+    #     aggregate_py,
+    #     selectedUser
+    # )
 
-    return jsonify({
-        "data": fetched_data,
-        "chart_id": chart_id,
-        "message": "Data received successfully!"
-    })
+    # return jsonify({
+    #     "data": fetched_data,
+    #     "chart_id": chart_id,
+    #     "message": "Data received successfully!"
+    # })
 
 
 
@@ -5916,12 +6181,13 @@ def receive_chart_details():
                 print(f"Filtered dataframe rows: {len(filtered_df)}")
 
                 # Now group the filtered dataframe (all rows)
-                grouped_df = filtered_df.groupby(x_axis[0]).size().reset_index(name="count")
+                # grouped_df = filtered_df.groupby(x_axis[0])[y_axis[0]].count().reset_index(name="count")
+                grouped_df = filtered_df.groupby(x_axis[0])[y_axis[0]].nunique().reset_index(name="count")
                 print("Grouped DataFrame with all rows:", grouped_df)
 
                 # For valid rows (non-null y_axis values)
                 filtered_df_valid = filtered_df[filtered_df[y_axis[0]].notnull()]
-                grouped_df_valid = filtered_df_valid.groupby(x_axis[0])[y_axis[0]].count().reset_index(name="count")
+                grouped_df_valid = filtered_df_valid.groupby(x_axis[0])[y_axis[0]].nunique().reset_index(name="count")
                 print("Grouped DataFrame with valid rows:", grouped_df_valid)
 
                 chosen_grouped_df = grouped_df_valid
@@ -8034,7 +8300,7 @@ def save_connection():
     dbUsername = data.get('dbUsername')
     dbPassword = data.get('dbPassword')
     saveName = data.get('saveName')
-    port = data.get('port')
+    port1 = data.get('port')
     dbName = data.get('dbName')
     company_name = data.get('company_name')
     user_id=data.get("user_id")
@@ -8055,7 +8321,7 @@ def save_connection():
             provider,
             dbUsername,
             dbPassword,
-            port,
+            port1,
             dbName,
             saveName,
             use_ssh,
@@ -8112,7 +8378,7 @@ def save_connection():
         return jsonify(success=False, error=f"Failed to save connection details: {str(e)}")
 
 
-def save_connection_details(company_name, dbType, provider, dbUsername, dbPassword, port, dbName,
+def save_connection_details(company_name, dbType, provider, dbUsername, dbPassword, port1, dbName,
                             saveName, use_ssh, ssh_host, ssh_port, ssh_username, ssh_key_path, created_at):
     try:
         conn = psycopg2.connect(
@@ -8155,7 +8421,7 @@ def save_connection_details(company_name, dbType, provider, dbUsername, dbPasswo
         cursor.execute(
             insert_query,
             (
-                saveName, dbType, provider, dbUsername, dbPassword, port, dbName,
+                saveName, dbType, provider, dbUsername, dbPassword, port1, dbName,
                 use_ssh, ssh_host, ssh_port, ssh_username, ssh_key_path, created_at
             )
         )
@@ -8184,6 +8450,8 @@ import paramiko
 from sshtunnel import SSHTunnelForwarder
 import socket
 import paramiko
+import pyodbc
+
 
 
 @app.route('/connect', methods=['POST'])
@@ -8313,6 +8581,46 @@ def connect_and_fetch_tables():
             db = client[db_name]
             tables = db.list_collection_names()
             client.close()
+        # ✅ MSSQL (SQL Server)
+        elif dbType.lower() in ["mssql", "sqlserver", "sql_server"]:
+            print(f"🧩 Connecting to MSSQL {host}:{port} ...")
+
+            # If user passes host like "localhost\SQLEXPRESS"
+            if "\\" in host:
+                server = host  # named instance
+            else:
+                server = f"{host},{port}"  # default/fixed port
+            
+
+            conn_str = (
+                "DRIVER={ODBC Driver 17 for SQL Server};"
+                f"SERVER={server};"
+                f"DATABASE={db_name};"
+                f"UID={username};"
+                f"PWD={password};"
+                "TrustServerCertificate=yes;"
+            )
+            # conn_str = (
+            #     "DRIVER={ODBC Driver 17 for SQL Server};"
+            #     "SERVER=192.168.18.11,1433;"
+            #     "DATABASE=comienzo;"
+            #     "UID=sa;"
+            #     "PWD=Gayu@123;"
+            #     "TrustServerCertificate=yes;"
+            # )
+
+            print("Connection String:", conn_str)
+
+            conn = pyodbc.connect(conn_str, timeout=30)
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT TABLE_NAME
+                FROM INFORMATION_SCHEMA.TABLES
+                WHERE TABLE_TYPE = 'BASE TABLE'
+            """)
+            tables = [row[0] for row in cursor.fetchall()]
+            conn.close()
+
         else:
             return jsonify(success=False, error="Unsupported database type.")
 
@@ -8371,7 +8679,9 @@ def fetch_table_names_from_external_db(db_details):
         ssh_host = db_details.get('ssh_host')
         ssh_username = db_details.get('ssh_username')
         ssh_key_path = db_details.get('ssh_key_path')
-        ssh_port = int(db_details.get('ssh_port', 22))
+        # ssh_port = int(db_details.get('ssh_port', 22))
+        ssh_port = int(db_details.get('ssh_port') or 22)
+
 
         # ✅ If SSH is enabled, start manual tunnel
         # ✅ If SSH is enabled, start manual tunnel
@@ -8478,6 +8788,30 @@ def fetch_table_names_from_external_db(db_details):
             cursor.execute("SELECT table_name FROM all_tables")
             table_names = [table[0] for table in cursor.fetchall()]
             conn.close()
+        elif db_type in ["MSSQL", "SQLServer", "sqlserver", "mssql"]:
+            print(f"🧩 Connecting to MSSQL {host}:{port} ...")
+
+            conn_str = (
+                "DRIVER={ODBC Driver 17 for SQL Server};"
+                f"SERVER={host},{port};"
+                f"DATABASE={db_name};"
+                f"UID={username};"
+                f"PWD={password};"
+                "TrustServerCertificate=yes;"
+            )
+            print("Connection String:", conn_str)
+            conn = pyodbc.connect(conn_str, timeout=10)
+            cursor = conn.cursor()
+
+            cursor.execute("""
+                SELECT TABLE_NAME
+                FROM INFORMATION_SCHEMA.TABLES
+                WHERE TABLE_TYPE = 'BASE TABLE'
+            """)
+
+            table_names = [row[0] for row in cursor.fetchall()]
+            conn.close()
+
 
         else:
             raise ValueError("Unsupported database type.")
@@ -8550,7 +8884,8 @@ def get_externaltable_data(table_name):
         "database": external_db_connection[7],
         "use_ssh": external_db_connection[8],
         "ssh_host": external_db_connection[9],
-        "ssh_port": int(external_db_connection[10]),
+        # "ssh_port": int(external_db_connection[10]),
+        "ssh_port": int(external_db_connection[10] or 22),
         "ssh_username": external_db_connection[11],
         "ssh_key_path": external_db_connection[12],
     }
@@ -8669,6 +9004,79 @@ def fetch_data_from_table(db_details, table_name):
                 database=db_details["database"],
                 port=db_details["port"]
             )
+        # ✅ MSSQL (SQL Server) Connection
+        elif dbType in ["MSSQL", "SQLServer", "sqlserver", "mssql"]:
+            if db_details.get("use_ssh"):
+                print("🔐 Establishing SSH tunnel for MSSQL connection...")
+
+                private_key = paramiko.RSAKey.from_private_key_file(db_details["ssh_key_path"])
+                ssh_client = paramiko.SSHClient()
+                ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+                ssh_client.connect(
+                    db_details["ssh_host"],
+                    username=db_details["ssh_username"],
+                    pkey=private_key,
+                    port=db_details["ssh_port"],
+                    timeout=10
+                )
+
+                local_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                local_sock.bind(('127.0.0.1', 0))
+                local_port = local_sock.getsockname()[1]
+                local_sock.listen(1)
+                print(f"✅ Local forwarder listening on 127.0.0.1:{local_port}")
+
+                transport = ssh_client.get_transport()
+
+                def pipe(src, dst):
+                    try:
+                        while True:
+                            data = src.recv(1024)
+                            if not data:
+                                break
+                            dst.sendall(data)
+                    except Exception:
+                        pass
+                    finally:
+                        src.close()
+                        dst.close()
+
+                def forward_tunnel():
+                    while not stop_event.is_set():
+                        try:
+                            client_sock, _ = local_sock.accept()
+                            chan = transport.open_channel(
+                                "direct-tcpip",
+                                ("127.0.0.1", db_details["port"]),  # ✅ MSSQL port (1433)
+                                client_sock.getsockname()
+                            )
+                            threading.Thread(target=pipe, args=(client_sock, chan), daemon=True).start()
+                            threading.Thread(target=pipe, args=(chan, client_sock), daemon=True).start()
+                        except Exception as e:
+                            print(f"❌ Channel open failed: {e}")
+
+                tunnel_thread = threading.Thread(target=forward_tunnel, daemon=True)
+                tunnel_thread.start()
+
+                host = "127.0.0.1"
+                port = local_port
+            else:
+                host = db_details["host"]
+                port = db_details["port"]
+
+            print(f"🧩 Connecting to MSSQL at {host}:{port} ...")
+
+            conn_str = (
+                "DRIVER={ODBC Driver 17 for SQL Server};"
+                f"SERVER={host},{port};"
+                f"DATABASE={db_details['database']};"
+                f"UID={db_details['user']};"
+                f"PWD={db_details['password']};"
+                "TrustServerCertificate=yes;"
+            )
+
+            conn = pyodbc.connect(conn_str, timeout=10)
+
 
         # ✅ Oracle Connection
         elif dbType == "Oracle":
@@ -8690,7 +9098,14 @@ def fetch_data_from_table(db_details, table_name):
 
         # ✅ Execute query and return first 10 rows
         cursor = conn.cursor()
-        query = f"SELECT * FROM {table_name} FETCH FIRST 10 ROWS ONLY" if dbType == "Oracle" else f"SELECT * FROM {table_name} LIMIT 10;"
+        if dbType == "Oracle":
+            query = f"SELECT * FROM {table_name} FETCH FIRST 10 ROWS ONLY"
+        elif dbType in ["MSSQL", "SQLServer", "sqlserver", "mssql"]:
+            query = f"SELECT TOP 10 * FROM {table_name}"
+        else:
+            query = f"SELECT * FROM {table_name} LIMIT 10"
+
+        # query = f"SELECT * FROM {table_name} FETCH FIRST 10 ROWS ONLY" if dbType == "Oracle" else f"SELECT * FROM {table_name} LIMIT 10;"
         cursor.execute(query)
         rows = cursor.fetchall()
         columns = [desc[0] for desc in cursor.description]
@@ -9528,6 +9943,30 @@ def connect_and_fetch_dbtables():
             cursor.execute("SHOW TABLES;")
             tables = [row[0] for row in cursor.fetchall()]
             conn.close()
+        elif db_type in ["MSSQL", "SQLServer", "sqlserver", "mssql"]:
+            print("🧩 Connecting to MSSQL...")
+
+            conn_str = (
+                "DRIVER={ODBC Driver 17 for SQL Server};"
+                f"SERVER={host},{port};"
+                f"DATABASE={db_name};"
+                f"UID={username};"
+                f"PWD={password};"
+                "TrustServerCertificate=yes;"
+            )
+
+            conn = pyodbc.connect(conn_str, timeout=10)
+            cursor = conn.cursor()
+
+            cursor.execute("""
+                SELECT TABLE_NAME
+                FROM INFORMATION_SCHEMA.TABLES
+                WHERE TABLE_TYPE = 'BASE TABLE'
+            """)
+
+            tables = [row[0] for row in cursor.fetchall()]
+            conn.close()
+
 
         else:
             return jsonify(success=False, error="Unsupported database type.")
@@ -10077,6 +10516,34 @@ def get_tables():
             tables = [row[0] for row in cursor.fetchall()]
             cursor.close()
             conn.close()
+        elif db_type in ['MSSQL', 'SQLServer', 'sqlserver', 'mssql']:
+            print("🧩 Connecting to MSSQL...")
+
+            server = host or 'localhost'
+            sql_port = port or '1433'
+
+            conn_str = (
+                "DRIVER={ODBC Driver 17 for SQL Server};"
+                f"SERVER={server},{sql_port};"
+                f"DATABASE={dbName};"
+                f"UID={username};"
+                f"PWD={password};"
+                "TrustServerCertificate=yes;"
+            )
+
+            conn = pyodbc.connect(conn_str, timeout=10)
+            cursor = conn.cursor()
+
+            cursor.execute("""
+                SELECT TABLE_NAME
+                FROM INFORMATION_SCHEMA.TABLES
+                WHERE TABLE_TYPE = 'BASE TABLE'
+            """)
+
+            tables = [row[0] for row in cursor.fetchall()]
+            cursor.close()
+            conn.close()
+
         else:
             return jsonify({"success": False, "error": f"Unsupported database type: {db_type}"}), 400
         return jsonify({"success": True, "tables": tables})
@@ -16220,6 +16687,195 @@ def get_kpi_insights(table_name):
             'success': False,
             'error': str(e)
         }), 500
+
+
+# @app.route("/api/get-source-data", methods=["POST"])
+# def get_source_data():
+#     payload = request.json
+
+#     # db_details = get_company_db_connection(payload["databaseName"])
+#     database_name = payload["databaseName"]
+#     conn = get_company_db_connection(database_name)
+#     table_name = payload["tableName"]
+#     x_axis = payload.get("xAxis")
+#     y_axis = payload.get("yAxis")
+#     filter_options= payload.get("filter_options", {})
+
+#     data = fetch_source_data_from_table(
+#         db_details=conn,
+#         table_name=table_name,
+#         x_axis=x_axis,
+#         y_axis=y_axis,
+#         limit=1000
+#     )
+
+#     return jsonify(data)
+
+# def fetch_source_data_from_table(db_details, table_name, x_axis=None, y_axis=None, limit=1000):
+#     conn = None
+#     try:
+#         conn = db_details
+
+#         # ----------------------------
+#         # ✅ SQL Execution (ALL COLUMNS)
+#         # ----------------------------
+#         cursor = conn.cursor()
+
+#         query = f"SELECT * FROM {table_name}"
+#         cursor.execute(query)
+
+#         rows = cursor.fetchall()
+#         columns = [desc[0] for desc in cursor.description]
+
+#         print(f"✅ Source data fetched: {len(rows)} rows")
+
+#         return {
+#             "columns": columns,
+#             "rows": [dict(zip(columns, row)) for row in rows]
+#         }
+
+#     except Exception as e:
+#         raise Exception(f"❌ Error fetching source data: {str(e)}")
+
+#     finally:
+#         if conn:
+#             conn.close()
+       
+@app.route("/api/get-source-data", methods=["POST"])
+def get_source_data():
+    payload = request.json
+
+    database_name = payload["databaseName"]
+    conn = get_company_db_connection(database_name)
+    table_name = payload["tableName"]
+    # x_axis = payload.get("xAxis")
+    # y_axis = payload.get("yAxis")
+    filter_options = payload.get("filter_options", {})
+
+    data = fetch_source_data_from_table(
+        db_details=conn,
+        table_name=table_name,
+        filter_options=filter_options,
+        limit=1000
+    )
+
+    return jsonify(data)
+
+
+# def fetch_source_data_from_table(db_details, table_name, filter_options=None, limit=1000):
+#     conn = None
+#     try:
+#         conn = db_details
+#         cursor = conn.cursor()
+#         print("Filter options received:", filter_options)
+
+#         # Base query
+#         query = f"SELECT * FROM {table_name}"
+
+#         # ----------------------------
+#         # ✅ Add filter conditions dynamically
+#         # ----------------------------
+#         where_clauses = []
+#         params = []
+
+#         if filter_options:
+#             for col, values in filter_options.items():
+#                 if isinstance(values, list) and values:
+#                     placeholders = ", ".join(["%s"] * len(values))
+#                     where_clauses.append(f"{col} IN ({placeholders})")
+#                     params.extend(values)
+
+#         if where_clauses:
+#             query += " WHERE " + " AND ".join(where_clauses)
+
+#         query += f" LIMIT {limit}"
+
+#         cursor.execute(query, tuple(params))
+#         rows = cursor.fetchall()
+#         columns = [desc[0] for desc in cursor.description]
+
+#         print(f"✅ Source data fetched: {len(rows)} rows with filters {filter_options}")
+
+#         return {
+#             "columns": columns,
+#             "rows": [dict(zip(columns, row)) for row in rows]
+#         }
+
+#     except Exception as e:
+#         raise Exception(f"❌ Error fetching source data: {str(e)}")
+
+#     finally:
+#         if conn:
+#             conn.close()
+from datetime import datetime, date
+def fetch_source_data_from_table(db_details, table_name, filter_options=None, limit=1000):
+    conn = None
+    try:
+        conn = db_details
+        cursor = conn.cursor()
+
+        # Ensure filter_options is a dictionary
+        if isinstance(filter_options, str):
+            try:
+                filter_options = json.loads(filter_options)
+            except Exception:
+                filter_options = {}
+
+        print("Filter options received:", filter_options)
+
+        # Base query
+        query = f"SELECT * FROM {table_name}"
+
+        # ----------------------------
+        # ✅ Add filter conditions dynamically
+        # ----------------------------
+        where_clauses = []
+        params = []
+
+        if filter_options and isinstance(filter_options, dict):
+            for col, values in filter_options.items():
+                if isinstance(values, list) and values:
+                    placeholders = ", ".join(["%s"] * len(values))
+                    where_clauses.append(f"{col} IN ({placeholders})")
+                    params.extend(values)
+
+        if where_clauses:
+            query += " WHERE " + " AND ".join(where_clauses)
+
+        query += f" LIMIT {limit}"
+        print("Final SQL Query:", query)
+
+        cursor.execute(query, tuple(params))
+        rows = cursor.fetchall()
+        columns = [desc[0] for desc in cursor.description]
+        formatted_rows = []
+        for row in rows:
+            row_dict = {}
+            for idx, col in enumerate(columns):
+                value = row[idx]
+                if isinstance(value, (datetime, date)):
+                    row_dict[col] = value.strftime("%Y-%m-%d")
+                else:
+                    row_dict[col] = value
+            formatted_rows.append(row_dict)
+
+        print(f"✅ Source data fetched: {len(formatted_rows)} rows with filters {filter_options}")
+
+        # print(f"✅ Source data fetched: {len(rows)} rows with filters {filter_options}")
+
+        return {
+            "columns": columns,
+            "rows": formatted_rows
+        }
+
+    except Exception as e:
+        raise Exception(f"❌ Error fetching source data: {str(e)}")
+
+    finally:
+        if conn:
+            conn.close()
+
+
 
 # if __name__ == '__main__':
 #     app.run(debug=True, port=5000)

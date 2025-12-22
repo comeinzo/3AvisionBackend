@@ -648,4 +648,5 @@ class LicenseManager:
         self.create_tables()
         self.add_missing_columns()
         self.insert_default_data()
+        self.insert_calculation_suggestions()
         print("🎯 License tables setup completed successfully.")

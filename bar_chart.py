@@ -10,7 +10,7 @@ import paramiko
 import socket
 import threading
 from dashboard_design import get_db_connection_or_path
-
+import pyodbc
 global_df = None  # Ensure global_df is initialized to None
 global_column_names = None
 def is_numeric(value):
@@ -271,7 +271,7 @@ def get_column_names(db_name, username, password, table_name, selected_user,
             print("fetched connection details:", connection_details)
             if not connection_details:
                 raise Exception(f"Unable to fetch external database connection details for user '{selected_user}'")
-
+            use_ssh = bool(connection_details[8])
             db_details = {
                 "name": connection_details[1],
                 "dbType": connection_details[2],
@@ -280,12 +280,19 @@ def get_column_names(db_name, username, password, table_name, selected_user,
                 "password": connection_details[5],
                 "port": int(connection_details[6]),
                 "database": connection_details[7],
-                "use_ssh": connection_details[8],
-                "ssh_host": connection_details[9],
-                "ssh_port": int(connection_details[10]),
-                "ssh_username": connection_details[11],
-                "ssh_key_path": connection_details[12],
+                "use_ssh": use_ssh,
+                "ssh_host": connection_details[9] if use_ssh else None,
+                "ssh_port": int(connection_details[10] or 22) if use_ssh else None,
+                "ssh_username": connection_details[11] if use_ssh else None,
+                "ssh_key_path": connection_details[12] if use_ssh else None,
+                # "use_ssh": connection_details[8],
+                # "ssh_host": connection_details[9],
+                # "ssh_port": int(connection_details[10]),
+                # "ssh_username": connection_details[11],
+                # "ssh_key_path": connection_details[12],
             }
+            target_host = db_details["host"]
+            target_port = db_details["port"]
 
             print(f"🔹 External DB Connection Details: {db_details}")
 
@@ -347,29 +354,62 @@ def get_column_names(db_name, username, password, table_name, selected_user,
                 tunnel_thread.start()
 
                 # Override host and port for local tunnel
-                host = "127.0.0.1"
-                port = local_port
+                target_host = "127.0.0.1"
+                target_port = local_port
 
-            print(f"🧩 Connecting to external PostgreSQL at {host}:{port} ...")
+            print(f"🧩 Connecting to external PostgreSQL at {target_host}:{target_port} ...")
+            
+        #     conn = psycopg2.connect(
+        #         dbname=db_details['database'],
+        #         user=db_details['user'],
+        #         password=db_details['password'],
+        #         host=host,       # ✅ Use tunneled host
+        #         port=port        # ✅ Use tunneled port
+        #     )
+
+        # # ✅ Fetch column names and types
+        # cursor = conn.cursor()
+        # cursor.execute("""
+        #     SELECT column_name, data_type
+        #     FROM information_schema.columns
+        #     WHERE table_schema = current_schema()
+        #     AND table_name = %s;
+        # """, (table_name,))
+
+        # columns_metadata = cursor.fetchall()
+
+        if db_details['dbType'] == 'MSSQL':
+            conn_str = (
+                f"DRIVER={{ODBC Driver 17 for SQL Server}};"
+                f"SERVER={target_host},{target_port};"
+                f"DATABASE={db_details['database']};"
+                f"UID={db_details['user']};"
+                f"PWD={db_details['password']};"
+                f"Timeout=10;"
+            )
+            conn = pyodbc.connect(conn_str)
+            query = "SELECT COLUMN_NAME, DATA_TYPE FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = ?"
+            query_params = (table_name,)
+        else:
             conn = psycopg2.connect(
                 dbname=db_details['database'],
                 user=db_details['user'],
                 password=db_details['password'],
-                host=host,       # ✅ Use tunneled host
-                port=port        # ✅ Use tunneled port
+                host=target_host,
+                port=target_port
             )
+            # PostgreSQL uses current_schema() to be safe
+            query = """
+                SELECT column_name, data_type 
+                FROM information_schema.columns 
+                WHERE table_name = %s AND table_schema = current_schema()
+            """
+            query_params = (table_name,)
 
-        # ✅ Fetch column names and types
+        # --- 4. FETCH AND PROCESS COLUMNS ---
         cursor = conn.cursor()
-        cursor.execute("""
-            SELECT column_name, data_type
-            FROM information_schema.columns
-            WHERE table_schema = current_schema()
-            AND table_name = %s;
-        """, (table_name,))
-
+        cursor.execute(query, query_params)
         columns_metadata = cursor.fetchall()
-
         numeric_columns = []
         text_columns = []
 
@@ -2903,6 +2943,7 @@ def fetch_column_name(table_name, x_axis_columns, db_name, calculation_expr, cal
                     
                     date_parts_data = {
                         "is_date": True,
+                        "all_values": [],  
                         "years": [],
                         "quarters": [],
                         "months": [],       # Numeric (1-12)
@@ -2912,7 +2953,23 @@ def fetch_column_name(table_name, x_axis_columns, db_name, calculation_expr, cal
                         "month_names": [],  # e.g., {"num": 1, "name": "January"}
                         "day_names": []     # e.g., {"num": 0, "name": "Sunday"}
                     }
-                    
+                    try:
+                        raw_query = sql.SQL(
+                            "SELECT DISTINCT {col} FROM {table} WHERE {col} IS NOT NULL ORDER BY 1"
+                        ).format(
+                            col=sql.Identifier(col),
+                            table=sql.Identifier(table_name)
+                        )
+
+                        cur.execute(raw_query)
+                        rows = cur.fetchall()
+
+                        # Convert to ISO string for frontend safety
+                        date_parts_data["all_values"] = [
+                            row[0].isoformat() if row[0] else None for row in rows
+                        ]
+                    except Exception as e:
+                        print(f"Error fetching raw date values for {col}: {e}")
                     # (dictionary_key, sql_extract_part)
                     parts_to_query = [
                         ('years', 'YEAR'),

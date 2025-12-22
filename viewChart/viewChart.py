@@ -541,6 +541,7 @@ from config import USER_NAME, DB_NAME, PASSWORD, HOST, PORT
 from bar_chart import fetch_external_db_connection,convert_calculation_to_sql
 from user_upload import get_db_connection
 import json
+import pyodbc
 
 def get_db_connection_view(database_name):
     connection = psycopg2.connect(
@@ -552,28 +553,79 @@ def get_db_connection_view(database_name):
     )
     return connection
 
+# def fetch_chart_data(connection, tableName):
+#     try:
+#         cursor = connection.cursor()
+
+#         # Use SQL composition to safely query using dynamic table and column names
+#         query = sql.SQL("SELECT * FROM {table}")
+#         query = query.format(
+#             table=sql.Identifier(tableName)
+#         )
+#         cursor.execute(query)
+#         results = cursor.fetchall()
+#         # Fetch the column names from the cursor
+#         column_names = [desc[0] for desc in cursor.description]
+#         # Convert the results to a DataFrame with the column names
+#         df = pd.DataFrame(results, columns=column_names)
+#         cursor.close()
+
+#         return df
+
+#     except Exception as e:
+#         raise Exception(f"Error fetching data from {tableName}: {str(e)}")
+
 def fetch_chart_data(connection, tableName):
     try:
         cursor = connection.cursor()
 
-        # Use SQL composition to safely query using dynamic table and column names
-        query = sql.SQL("SELECT * FROM {table}")
-        query = query.format(
-            table=sql.Identifier(tableName)
-        )
-        cursor.execute(query)
-        results = cursor.fetchall()
-        # Fetch the column names from the cursor
-        column_names = [desc[0] for desc in cursor.description]
-        # Convert the results to a DataFrame with the column names
-        df = pd.DataFrame(results, columns=column_names)
-        cursor.close()
+        # 🔍 Detect DB type by connection class
+        is_postgres = isinstance(connection, psycopg2.extensions.connection)
+        is_mssql = isinstance(connection, pyodbc.Connection)
+        print("is_postgres",is_postgres)
+        print("is_mssql",is_mssql)
 
+        if is_postgres:
+            # ✅ PostgreSQL safe identifier handling
+            query = sql.SQL("SELECT * FROM {}").format(
+                sql.Identifier(tableName)
+            )
+            cursor.execute(query)
+
+        elif is_mssql:
+            # ✅ MSSQL safe table name (QUOTENAME equivalent)
+            query = f"SELECT * FROM [{tableName}]"
+            cursor.execute(query)
+
+        else:
+            raise Exception("Unsupported database connection type")
+
+        if is_postgres:
+            query = sql.SQL("SELECT * FROM {}").format(
+                sql.Identifier(tableName)
+            )
+            cursor.execute(query)
+
+        elif is_mssql:
+            query = f"SELECT * FROM [{tableName}]"
+            cursor.execute(query)
+
+        else:
+            raise Exception("Unsupported database connection type")
+
+        # 🔥 IMPORTANT FIX HERE
+        rows = cursor.fetchall()
+        results = [tuple(row) for row in rows]  # ✅ normalize pyodbc rows
+
+        column_names = [desc[0] for desc in cursor.description]
+
+        df = pd.DataFrame(results, columns=column_names)
+
+        cursor.close()
         return df
 
     except Exception as e:
         raise Exception(f"Error fetching data from {tableName}: {str(e)}")
-
 def fetch_ai_saved_chart_data(connection, tableName, chart_id):
     try:
         cursor = connection.cursor()
@@ -1208,15 +1260,54 @@ def filter_chart_data(database_name, table_name, x_axis, y_axis, aggregate, clic
             y_axis_aggregate_parts.append(expr)
 
         y_axis_aggregate = ", ".join(y_axis_aggregate_parts)
+        # Around line 1320 in your filter_chart_data function
+        # if category:
+        #     # Handle category filtering
+        #     if matched_calc_x and clicked_category_Xaxis.lower() == x_axis.lower():
+        #         formula_sql_click = convert_calculation_to_sql(matched_calc_x["calculation"].strip(), dataframe_columns=global_df.columns.tolist())
+        #         where_expr = f"({formula_sql_click}) = %s"
+        #     else:
+        #         # CHECK IF THE COLUMN IS A DATE AND THE CATEGORY IS A YEAR
+        #         if "date" in clicked_category_Xaxis.lower() and len(str(category)) == 4:
+        #             where_expr = f"EXTRACT(YEAR FROM \"{clicked_category_Xaxis}\") = %s"
+        #         else:
+        #             where_expr = f'"{clicked_category_Xaxis}" = %s'
 
-        
+        #     query = f"""
+        #         SELECT {X_Axis}, {y_axis_aggregate}
+        #         FROM "{table_name}"
+        #         WHERE {where_expr}
+        #         GROUP BY {X_Axis_group};
+        #     """
+        #     # If using EXTRACT(YEAR...), ensure category is an integer
+
+        #     print("query", query)
+        #     param = int(category) if "YEAR" in where_expr else category
+        #     cursor.execute(query, (param,))
+
+
+        # Locate the block: if category: (around line 1320)
         if category:
             # Handle category filtering
             if matched_calc_x and clicked_category_Xaxis.lower() == x_axis.lower():
                 formula_sql_click = convert_calculation_to_sql(matched_calc_x["calculation"].strip(), dataframe_columns=global_df.columns.tolist())
                 where_expr = f"({formula_sql_click}) = %s"
             else:
-                where_expr = f'"{clicked_category_Xaxis}" = %s'
+                # --- NEW DATE LOGIC START ---
+                # List of months to identify if the category clicked is a month
+                months = ["January", "February", "March", "April", "May", "June", 
+                        "July", "August", "September", "October", "November", "December"]
+                
+                if clicked_category_Xaxis.lower() == "ship_date" and category in months:
+                    # Convert the date column to Month name for comparison
+                    where_expr = f"TRIM(TO_CHAR(\"{clicked_category_Xaxis}\", 'Month')) = %s"
+                elif clicked_category_Xaxis.lower() == "ship_date" and len(str(category)) == 4 and str(category).isdigit():
+                    # Handle Year clicks (from your previous error)
+                    where_expr = f"EXTRACT(YEAR FROM \"{clicked_category_Xaxis}\")::text = %s"
+                else:
+                    # Default behavior for non-date columns (region, country, etc.)
+                    where_expr = f'"{clicked_category_Xaxis}" = %s'
+                # --- NEW DATE LOGIC END ---
 
             query = f"""
                 SELECT {X_Axis}, {y_axis_aggregate}
@@ -1224,8 +1315,25 @@ def filter_chart_data(database_name, table_name, x_axis, y_axis, aggregate, clic
                 WHERE {where_expr}
                 GROUP BY {X_Axis_group};
             """
+            print("Executing query:", query, "with param:", category)
             cursor.execute(query, (category,))
-            print("query", query,category)
+                
+        # if category:
+        #     # Handle category filtering
+        #     if matched_calc_x and clicked_category_Xaxis.lower() == x_axis.lower():
+        #         formula_sql_click = convert_calculation_to_sql(matched_calc_x["calculation"].strip(), dataframe_columns=global_df.columns.tolist())
+        #         where_expr = f"({formula_sql_click}) = %s"
+        #     else:
+        #         where_expr = f'"{clicked_category_Xaxis}" = %s'
+
+        #     query = f"""
+        #         SELECT {X_Axis}, {y_axis_aggregate}
+        #         FROM "{table_name}"
+        #         WHERE {where_expr}
+        #         GROUP BY {X_Axis_group};
+        #     """
+        #     cursor.execute(query, (category,))
+        #     print("query", query,category)
 
         else:
             # Handle general filtering
