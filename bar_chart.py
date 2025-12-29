@@ -238,25 +238,252 @@ def remove_symbols(value):
 #             cursor.close()
 #         if conn:
 #             conn.close()
-def get_column_names(db_name, username, password, table_name, selected_user,
+
+
+
+# def get_column_names(db_name, username, password, table_name, selected_user,
+#                      host='localhost', port='5432', connection_type='local'):
+#     """
+#     Retrieve numeric and text column names from a given table
+#     for both local and external (SSH) PostgreSQL connections.
+#     """
+#     print("kconnect",connection_type)
+#     conn = None
+#     cursor = None
+#     ssh_client = None
+#     local_sock = None
+#     stop_event = threading.Event()
+#     tunnel_thread = None
+
+#     try:
+#         print("connection_type:", connection_type)
+
+#         # ✅ 1️⃣ LOCAL DATABASE CONNECTION
+#         if not connection_type or connection_type.lower() in ('local', 'null', 'none'):
+#             conn = psycopg2.connect(
+#                 dbname=db_name,
+#                 user=username,
+#                 password=password,
+#                 host=host,
+#                 port=port
+#             )
+
+#         # ✅ 2️⃣ EXTERNAL DATABASE CONNECTION (via SSH tunnel)
+#         else:
+#             connection_details = fetch_external_db_connection(db_name, selected_user)
+#             print("fetched connection details:", connection_details)
+#             if not connection_details:
+#                 raise Exception(f"Unable to fetch external database connection details for user '{selected_user}'")
+#             use_ssh = bool(connection_details[8])
+#             db_details = {
+#                 "name": connection_details[1],
+#                 "dbType": connection_details[2],
+#                 "host": connection_details[3],
+#                 "user": connection_details[4],
+#                 "password": connection_details[5],
+#                 "port": int(connection_details[6]),
+#                 "database": connection_details[7],
+#                 "use_ssh": use_ssh,
+#                 "ssh_host": connection_details[9] if use_ssh else None,
+#                 "ssh_port": int(connection_details[10] or 22) if use_ssh else None,
+#                 "ssh_username": connection_details[11] if use_ssh else None,
+#                 "ssh_key_path": connection_details[12] if use_ssh else None,
+#                 # "use_ssh": connection_details[8],
+#                 # "ssh_host": connection_details[9],
+#                 # "ssh_port": int(connection_details[10]),
+#                 # "ssh_username": connection_details[11],
+#                 # "ssh_key_path": connection_details[12],
+#             }
+#             target_host = db_details["host"]
+#             target_port = db_details["port"]
+
+#             print(f"🔹 External DB Connection Details: {db_details}")
+
+#             # ✅ Start SSH tunnel if needed
+#             if db_details["use_ssh"]:
+#                 print("🔐 Establishing SSH tunnel manually (Paramiko)...")
+#                 private_key = paramiko.RSAKey.from_private_key_file(db_details["ssh_key_path"])
+
+#                 ssh_client = paramiko.SSHClient()
+#                 ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+#                 ssh_client.connect(
+#                     db_details["ssh_host"],
+#                     username=db_details["ssh_username"],
+#                     pkey=private_key,
+#                     port=db_details["ssh_port"],
+#                     timeout=10
+#                 )
+
+#                 # Find free local port for tunnel
+#                 local_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+#                 local_sock.bind(('127.0.0.1', 0))
+#                 local_port = local_sock.getsockname()[1]
+#                 local_sock.listen(1)
+#                 print(f"✅ Local forwarder listening on 127.0.0.1:{local_port}")
+
+#                 transport = ssh_client.get_transport()
+
+#                 def pipe(src, dst):
+#                     try:
+#                         while True:
+#                             data = src.recv(1024)
+#                             if not data:
+#                                 break
+#                             dst.sendall(data)
+#                     except Exception:
+#                         pass
+#                     finally:
+#                         src.close()
+#                         dst.close()
+
+#                 def forward_tunnel():
+#                     while not stop_event.is_set():
+#                         try:
+#                             client_sock, _ = local_sock.accept()
+#                             chan = transport.open_channel(
+#                                 "direct-tcpip",
+#                                 ("127.0.0.1", 5432),
+#                                 client_sock.getsockname()
+#                             )
+#                             if chan is None:
+#                                 client_sock.close()
+#                                 continue
+#                             threading.Thread(target=pipe, args=(client_sock, chan), daemon=True).start()
+#                             threading.Thread(target=pipe, args=(chan, client_sock), daemon=True).start()
+#                         except Exception as e:
+#                             print(f"❌ Channel open failed: {e}")
+
+#                 tunnel_thread = threading.Thread(target=forward_tunnel, daemon=True)
+#                 tunnel_thread.start()
+
+#                 # Override host and port for local tunnel
+#                 target_host = "127.0.0.1"
+#                 target_port = local_port
+
+#             print(f"🧩 Connecting to external PostgreSQL at {target_host}:{target_port} ...")
+            
+#         #     conn = psycopg2.connect(
+#         #         dbname=db_details['database'],
+#         #         user=db_details['user'],
+#         #         password=db_details['password'],
+#         #         host=host,       # ✅ Use tunneled host
+#         #         port=port        # ✅ Use tunneled port
+#         #     )
+
+#         # # ✅ Fetch column names and types
+#         # cursor = conn.cursor()
+#         # cursor.execute("""
+#         #     SELECT column_name, data_type
+#         #     FROM information_schema.columns
+#         #     WHERE table_schema = current_schema()
+#         #     AND table_name = %s;
+#         # """, (table_name,))
+
+#         # columns_metadata = cursor.fetchall()
+
+#         if db_details['dbType'] == 'MSSQL':
+#             conn_str = (
+#                 f"DRIVER={{ODBC Driver 17 for SQL Server}};"
+#                 f"SERVER={target_host},{target_port};"
+#                 f"DATABASE={db_details['database']};"
+#                 f"UID={db_details['user']};"
+#                 f"PWD={db_details['password']};"
+#                 f"Timeout=10;"
+#             )
+#             conn = pyodbc.connect(conn_str)
+#             query = "SELECT COLUMN_NAME, DATA_TYPE FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = ?"
+#             query_params = (table_name,)
+#         else:
+#             conn = psycopg2.connect(
+#                 dbname=db_details['database'],
+#                 user=db_details['user'],
+#                 password=db_details['password'],
+#                 host=target_host,
+#                 port=target_port
+#             )
+#             # PostgreSQL uses current_schema() to be safe
+#             query = """
+#                 SELECT column_name, data_type 
+#                 FROM information_schema.columns 
+#                 WHERE table_name = %s AND table_schema = current_schema()
+#             """
+#             query_params = (table_name,)
+
+#         # --- 4. FETCH AND PROCESS COLUMNS ---
+#         cursor = conn.cursor()
+#         cursor.execute(query, query_params)
+#         columns_metadata = cursor.fetchall()
+#         numeric_columns = []
+#         text_columns = []
+
+#         numeric_types = [
+#             'smallint', 'integer', 'bigint', 'decimal', 'numeric', 'real',
+#             'double precision', 'serial', 'bigserial', 'money'
+#         ]
+#         text_types = [
+#             'character varying', 'varchar', 'character', 'char', 'text', 'citext',
+#             'json', 'jsonb', 'xml', 'uuid', 'bytea', 'tsquery', 'tsvector',
+#             'inet', 'cidr', 'macaddr'
+#         ]
+#         datetime_types = ['date', 'timestamp', 'timestamptz', 'time', 'timetz', 'interval']
+#         boolean_type = ['boolean']
+
+#         for column_name, data_type in columns_metadata:
+#             data_type_lower = data_type.lower()
+#             if data_type_lower in numeric_types:
+#                 numeric_columns.append(column_name)
+#             elif data_type_lower in text_types or data_type_lower in datetime_types or data_type_lower in boolean_type:
+#                 text_columns.append(column_name)
+#             else:
+#                 text_columns.append(column_name)
+
+#         return {'numeric_columns': numeric_columns, 'text_columns': text_columns}
+
+#     except psycopg2.Error as e:
+#         print(f"Database error occurred: {e}")
+#         return {'numeric_columns': [], 'text_columns': [], 'error': f"Database error: {e}"}
+
+#     except Exception as e:
+#         print(f"An unexpected error occurred: {e}")
+#         return {'numeric_columns': [], 'text_columns': [], 'error': f"An unexpected error occurred: {e}"}
+
+#     finally:
+#         # ✅ Close resources
+#         if cursor:
+#             cursor.close()
+#         if conn:
+#             conn.close()
+#         if ssh_client:
+#             stop_event.set()
+#             ssh_client.close()
+#             print("🔒 SSH Tunnel closed.")
+
+
+def get_column_names(db_name, username, password, table_name, selected_user, 
                      host='localhost', port='5432', connection_type='local'):
     """
-    Retrieve numeric and text column names from a given table
-    for both local and external (SSH) PostgreSQL connections.
+    Retrieve numeric and text column names from a given table 
+    for both local and external (SSH) PostgreSQL/MSSQL connections.
     """
-    print("kconnect",connection_type)
     conn = None
     cursor = None
     ssh_client = None
     local_sock = None
     stop_event = threading.Event()
     tunnel_thread = None
+    
+    # Initialize query variables
+    query = ""
+    query_params = ()
 
     try:
         print("connection_type:", connection_type)
 
-        # ✅ 1️⃣ LOCAL DATABASE CONNECTION
+        # =======================================================
+        # ✅ 1️⃣ LOCAL DATABASE CONNECTION (Assumes PostgreSQL)
+        # =======================================================
         if not connection_type or connection_type.lower() in ('local', 'null', 'none'):
+            print("🔹 Establishing Local PostgreSQL Connection...")
             conn = psycopg2.connect(
                 dbname=db_name,
                 user=username,
@@ -264,13 +491,24 @@ def get_column_names(db_name, username, password, table_name, selected_user,
                 host=host,
                 port=port
             )
+            
+            # Set PostgreSQL Query
+            query = """
+                SELECT column_name, data_type 
+                FROM information_schema.columns 
+                WHERE table_name = %s AND table_schema = current_schema()
+            """
+            query_params = (table_name,)
 
-        # ✅ 2️⃣ EXTERNAL DATABASE CONNECTION (via SSH tunnel)
+        # =======================================================
+        # ✅ 2️⃣ EXTERNAL DATABASE CONNECTION (MSSQL or PostgreSQL)
+        # =======================================================
         else:
             connection_details = fetch_external_db_connection(db_name, selected_user)
-            print("fetched connection details:", connection_details)
             if not connection_details:
                 raise Exception(f"Unable to fetch external database connection details for user '{selected_user}'")
+
+            # Extract details safely
             use_ssh = bool(connection_details[8])
             db_details = {
                 "name": connection_details[1],
@@ -285,18 +523,14 @@ def get_column_names(db_name, username, password, table_name, selected_user,
                 "ssh_port": int(connection_details[10] or 22) if use_ssh else None,
                 "ssh_username": connection_details[11] if use_ssh else None,
                 "ssh_key_path": connection_details[12] if use_ssh else None,
-                # "use_ssh": connection_details[8],
-                # "ssh_host": connection_details[9],
-                # "ssh_port": int(connection_details[10]),
-                # "ssh_username": connection_details[11],
-                # "ssh_key_path": connection_details[12],
             }
+            
             target_host = db_details["host"]
             target_port = db_details["port"]
 
-            print(f"🔹 External DB Connection Details: {db_details}")
+            print(f"🔹 External DB Details: {db_details}")
 
-            # ✅ Start SSH tunnel if needed
+            # --- Start SSH Tunnel if needed ---
             if db_details["use_ssh"]:
                 print("🔐 Establishing SSH tunnel manually (Paramiko)...")
                 private_key = paramiko.RSAKey.from_private_key_file(db_details["ssh_key_path"])
@@ -311,24 +545,21 @@ def get_column_names(db_name, username, password, table_name, selected_user,
                     timeout=10
                 )
 
-                # Find free local port for tunnel
+                # Find free local port
                 local_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 local_sock.bind(('127.0.0.1', 0))
                 local_port = local_sock.getsockname()[1]
                 local_sock.listen(1)
-                print(f"✅ Local forwarder listening on 127.0.0.1:{local_port}")
-
+                
                 transport = ssh_client.get_transport()
 
                 def pipe(src, dst):
                     try:
                         while True:
                             data = src.recv(1024)
-                            if not data:
-                                break
+                            if not data: break
                             dst.sendall(data)
-                    except Exception:
-                        pass
+                    except: pass
                     finally:
                         src.close()
                         dst.close()
@@ -339,7 +570,7 @@ def get_column_names(db_name, username, password, table_name, selected_user,
                             client_sock, _ = local_sock.accept()
                             chan = transport.open_channel(
                                 "direct-tcpip",
-                                ("127.0.0.1", 5432),
+                                (target_host, target_port), # Forward to remote DB
                                 client_sock.getsockname()
                             )
                             if chan is None:
@@ -353,103 +584,80 @@ def get_column_names(db_name, username, password, table_name, selected_user,
                 tunnel_thread = threading.Thread(target=forward_tunnel, daemon=True)
                 tunnel_thread.start()
 
-                # Override host and port for local tunnel
+                # Update target to point to the local tunnel
                 target_host = "127.0.0.1"
                 target_port = local_port
 
-            print(f"🧩 Connecting to external PostgreSQL at {target_host}:{target_port} ...")
+            print(f"🧩 Connecting to External {db_details['dbType']} at {target_host}:{target_port} ...")
+
+            # --- Connect based on DB Type ---
+            if db_details['dbType'] == 'MSSQL':
+                conn_str = (
+                    f"DRIVER={{ODBC Driver 17 for SQL Server}};"
+                    f"SERVER={target_host},{target_port};"
+                    f"DATABASE={db_details['database']};"
+                    f"UID={db_details['user']};"
+                    f"PWD={db_details['password']};"
+                    f"Timeout=10;"
+                )
+                conn = pyodbc.connect(conn_str)
+                query = "SELECT COLUMN_NAME, DATA_TYPE FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = ?"
+                query_params = (table_name,)
             
-        #     conn = psycopg2.connect(
-        #         dbname=db_details['database'],
-        #         user=db_details['user'],
-        #         password=db_details['password'],
-        #         host=host,       # ✅ Use tunneled host
-        #         port=port        # ✅ Use tunneled port
-        #     )
+            else: # Defaults to PostgreSQL
+                conn = psycopg2.connect(
+                    dbname=db_details['database'],
+                    user=db_details['user'],
+                    password=db_details['password'],
+                    host=target_host,
+                    port=target_port
+                )
+                query = """
+                    SELECT column_name, data_type 
+                    FROM information_schema.columns 
+                    WHERE table_name = %s AND table_schema = current_schema()
+                """
+                query_params = (table_name,)
 
-        # # ✅ Fetch column names and types
-        # cursor = conn.cursor()
-        # cursor.execute("""
-        #     SELECT column_name, data_type
-        #     FROM information_schema.columns
-        #     WHERE table_schema = current_schema()
-        #     AND table_name = %s;
-        # """, (table_name,))
-
-        # columns_metadata = cursor.fetchall()
-
-        if db_details['dbType'] == 'MSSQL':
-            conn_str = (
-                f"DRIVER={{ODBC Driver 17 for SQL Server}};"
-                f"SERVER={target_host},{target_port};"
-                f"DATABASE={db_details['database']};"
-                f"UID={db_details['user']};"
-                f"PWD={db_details['password']};"
-                f"Timeout=10;"
-            )
-            conn = pyodbc.connect(conn_str)
-            query = "SELECT COLUMN_NAME, DATA_TYPE FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = ?"
-            query_params = (table_name,)
-        else:
-            conn = psycopg2.connect(
-                dbname=db_details['database'],
-                user=db_details['user'],
-                password=db_details['password'],
-                host=target_host,
-                port=target_port
-            )
-            # PostgreSQL uses current_schema() to be safe
-            query = """
-                SELECT column_name, data_type 
-                FROM information_schema.columns 
-                WHERE table_name = %s AND table_schema = current_schema()
-            """
-            query_params = (table_name,)
-
-        # --- 4. FETCH AND PROCESS COLUMNS ---
+        # =======================================================
+        # ✅ 3️⃣ FETCH METADATA (Common for all)
+        # =======================================================
         cursor = conn.cursor()
         cursor.execute(query, query_params)
         columns_metadata = cursor.fetchall()
+
         numeric_columns = []
         text_columns = []
 
+        # Data Type Mappings
         numeric_types = [
             'smallint', 'integer', 'bigint', 'decimal', 'numeric', 'real',
-            'double precision', 'serial', 'bigserial', 'money'
+            'double precision', 'serial', 'bigserial', 'money', 'float', 'int', 'tinyint', 'bit'
         ]
         text_types = [
             'character varying', 'varchar', 'character', 'char', 'text', 'citext',
-            'json', 'jsonb', 'xml', 'uuid', 'bytea', 'tsquery', 'tsvector',
-            'inet', 'cidr', 'macaddr'
+            'json', 'jsonb', 'xml', 'uuid', 'bytea', 'nvarchar', 'nchar'
         ]
-        datetime_types = ['date', 'timestamp', 'timestamptz', 'time', 'timetz', 'interval']
-        boolean_type = ['boolean']
+        datetime_types = ['date', 'timestamp', 'timestamptz', 'time', 'timetz', 'interval', 'datetime', 'datetime2', 'smalldatetime']
+        boolean_type = ['boolean', 'bool']
 
         for column_name, data_type in columns_metadata:
             data_type_lower = data_type.lower()
             if data_type_lower in numeric_types:
                 numeric_columns.append(column_name)
-            elif data_type_lower in text_types or data_type_lower in datetime_types or data_type_lower in boolean_type:
-                text_columns.append(column_name)
             else:
+                # Treat text, dates, and booleans as text/categorical for now
                 text_columns.append(column_name)
 
         return {'numeric_columns': numeric_columns, 'text_columns': text_columns}
 
-    except psycopg2.Error as e:
-        print(f"Database error occurred: {e}")
-        return {'numeric_columns': [], 'text_columns': [], 'error': f"Database error: {e}"}
-
     except Exception as e:
         print(f"An unexpected error occurred: {e}")
-        return {'numeric_columns': [], 'text_columns': [], 'error': f"An unexpected error occurred: {e}"}
+        return {'numeric_columns': [], 'text_columns': [], 'error': f"Error: {e}"}
 
     finally:
-        # ✅ Close resources
-        if cursor:
-            cursor.close()
-        if conn:
-            conn.close()
+        if cursor: cursor.close()
+        if conn: conn.close()
         if ssh_client:
             stop_event.set()
             ssh_client.close()
