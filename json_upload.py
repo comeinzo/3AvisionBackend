@@ -18,6 +18,85 @@ from psycopg2.extras import execute_values
 #         return re.sub(r'\W+', '_', name).lower()
 #     return name
 
+
+# def apply_masking(df, mask_settings):
+#     if not isinstance(mask_settings, dict):
+#         return df
+#     print("df",df)
+
+#     for column, config in mask_settings.items():
+
+#         # ✅ skip null / invalid configs
+#         if not isinstance(config, dict):
+#             continue
+
+#         if column not in df.columns:
+#             continue
+
+#         mask_from = config.get("maskFrom")
+#         characters = int(config.get("characters", 0))
+
+#         if characters <= 0 or mask_from not in ("start", "end"):
+#             continue
+
+#         def mask_value(val):
+#             if pd.isna(val):
+#                 return val
+
+#             val = str(val)
+
+#             if len(val) <= characters:
+#                 return "•" * len(val)
+
+#             if mask_from == "start":
+#                 return "•" * characters + val[characters:]
+
+#             return val[:-characters] + "•" * characters
+
+#         df[column] = df[column].apply(mask_value)
+
+#     return df
+def apply_masking(df, mask_settings):
+    if not isinstance(mask_settings, dict):
+        return df
+
+    for column, config in mask_settings.items():
+
+        if not isinstance(config, dict):
+            continue
+
+        if column not in df.columns:
+            continue
+
+        mask_from = config.get("maskFrom")
+        characters = int(config.get("characters", 0))
+
+        if characters <= 0 or mask_from not in ("start", "end"):
+            continue
+
+        masked_col = f"{column}__masked"
+
+        def mask_value(val):
+            if pd.isna(val):
+                return val
+
+            val = str(val)
+
+            if len(val) <= characters:
+                return "•" * len(val)
+
+            if mask_from == "start":
+                return "•" * characters + val[characters:]
+
+            return val[:-characters] + "•" * characters
+
+        # ✅ Create masked column (DO NOT overwrite original)
+        df[masked_col] = df[column].apply(mask_value)
+
+    return df
+
+
+
 def sanitize_column_name(header):
     """Sanitize column names to lowercase, replace non-alphanumeric with _, collapse multiple _"""
     sanitized = str(header).lower().strip()
@@ -448,7 +527,7 @@ def insert_or_update_batch(cur, conn, table_name, df, primary_key_column, batch_
 
 # --- Main Function (Updated) ---
 
-def upload_json_to_postgresql(database_name, username, password, json_file_path, user_provided_primary_key=None, host='localhost', port='5432', table_name=None):
+def upload_json_to_postgresql(database_name, username, password, json_file_path, user_provided_primary_key=None, host='localhost', port='5432',mask_settings=None, table_name=None):
     conn = None
     cur = None
     try:
@@ -488,8 +567,11 @@ def upload_json_to_postgresql(database_name, username, password, json_file_path,
 
         df = flatten_json_data(json_array)
 
+
         # Sanitize DataFrame column names
         df.columns = [sanitize_column_name(col) for col in df.columns]
+        df = apply_masking(df, mask_settings)
+        print("mask_settings=None",df)
 
         # Determine the table name from the JSON file name
         # table_name = os.path.splitext(os.path.basename(json_file_path))[0]

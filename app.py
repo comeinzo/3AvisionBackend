@@ -508,6 +508,7 @@ def test_db():
 #     except Exception as e:
 #         print(f"Upload error: {str(e)}")
 #         return jsonify({'message': 'Internal server error occurred', 'status': False}), 500
+import json
 @app.route('/uploadexcel', methods=['POST'])
 @employee_required
 @token_required
@@ -518,6 +519,18 @@ def upload_file_excel():
         primary_key_column = request.form.get('primaryKeyColumnName')
         print("pcolo",primary_key_column)
         user_email = request.form.get('email', 'Unknown User')
+        # mask_settings = request.form.get("maskSettings")
+        # print("maskSettings",mask_settings)
+        import json
+
+        mask_settings_raw = request.form.get("maskSettings")
+        print("maskSettings raw:", mask_settings_raw)
+
+        try:
+            mask_settings = json.loads(mask_settings_raw) if mask_settings_raw else {}
+        except json.JSONDecodeError as e:
+            print("Invalid maskSettings JSON:", e)
+            mask_settings = {}
 
         if not database_name or not primary_key_column:
             return jsonify({'message': 'Database and primary key are required', 'status': False}), 400
@@ -557,11 +570,12 @@ def upload_file_excel():
             primary_key_column,
             host,
             port,
-            selected_sheets
+            selected_sheets,mask_settings
         )
         print("result",result)
         if isinstance(result, dict) and result.get("message") == "Upload successful":
             sheet_list = ', '.join(selected_sheets)
+            mask_log_text = build_mask_log(mask_settings)
             log_activity(
                 user_email=user_email,
                 action_type="Upload Excel",
@@ -570,7 +584,7 @@ def upload_file_excel():
                     f"with {result.get('rows_added', 0)} inserted, "
                     f"{result.get('rows_updated', 0)} updated, "
                     f"{result.get('rows_deleted', 0)} deleted, "
-                    f"{result.get('rows_skipped', 0)} skipped."
+                    f"{result.get('rows_skipped', 0)} skipped,{mask_log_text}."
                 ),
                 company_name=database_name,
                 table_name=sheet_list
@@ -632,6 +646,16 @@ def fetch_xml_from_url():
         primary_key_column = data.get('primaryKeyColumnName')
         database_name = data.get('company_database')
         user_email = data.get('email', 'Unknown User')
+        import json
+
+        mask_settings_raw = data.get("maskSettings")
+        print("maskSettings raw:", mask_settings_raw)
+
+        try:
+            mask_settings = json.loads(mask_settings_raw) if mask_settings_raw else {}
+        except json.JSONDecodeError as e:
+            print("Invalid maskSettings JSON:", e)
+            mask_settings = {}
         
         # Validate required parameters
         if not xml_url:
@@ -668,17 +692,18 @@ def fetch_xml_from_url():
             temp_file_path, 
             primary_key_column, 
             host, 
-            port
+            port,mask_settings
         )
         
         # Check if upload was successful
         if isinstance(result, dict) and result.get("message") == "Upload successful":
+            mask_log_text = build_mask_log(mask_settings)
             log_activity(
                 user_email=request.current_user.get("email", "Unknown"),
                 action_type=", ".join(result.get("actions_performed", [])),
                 table_name=result.get("table_name"),
                 company_name=database_name,
-                description=f"XML fetch from URL performed with {result['rows_inserted']} inserted, {result['rows_updated']} updated, {result['rows_skipped']} skipped rows."
+                description=f"XML fetch from URL performed with {result['rows_inserted']} inserted, {result['rows_updated']} updated, {result['rows_skipped']} skipped rows,{mask_log_text}."
             )
             return jsonify({
                 'message': 'XML fetched and uploaded successfully',
@@ -712,6 +737,16 @@ def upload_file_csv():
         primary_key_column = request.form.get('primaryKeyColumnName')
         update_permission = request.form.get('updatePermission')
         user_email = request.form.get('email', 'Unknown User')
+        import json
+
+        mask_settings_raw = request.form.get("maskSettings")
+        print("maskSettings raw:", mask_settings_raw)
+
+        try:
+            mask_settings = json.loads(mask_settings_raw) if mask_settings_raw else {}
+        except json.JSONDecodeError as e:
+            print("Invalid maskSettings JSON:", e)
+            mask_settings = {}
         
         if not database_name:
             return jsonify({'message': 'Company database name is required', 'status': False}), 400
@@ -753,15 +788,16 @@ def upload_file_csv():
         
         try:
             # Upload to PostgreSQL
-            result = upload_csv_to_postgresql(database_name=database_name,primary_key_column=primary_key_column, username=username, password=password, csv_file_name=temp_file_path, host=host, port=port)
+            result = upload_csv_to_postgresql(database_name=database_name,primary_key_column=primary_key_column, username=username, password=password, csv_file_name=temp_file_path, host=host, port=port,mask_settings=mask_settings)
             print("result",result)
             if isinstance(result, dict) and result.get("message") == "Upload successful":
+                mask_log_text = build_mask_log(mask_settings)
                 log_activity(
                     user_email=request.current_user.get("email", "Unknown"),
                     action_type=", ".join(result.get("actions_performed", [])),
                     table_name=result.get("table_name"),
                     company_name=database_name,
-                    description=f"CSV upload performed with {result['rows_added']} inserted, {result['rows_updated']} updated, {result['rows_skipped']} skipped rows."
+                    description=f"CSV upload performed with {result['rows_added']} inserted, {result['rows_updated']} updated, {result['rows_skipped']} skipped rows,{mask_log_text}."
                 )
                 return jsonify({
                     'message': 'File uploaded successfully',
@@ -988,6 +1024,7 @@ def remote_xml_fetch():
 
         # Return parsed JSON
         if parsed_data and len(parsed_data) > 0:
+            print("parsed_data",parsed_data)
             return jsonify({
                 "success": True,
                 "data": parsed_data,
@@ -1012,6 +1049,43 @@ def remote_xml_fetch():
     except Exception as e:
         print("[SERVER ERROR]", e)
         return jsonify({"success": False, "message": str(e)}), 500
+# def build_mask_log(mask_settings: dict):
+#     """
+#     Convert maskSettings into human-readable log text
+#     """
+#     if not mask_settings:
+#         return "No masking applied"
+
+#     parts = []
+#     for col, cfg in mask_settings.items():
+#         mask_from = cfg.get("maskFrom", "unknown")
+#         chars = cfg.get("characters", 0)
+#         parts.append(f"{col} ({mask_from}, {chars} chars)")
+
+#     return "Masking applied → " + ", ".join(parts)
+
+def build_mask_log(mask_settings):
+    """
+    Build human-readable masking audit log
+    """
+    if not isinstance(mask_settings, dict):
+        return ""
+
+    log_lines = []
+
+    for column, cfg in mask_settings.items():
+        # ✅ Skip invalid or disabled masking
+        if not isinstance(cfg, dict):
+            continue
+
+        mask_from = cfg.get("maskFrom", "unknown")
+        characters = cfg.get("characters", "N/A")
+
+        log_lines.append(
+            f"Column '{column}' masked from '{mask_from}' with {characters} characters"
+        )
+
+    return "; ".join(log_lines)
 
 
 @app.route('/upload-json', methods=['POST'])
@@ -1022,6 +1096,16 @@ def upload_file_json():
         database_name = request.form.get('company_database')
         primary_key_column = request.form.get('primaryKeyColumnName')
         user_email = request.form.get('email', 'Unknown User')
+        import json
+
+        mask_settings_raw = request.form.get("maskSettings")
+        print("maskSettings raw:", mask_settings_raw)
+
+        try:
+            mask_settings = json.loads(mask_settings_raw) if mask_settings_raw else {}
+        except json.JSONDecodeError as e:
+            print("Invalid maskSettings JSON:", e)
+            mask_settings = {}
         
         
         # Check if file is present in the request
@@ -1045,16 +1129,17 @@ def upload_file_json():
         json_file.save(temp_file_path)
 
         # Call the upload_json_to_postgresql function
-        result = upload_json_to_postgresql(database_name, username, password, temp_file_path, primary_key_column, host, port)
+        result = upload_json_to_postgresql(database_name, username, password, temp_file_path, primary_key_column, host, port,mask_settings)
         
         # if result == "Upload successful":
         if isinstance(result, dict) and result.get("message") == "Upload successful":
+            mask_log_text = build_mask_log(mask_settings)
             log_activity(
                     user_email=request.current_user.get("email", "Unknown"),
                     action_type=", ".join(result.get("actions_performed", [])),
                     table_name=result.get("table_name"),
                     company_name=database_name,
-                    description=f"Json upload performed with {result['rows_inserted']} inserted, {result['rows_updated']} updated, {result['rows_skipped']} skipped rows."
+                    description=f"Json upload performed with {result['rows_inserted']} inserted, {result['rows_updated']} updated, {result['rows_skipped']} skipped rows,{mask_log_text}."
             )
             return jsonify({
                     'message': 'File uploaded successfully',
@@ -1085,6 +1170,17 @@ def upload_file_xml():
         database_name = request.form.get('company_database')
         primary_key_column = request.form.get('primaryKeyColumnName')
         user_email = request.form.get('email', 'Unknown User')
+        import json
+
+        mask_settings_raw = request.form.get("maskSettings")
+        print("maskSettings raw:", mask_settings_raw)
+
+        try:
+            mask_settings = json.loads(mask_settings_raw) if mask_settings_raw else {}
+        except json.JSONDecodeError as e:
+            print("Invalid maskSettings JSON:", e)
+            mask_settings = {}
+
         
         
         # Check if file is present in the request
@@ -1108,7 +1204,7 @@ def upload_file_xml():
         xml_file.save(temp_file_path)
 
         # Call the upload_xml_to_postgresql function
-        result = upload_xml_to_postgresql(database_name, username, password, temp_file_path, primary_key_column, host, port)
+        result = upload_xml_to_postgresql(database_name, username, password, temp_file_path, primary_key_column, host, port,mask_settings)
         
         # if result == "Upload successful":
         if isinstance(result, dict) and result.get("message") == "Upload successful":
@@ -7929,7 +8025,24 @@ def get_date_columns():
             ORDER BY column_name
         """, (table_name,))
         
-        columns = [row[0] for row in cursor.fetchall()]
+        # columns = [row[0] for row in cursor.fetchall()]
+        all_columns = [row[0] for row in cursor.fetchall()]
+
+        # 🔐 Identify masked columns
+        masked_columns = {col for col in all_columns if col.endswith('__masked')}
+
+        # 🔐 Identify originals that have masked versions
+        originals_with_mask = {
+            col.replace('__masked', '') for col in masked_columns
+        }
+
+        # ✅ Final list:
+        # - include masked columns
+        # - include original only if no masked version exists
+        columns = [
+            col for col in all_columns
+            if col.endswith('__masked') or col not in originals_with_mask
+        ]
 
         # Close the connection
         cursor.close()
@@ -8100,7 +8213,25 @@ def get_date_columnsdb():
             ORDER BY column_name
         """, (table_name,))
         
-        columns = [row[0] for row in cursor.fetchall()]
+        # columns = [row[0] for row in cursor.fetchall()]
+        all_columns = [row[0] for row in cursor.fetchall()]
+
+        # 🔐 Identify masked columns
+        masked_columns = {col for col in all_columns if col.endswith('__masked')}
+
+        # 🔐 Identify originals that have masked versions
+        originals_with_mask = {
+            col.replace('__masked', '') for col in masked_columns
+        }
+
+        # ✅ Final list:
+        # - include masked columns
+        # - include original only if no masked version exists
+        columns = [
+            col for col in all_columns
+            if col.endswith('__masked') or col not in originals_with_mask
+        ]
+
 
         # Close the connection
         cursor.close()
@@ -8592,7 +8723,7 @@ def connect_and_fetch_tables():
             
 
             conn_str = (
-                "DRIVER={ODBC Driver 17 for SQL Server};"
+                "DRIVER={ODBC Driver 18 for SQL Server};"
                 f"SERVER={server};"
                 f"DATABASE={db_name};"
                 f"UID={username};"
@@ -8600,7 +8731,7 @@ def connect_and_fetch_tables():
                 "TrustServerCertificate=yes;"
             )
             # conn_str = (
-            #     "DRIVER={ODBC Driver 17 for SQL Server};"
+            #     "DRIVER={ODBC Driver 18 for SQL Server};"
             #     "SERVER=192.168.18.11,1433;"
             #     "DATABASE=comienzo;"
             #     "UID=sa;"
@@ -8791,7 +8922,7 @@ def fetch_table_names_from_external_db(db_details):
             print(f"🧩 Connecting to MSSQL {host}:{port} ...")
 
             conn_str = (
-                "DRIVER={ODBC Driver 17 for SQL Server};"
+                "DRIVER={ODBC Driver 18 for SQL Server};"
                 f"SERVER={host},{port};"
                 f"DATABASE={db_name};"
                 f"UID={username};"
@@ -9066,7 +9197,7 @@ def fetch_data_from_table(db_details, table_name):
             print(f"🧩 Connecting to MSSQL at {host}:{port} ...")
 
             conn_str = (
-                "DRIVER={ODBC Driver 17 for SQL Server};"
+                "DRIVER={ODBC Driver 18 for SQL Server};"
                 f"SERVER={host},{port};"
                 f"DATABASE={db_details['database']};"
                 f"UID={db_details['user']};"
@@ -9946,7 +10077,7 @@ def connect_and_fetch_dbtables():
             print("🧩 Connecting to MSSQL...")
 
             conn_str = (
-                "DRIVER={ODBC Driver 17 for SQL Server};"
+                "DRIVER={ODBC Driver 18 for SQL Server};"
                 f"SERVER={host},{port};"
                 f"DATABASE={db_name};"
                 f"UID={username};"
@@ -10522,7 +10653,7 @@ def get_tables():
             sql_port = port or '1433'
 
             conn_str = (
-                "DRIVER={ODBC Driver 17 for SQL Server};"
+                "DRIVER={ODBC Driver 18 for SQL Server};"
                 f"SERVER={server},{sql_port};"
                 f"DATABASE={dbName};"
                 f"UID={username};"
@@ -11500,15 +11631,28 @@ def save_api_data():
 
         # ✅ Pass the table name explicitly to upload_json_to_postgresql
         result = upload_json_to_postgresql(
-            database_name,
-            username,
-            password,
-            temp_file_path,
-            primary_key_column,
-            host,
-            port,
-            table_name  # ✅ Add this argument
+            database_name=database_name,
+            username=username,
+            password=password,
+            json_file_path=temp_file_path,
+            user_provided_primary_key=primary_key_column,
+            host=host,
+            port=port,mask_settings=mask_settings,
+            table_name=table_name,
+            
         )
+
+        # result = upload_json_to_postgresql(
+        #     database_name,
+        #     username,
+        #     password,
+        #     temp_file_path,
+        #     primary_key_column,
+        #     host,
+        #     port,
+        #     mask_settings=None,
+        #     table_name  
+        # )
 
         # Cleanup temp file
         os.remove(temp_file_path)
@@ -12716,6 +12860,22 @@ def get_column_types():
             "status": "error",
             "message": str(e)
         }), 500
+def prefer_masked_filter_columns(columns):
+    """
+    Hide original column if <column>_masked exists
+    """
+    final_cols = {}
+    
+    for col in columns:
+        name = col["name"]
+        if name.endswith("_masked"):
+            base = name.replace("_masked", "")
+            final_cols[base] = col
+        else:
+            if name not in final_cols:
+                final_cols[name] = col
+
+    return list(final_cols.values())
 
 #===========================Dashboard Fileter==================================
 @app.route('/api/columnsFilter', methods=['GET'])
@@ -12740,8 +12900,19 @@ def get_tableFilter_columns():
             FROM information_schema.columns 
             WHERE table_name = %s
         """, (table_name,))
-        columns = [{"name": row['column_name'], "value": row['column_name'], "data_type": row['data_type']} 
-                   for row in cur.fetchall()]
+        # columns = [{"name": row['column_name'], "value": row['column_name'], "data_type": row['data_type']} 
+        #            for row in cur.fetchall()]
+        raw_columns = [
+            {
+                "name": row['column_name'],
+                "value": row['column_name'],
+                "data_type": row['data_type']
+            }
+            for row in cur.fetchall()
+        ]
+
+        # ✅ Prefer masked columns
+        columns = prefer_masked_filter_columns(raw_columns)
 
         cur.close()
         conn.close()

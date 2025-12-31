@@ -701,6 +701,45 @@ def bulk_insert_with_copy(cur, conn, table_name, df):
         return False
     
     return True
+def sync_masked_columns(cur, table_name, df):
+    """
+    Drop masked columns from DB that are not present in the current upload
+    """
+    # Masked columns in DataFrame
+    df_masked_cols = {col for col in df.columns if col.endswith("_masked") or col.endswith("__masked")}
+
+    # Fetch masked columns from DB
+    cur.execute(
+        """
+        SELECT column_name
+        FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = %s
+          AND column_name LIKE %s
+        """,
+        (table_name, '%masked')
+    )
+
+    rows = cur.fetchall()
+
+    # ✅ Defensive: handle empty or malformed rows
+    db_masked_cols = set()
+    for row in rows:
+        if row and len(row) > 0:
+            db_masked_cols.add(row[0])
+
+    # Columns to drop
+    cols_to_drop = db_masked_cols - df_masked_cols
+
+    for col in cols_to_drop:
+        cur.execute(
+            sql.SQL("ALTER TABLE {} DROP COLUMN {}").format(
+                sql.Identifier(table_name),
+                sql.Identifier(col)
+            )
+        )
+        print(f"🗑 Dropped obsolete masked column '{col}' from '{table_name}'")
+
 
 # PERFORMANCE OPTIMIZATION: Optimized batch insert using execute_values
 def optimized_batch_insert(cur, conn, table_name, df, batch_size=5000):
@@ -726,6 +765,25 @@ def optimized_batch_insert(cur, conn, table_name, df, batch_size=5000):
                 else:
                     processed_row.append(value)
             rows_to_insert.append(tuple(processed_row))
+        # 🔹 Ensure masked columns exist in DB
+            cur.execute("""
+                SELECT column_name
+                FROM information_schema.columns
+                WHERE table_name = %s
+            """, (table_name,))
+            existing_columns = {row[0] for row in cur.fetchall()}
+
+            for col in df.columns:
+                if col not in existing_columns:
+                    col_type = determine_column_type(df, col)
+                    alter_sql = sql.SQL("ALTER TABLE {} ADD COLUMN {} {}").format(
+                        sql.Identifier(table_name),
+                        sql.Identifier(col),
+                        sql.SQL(col_type)
+                    )
+                    cur.execute(alter_sql)
+                    print(f"✔ Added missing column '{col}' to '{table_name}'")
+
 
         # Use execute_values for better performance
         placeholders = ', '.join(['%s'] * len(df.columns))
@@ -1254,6 +1312,85 @@ def sanitize_column_name(header):
     sanitized = sanitized.strip('_')                    # remove leading/trailing _
     return sanitized
 
+
+
+# def apply_masking(df, mask_settings):
+#     if not isinstance(mask_settings, dict):
+#         return df
+
+#     for column, config in mask_settings.items():
+
+#         # ✅ skip null / invalid configs
+#         if not isinstance(config, dict):
+#             continue
+
+#         if column not in df.columns:
+#             continue
+
+#         mask_from = config.get("maskFrom")
+#         characters = int(config.get("characters", 0))
+
+#         if characters <= 0 or mask_from not in ("start", "end"):
+#             continue
+
+#         def mask_value(val):
+#             if pd.isna(val):
+#                 return val
+
+#             val = str(val)
+
+#             if len(val) <= characters:
+#                 return "•" * len(val)
+
+#             if mask_from == "start":
+#                 return "•" * characters + val[characters:]
+
+#             return val[:-characters] + "•" * characters
+
+#         df[column] = df[column].apply(mask_value)
+
+#     return df
+def apply_masking(df, mask_settings):
+    if not isinstance(mask_settings, dict):
+        return df
+
+    for column, config in mask_settings.items():
+
+        if not isinstance(config, dict):
+            continue
+
+        if column not in df.columns:
+            continue
+
+        mask_from = config.get("maskFrom")
+        characters = int(config.get("characters", 0))
+
+        if characters <= 0 or mask_from not in ("start", "end"):
+            continue
+
+        masked_col = f"{column}__masked"
+
+        def mask_value(val):
+            if pd.isna(val):
+                return val
+
+            val = str(val)
+
+            if len(val) <= characters:
+                return "•" * len(val)
+
+            if mask_from == "start":
+                return "•" * characters + val[characters:]
+
+            return val[:-characters] + "•" * characters
+
+        # ✅ Create masked column (DO NOT overwrite original)
+        df[masked_col] = df[column].apply(mask_value)
+
+    return df
+
+
+
 def upload_excel_to_postgresql(
     database_name,
     username,
@@ -1262,7 +1399,7 @@ def upload_excel_to_postgresql(
     primary_key_column,
     host,
     port='5432',
-    selected_sheets=None
+    selected_sheets=None,mask_settings=None
 ):
     try:
         # Split composite keys if passed as comma-separated string
@@ -1306,11 +1443,14 @@ def upload_excel_to_postgresql(
 
                 # Read sheet
                 df = pd.read_excel(xls, sheet_name=sheet_name_cleaned, dtype_backend='numpy_nullable')
+                df = apply_masking(df, mask_settings)
+
 
                 # Sanitize DataFrame columns
                 # df.columns = [sanitize_column_name(col) for col in df.columns]
                 # df.columns = [sanitize_column_name(col).lower().strip() for col in df.columns]
                 df.columns = [sanitize_column_name(col) for col in df.columns]
+                
                 
 
                 # Sanitize primary key columns
@@ -1348,6 +1488,7 @@ def upload_excel_to_postgresql(
                 #   PRIMARY KEY UPDATE LOGIC (COMPLETE)
                 # ---------------------------------------------------------
                 if table_exists:
+                    sync_masked_columns(cur, table_name, df)
 
                     # Fetch existing PK
                     cur.execute("""

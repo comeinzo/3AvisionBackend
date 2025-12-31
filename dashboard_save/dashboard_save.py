@@ -1095,7 +1095,7 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                             print(f"🧩 Connecting to external MSSQL at {host}:{port} ...")
 
                             connection = pyodbc.connect(
-                                f"DRIVER={{ODBC Driver 17 for SQL Server}};"
+                                f"DRIVER={{ODBC Driver 18 for SQL Server}};"
                                 f"SERVER={host},{port};"
                                 f"DATABASE={db_details['database']};"
                                 f"UID={db_details['user']};"

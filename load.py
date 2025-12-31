@@ -134,6 +134,7 @@ def get_table_columns_with_types(company_name, table_name):
         """, (table_name,))
         
         columns = {row[0]: row[1] for row in cursor.fetchall()}
+        columns = prefer_masked_columns_dict(columns)
 
         cursor.close()
         connection.close()
@@ -143,6 +144,20 @@ def get_table_columns_with_types(company_name, table_name):
     except Exception as e:
         print(f"Error fetching table columns with types: {e}")
         raise
+def prefer_masked_columns_dict(columns_dict):
+    """
+    Given a dict of columns {col_name: type}, return only masked columns if they exist,
+    otherwise return the original.
+    """
+    masked_columns = {}
+    for col, dtype in columns_dict.items():
+        if col.endswith("_masked"):
+            masked_columns[col] = dtype
+        else:
+            # Only add original if masked version doesn't exist
+            if f"{col}_masked" not in columns_dict:
+                masked_columns[col] = dtype
+    return masked_columns
 
 def get_table_columns_with_typesdb(company_name, table_name,selected_user=None):
     """
@@ -228,6 +243,7 @@ def get_table_columns_with_typesdb(company_name, table_name,selected_user=None):
 
         
         columns = {row[0]: row[1] for row in cursor.fetchall()}
+        columns = prefer_masked_columns_dict(columns)
 
         cursor.close()
         connection.close()
@@ -393,15 +409,35 @@ def get_table_data_with_cache(company_name, table_name, date_column=None, start_
         cursor = connection.cursor(cursor_factory=RealDictCursor)
 
         # Build column selection part of query
-        if selected_columns and len(selected_columns) > 0:
-            # Validate that all selected columns exist
-            all_columns = get_table_columns( table_name,company_name)
-            invalid_columns = [col for col in selected_columns if col not in all_columns]
-            if invalid_columns:
-                raise ValueError(f'Invalid columns: {invalid_columns}. Available columns: {all_columns}')
-            
+        # if selected_columns and len(selected_columns) > 0:
+        #     # Validate that all selected columns exist
+        #     all_columns = get_table_columns( table_name,company_name)
+        #     invalid_columns = [col for col in selected_columns if col not in all_columns]
+        #     if invalid_columns:
+        #         raise ValueError(f'Invalid columns: {invalid_columns}. Available columns: {all_columns}')
+        all_columns = get_table_columns(table_name, company_name)
+
+        resolved_columns = []
+
+        if selected_columns:
+            for col in selected_columns:
+                masked_col = f"{col}_masked"
+                if masked_col in all_columns:
+                    resolved_columns.append(masked_col)
+                else:
+                    resolved_columns.append(col)
+        else:
+            # No selected columns → use all columns, but prefer masked
+            used = set()
+            for col in all_columns:
+                if col.endswith("_masked"):
+                    used.add(col.replace("_masked", ""))
+                    resolved_columns.append(col)
+                elif f"{col}_masked" not in all_columns:
+                    resolved_columns.append(col)
+        if resolved_columns:
             # Use selected columns
-            columns_str = ', '.join([f'"{col}"' for col in selected_columns])
+            columns_str = ', '.join([f'"{col}"' for col in resolved_columns])
         else:
             # Use all columns
             columns_str = '*'
@@ -429,6 +465,15 @@ def get_table_data_with_cache(company_name, table_name, date_column=None, start_
         # Add column conditions
         if column_conditions and len(column_conditions) > 0:
             print(f"Processing {len(column_conditions)} column conditions...")
+            # Replace condition column names with masked versions if available
+            if column_conditions:
+                all_columns = get_table_columns(table_name, company_name)
+                for cond in column_conditions:
+                    col = cond.get("column")
+                    masked_col = f"{col}_masked"
+                    if masked_col in all_columns:
+                        cond["column"] = masked_col
+
             condition_parts, condition_params = build_where_conditions(column_conditions)
             if condition_parts:  # Only add if we have valid conditions
                 where_conditions.extend(condition_parts)
