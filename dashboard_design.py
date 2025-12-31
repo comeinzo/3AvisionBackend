@@ -292,7 +292,7 @@ def get_db_connection_or_path(selected_user, company_name, return_path=False):
         # )
         if db_type == 'MSSQL':
             connection_path = (
-                f"DRIVER={{ODBC Driver 17 for SQL Server}};"
+                f"DRIVER={{ODBC Driver 18 for SQL Server}};"
                 f"SERVER={host},{port};DATABASE={db_details['database']};"
                 f"UID={db_details['user']};PWD={db_details['password']}"
             )
@@ -320,7 +320,7 @@ def get_db_connection_or_path(selected_user, company_name, return_path=False):
             print(f"🧩 Connecting to external MSSQL at {host}:{port} ...")
 
             connection = pyodbc.connect(
-                f"DRIVER={{ODBC Driver 17 for SQL Server}};"
+                f"DRIVER={{ODBC Driver 18 for SQL Server}};"
                 f"SERVER={host},{port};"
                 f"DATABASE={db_details['database']};"
                 f"UID={db_details['user']};"

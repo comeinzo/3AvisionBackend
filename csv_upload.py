@@ -526,9 +526,86 @@ def process_csv_in_chunks(csv_file_path, chunk_size=50000):
     for chunk in pd.read_csv(csv_file_path, chunksize=chunk_size, low_memory=False, dtype_backend='numpy_nullable'):
         yield chunk
 
+
+# def apply_masking(df, mask_settings):
+#     if not isinstance(mask_settings, dict):
+#         return df
+
+#     for column, config in mask_settings.items():
+
+#         # ✅ skip null / invalid configs
+#         if not isinstance(config, dict):
+#             continue
+
+#         if column not in df.columns:
+#             continue
+
+#         mask_from = config.get("maskFrom")
+#         characters = int(config.get("characters", 0))
+
+#         if characters <= 0 or mask_from not in ("start", "end"):
+#             continue
+
+#         def mask_value(val):
+#             if pd.isna(val):
+#                 return val
+
+#             val = str(val)
+
+#             if len(val) <= characters:
+#                 return "•" * len(val)
+
+#             if mask_from == "start":
+#                 return "•" * characters + val[characters:]
+
+#             return val[:-characters] + "•" * characters
+
+#         df[column] = df[column].apply(mask_value)
+
+#     return df
+def apply_masking(df, mask_settings):
+    if not isinstance(mask_settings, dict):
+        return df
+
+    for column, config in mask_settings.items():
+
+        if not isinstance(config, dict):
+            continue
+
+        if column not in df.columns:
+            continue
+
+        mask_from = config.get("maskFrom")
+        characters = int(config.get("characters", 0))
+
+        if characters <= 0 or mask_from not in ("start", "end"):
+            continue
+
+        masked_col = f"{column}__masked"
+
+        def mask_value(val):
+            if pd.isna(val):
+                return val
+
+            val = str(val)
+
+            if len(val) <= characters:
+                return "•" * len(val)
+
+            if mask_from == "start":
+                return "•" * characters + val[characters:]
+
+            return val[:-characters] + "•" * characters
+
+        # ✅ Create masked column (DO NOT overwrite original)
+        df[masked_col] = df[column].apply(mask_value)
+
+    return df
+
+
 UPLOAD_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'uploads', 'csv')
 
-def upload_csv_to_postgresql(database_name,primary_key_column, username, password, csv_file_name, host, port='5432',):
+def upload_csv_to_postgresql(database_name,primary_key_column, username, password, csv_file_name, host, port='5432',mask_settings=None):
     conn = None
     cur = None
     try:
@@ -576,6 +653,8 @@ def upload_csv_to_postgresql(database_name,primary_key_column, username, passwor
         # initial_df = pd.read_csv(csv_file_path, nrows=1000, low_memory=False, dtype_backend='numpy_nullable')
        # Read only a small sample for schema inference
         schema_df = pd.read_csv(csv_file_path, nrows=1000, low_memory=False, dtype_backend='numpy_nullable')
+        schema_df = apply_masking(schema_df, mask_settings)
+
         print(f"Processing CSV for schema inference: {schema_df.shape[0]} rows.")
 
         schema_df = preprocess_dates(schema_df)
@@ -597,6 +676,8 @@ def upload_csv_to_postgresql(database_name,primary_key_column, username, passwor
         else:
             # Read the entire CSV for smaller datasets
             initial_df = pd.read_csv(csv_file_path, low_memory=False, dtype_backend='numpy_nullable')
+            initial_df = apply_masking(initial_df, mask_settings)
+
 
         print(f"Processing CSV for schema inference: {initial_df.shape[0]} rows.")
 
