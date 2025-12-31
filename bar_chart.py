@@ -238,9 +238,6 @@ def remove_symbols(value):
 #             cursor.close()
 #         if conn:
 #             conn.close()
-
-
-
 # def get_column_names(db_name, username, password, table_name, selected_user,
 #                      host='localhost', port='5432', connection_type='local'):
 #     """
@@ -458,7 +455,6 @@ def remove_symbols(value):
 #             ssh_client.close()
 #             print("🔒 SSH Tunnel closed.")
 
-
 def get_column_names(db_name, username, password, table_name, selected_user, 
                      host='localhost', port='5432', connection_type='local'):
     """
@@ -662,6 +658,8 @@ def get_column_names(db_name, username, password, table_name, selected_user,
             stop_event.set()
             ssh_client.close()
             print("🔒 SSH Tunnel closed.")
+
+
 
 
 
@@ -1411,11 +1409,7 @@ def fetch_data(table_name, x_axis_columns, filter_options, y_axis_column, aggreg
     elif aggregation == "average":
         grouped_df = filtered_df.groupby(x_axis_columns_str[0])[y_axis_column].mean().reset_index()
     elif aggregation == "count":
-        # grouped_df = filtered_df.groupby(x_axis_columns_str[0]).size().reset_index(name="count")
-        # Instead of .size(), select the country column and use .nunique()
-        grouped_df = filtered_df.groupby(x_axis_columns_str[0])[y_axis_column].nunique().reset_index(name="count")
-        print("grouped_df:==================================", grouped_df)
-
+        grouped_df = filtered_df.groupby(x_axis_columns_str[0]).size().reset_index(name="count")
     elif aggregation == "maximum":
         grouped_df = filtered_df.groupby(x_axis_columns_str[0])[y_axis_column].max().reset_index()
     elif aggregation == "minimum":

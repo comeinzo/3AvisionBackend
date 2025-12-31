@@ -124,6 +124,240 @@ def fetch_table_columns(db_config, table_name):
         if conn and db_config['dbType'] not in ['MongoDB']:
             conn.close()
     return columns, error_message
+def fetch_mysql_column_types(db_config, table_name):
+    import mysql.connector
+
+    conn = mysql.connector.connect(
+        host=db_config['provider'] or 'localhost',
+        port=db_config['port'] or '3306',
+        database=db_config['dbName'],
+        user=db_config['dbUsername'],
+        password=db_config['dbPassword']
+    )
+
+    cursor = conn.cursor(dictionary=True)
+    cursor.execute("""
+        SELECT 
+            COLUMN_NAME,
+            DATA_TYPE,
+            CHARACTER_MAXIMUM_LENGTH,
+            NUMERIC_PRECISION,
+            NUMERIC_SCALE
+        FROM INFORMATION_SCHEMA.COLUMNS
+        WHERE TABLE_NAME = %s AND TABLE_SCHEMA = %s
+    """, (table_name, db_config['dbName']))
+
+    columns = {}
+    for row in cursor.fetchall():
+        columns[row["COLUMN_NAME"].lower()] = {
+            "type": row["DATA_TYPE"].lower(),
+            "length": row["CHARACTER_MAXIMUM_LENGTH"],
+            "precision": row["NUMERIC_PRECISION"],
+            "scale": row["NUMERIC_SCALE"]
+        }
+
+    conn.close()
+    return columns
+def mysql_to_postgres_type(col_info):
+    t = col_info["type"]
+
+    if t in ["int", "integer"]:
+        return "INTEGER"
+    elif t == "bigint":
+        return "BIGINT"
+    elif t == "smallint":
+        return "SMALLINT"
+    elif t == "tinyint":
+        return "BOOLEAN"
+    elif t in ["float", "double"]:
+        return "DOUBLE PRECISION"
+    elif t == "decimal":
+        return f"NUMERIC({col_info['precision']},{col_info['scale']})"
+    elif t in ["varchar", "char"]:
+        return f"VARCHAR({col_info['length']})"
+    elif t in ["text", "mediumtext", "longtext"]:
+        return "TEXT"
+    elif t == "json":
+        return "JSONB"
+    elif t == "date":
+        return "DATE"
+    elif t in ["datetime", "timestamp"]:
+        return "TIMESTAMP"
+    elif t == "time":
+        return "TIME"
+    elif t in ["blob", "binary", "varbinary"]:
+        return "BYTEA"
+    else:
+        return "TEXT"
+
+def fetch_oracle_column_types(db_config, table_name):
+    import cx_Oracle
+
+    dsn = cx_Oracle.makedsn(
+        db_config['provider'],
+        db_config['port'],
+        service_name=db_config['dbName']
+    )
+
+    conn = cx_Oracle.connect(
+        user=db_config['dbUsername'],
+        password=db_config['dbPassword'],
+        dsn=dsn
+    )
+
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT 
+            COLUMN_NAME,
+            DATA_TYPE,
+            DATA_LENGTH,
+            DATA_PRECISION,
+            DATA_SCALE
+        FROM USER_TAB_COLUMNS
+        WHERE TABLE_NAME = :table
+    """, table=table_name.upper())
+
+    columns = {}
+    for row in cursor.fetchall():
+        columns[row[0].lower()] = {
+            "type": row[1].lower(),
+            "length": row[2],
+            "precision": row[3],
+            "scale": row[4]
+        }
+
+    conn.close()
+    return columns
+
+def oracle_to_postgres_type(col_info):
+    t = col_info["type"]
+
+    if t == "number":
+        if col_info["scale"] == 0:
+            return "INTEGER"
+        elif col_info["precision"]:
+            return f"NUMERIC({col_info['precision']},{col_info['scale']})"
+        return "NUMERIC"
+    elif t in ["varchar2", "nvarchar2", "char"]:
+        return f"VARCHAR({col_info['length']})"
+    elif t in ["clob", "nclob"]:
+        return "TEXT"
+    elif t == "date":
+        return "TIMESTAMP"
+    elif t.startswith("timestamp"):
+        return "TIMESTAMP"
+    elif t == "blob":
+        return "BYTEA"
+    elif t == "raw":
+        return "BYTEA"
+    else:
+        return "TEXT"
+
+def mongo_to_postgres_type(series: pd.Series):
+    non_null = series.dropna()
+    if non_null.empty:
+        return "TEXT"
+
+    sample = non_null.iloc[0]
+
+    if isinstance(sample, bool):
+        return "BOOLEAN"
+    if isinstance(sample, int):
+        return "INTEGER"
+    if isinstance(sample, float):
+        return "DOUBLE PRECISION"
+    if isinstance(sample, dict):
+        return "JSONB"
+    if isinstance(sample, list):
+        return "JSONB"
+    if isinstance(sample, bytes):
+        return "BYTEA"
+    if isinstance(sample, datetime):
+        return "TIMESTAMP"
+
+    max_len = non_null.astype(str).str.len().max()
+    return f"VARCHAR({max_len})" if max_len <= 255 else "TEXT"
+
+def fetch_mssql_column_types(db_config, table_name):
+    import pyodbc
+
+    server = db_config['provider'] or 'localhost'
+    sql_port = db_config['port'] or '1433'
+    conn_str = (
+        "DRIVER={ODBC Driver 17 for SQL Server};"
+        f"SERVER={server},{sql_port};"
+        f"DATABASE={db_config['dbName']};"
+        f"UID={db_config['dbUsername']};"
+        f"PWD={db_config['dbPassword']};"
+        "TrustServerCertificate=yes;"
+    )
+
+    conn = pyodbc.connect(conn_str)
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        SELECT 
+            COLUMN_NAME,
+            DATA_TYPE,
+            CHARACTER_MAXIMUM_LENGTH,
+            NUMERIC_PRECISION,
+            NUMERIC_SCALE
+        FROM INFORMATION_SCHEMA.COLUMNS
+        WHERE TABLE_NAME = ?
+    """, table_name)
+
+    columns = {}
+    for row in cursor.fetchall():
+        columns[row.COLUMN_NAME.lower()] = {
+            "type": row.DATA_TYPE.lower(),
+            "length": row.CHARACTER_MAXIMUM_LENGTH,
+            "precision": row.NUMERIC_PRECISION,
+            "scale": row.NUMERIC_SCALE
+        }
+
+    conn.close()
+    return columns
+def mssql_to_postgres_type(col_info):
+    t = col_info["type"]
+
+    if t in ["int"]:
+        return "INTEGER"
+    elif t == "bigint":
+        return "BIGINT"
+    elif t == "smallint":
+        return "SMALLINT"
+    elif t == "bit":
+        return "BOOLEAN"
+    elif t in ["float"]:
+        return "DOUBLE PRECISION"
+    elif t == "real":
+        return "REAL"
+    elif t in ["decimal", "numeric"]:
+        return f"NUMERIC({col_info['precision']},{col_info['scale']})"
+    elif t in ["money", "smallmoney"]:
+        return "NUMERIC(19,4)"
+    elif t in ["varchar", "nvarchar"]:
+        if col_info["length"] == -1:
+            return "TEXT"
+        return f"VARCHAR({col_info['length']})"
+    elif t in ["char", "nchar"]:
+        return f"CHAR({col_info['length']})"
+    elif t in ["text", "ntext"]:
+        return "TEXT"
+    elif t == "date":
+        return "DATE"
+    elif t in ["datetime", "datetime2", "smalldatetime"]:
+        return "TIMESTAMP"
+    elif t == "datetimeoffset":
+        return "TIMESTAMPTZ"
+    elif t == "time":
+        return "TIME"
+    elif t == "uniqueidentifier":
+        return "UUID"
+    elif t in ["varbinary", "binary", "image"]:
+        return "BYTEA"
+    else:
+        return "TEXT"
 
 def fetch_data_with_columns(db_config, table_name, selected_columns=None, chunk_size=100000):
     conn = None
@@ -185,7 +419,23 @@ def fetch_data_with_columns(db_config, table_name, selected_columns=None, chunk_
             columns_str = ", ".join([f"`{col}`" for col in selected_columns])
 
             while True:
-                sql_query = f"SELECT {columns_str} FROM `{table_name}` ORDER BY `id` ASC LIMIT {chunk_size} OFFSET {offset}"
+                safe_columns = []
+                for col in selected_columns:
+                    if col.lower() == "datetimeoffset_col":
+                        safe_columns.append(f"CAST([{col}] AS DATETIME2) AS [{col}]")
+                    else:
+                        safe_columns.append(f"[{col}]")
+
+                columns_str = ", ".join(safe_columns)
+
+                sql_query = f"""
+                SELECT {columns_str}
+                FROM [{table_name}]
+                ORDER BY [{primary_key}] ASC
+                OFFSET {offset} ROWS FETCH NEXT {chunk_size} ROWS ONLY
+                """
+
+                # sql_query = f"SELECT {columns_str} FROM `{table_name}` ORDER BY `id` ASC LIMIT {chunk_size} OFFSET {offset}"
                 print(f"Executing query: {sql_query}")
                 chunk_df = pd.read_sql_query(sql_query, conn)
 
@@ -272,7 +522,16 @@ def fetch_data_with_columns(db_config, table_name, selected_columns=None, chunk_
             else:
                 selected_columns = [primary_key] if primary_key else ['*']
 
-            columns_str = ", ".join([f"[{col}]" for col in selected_columns])
+            # columns_str = ", ".join([f"[{col}]" for col in selected_columns])
+            safe_columns = []
+            for col in selected_columns:
+                if col.lower() == "datetimeoffset_col":
+                    safe_columns.append(f"CAST([{col}] AS DATETIME2(7)) AS [{col}]")
+                else:
+                    safe_columns.append(f"[{col}]")
+
+            columns_str = ", ".join(safe_columns)
+
 
             while True:
                 # SQL Server OFFSET-FETCH pagination
@@ -509,10 +768,63 @@ def insert_dataframe_with_upsert(db_config, dest_table_name, source_df,source_co
                     print(f"No explicit PK found. Using heuristic primary key: {source_pk_columns[0]}")
 
 
-            columns_with_types = ', '.join(
-                f"{col} {determine_sql_data_type(df_cleaned[col])}"
-                for col in sanitized_columns
-            )
+            # columns_with_types = ', '.join(
+            #     f"{col} {determine_sql_data_type(df_cleaned[col])}"
+            #     for col in sanitized_columns
+            # )
+            # DEFAULT: existing behavior (DO NOT CHANGE)
+            columns_with_types = []
+
+            # MSSQL source → convert datatypes
+            # if source_config["dbType"].lower() in ["mssql", "sqlserver"]:
+            #     mssql_types = fetch_mssql_column_types(source_config, source_table_name)
+            db_type = source_config["dbType"].lower()
+
+            if db_type in ["mssql", "sqlserver"]:
+                source_types = fetch_mssql_column_types(source_config, source_table_name)
+                mapper = mssql_to_postgres_type
+
+            elif db_type == "mysql":
+                source_types = fetch_mysql_column_types(source_config, source_table_name)
+                mapper = mysql_to_postgres_type
+
+            elif db_type == "oracle":
+                source_types = fetch_oracle_column_types(source_config, source_table_name)
+                mapper = oracle_to_postgres_type
+            else:
+                source_types = None
+                mapper = None
+
+
+            for col in sanitized_columns:
+                if source_types and col.lower() in source_types:
+                    pg_type = mapper(source_types[col.lower()])
+                elif db_type == "mongodb":
+                    pg_type = mongo_to_postgres_type(df_cleaned[col])
+                else:
+                    pg_type = determine_sql_data_type(df_cleaned[col])
+
+                columns_with_types.append(f"{col} {pg_type}")
+
+
+            #     for col in sanitized_columns:
+            #         col_info = mssql_types.get(col.lower())
+            #         if col_info:
+            #             pg_type = mssql_to_postgres_type(col_info)
+            #         else:
+            #             pg_type = determine_sql_data_type(df_cleaned[col])
+
+            #         columns_with_types.append(f"{col} {pg_type}")
+
+            # # All other sources → KEEP existing behavior
+            # else:
+            #     for col in sanitized_columns:
+            #         columns_with_types.append(
+            #             f"{col} {determine_sql_data_type(df_cleaned[col])}"
+            #         )
+
+            columns_with_types = ", ".join(columns_with_types)
+
             pk_constraint = f", PRIMARY KEY ({', '.join(source_pk_columns)})"
             create_table_query = f"CREATE TABLE {dest_table_name} ({columns_with_types}{pk_constraint})"
             cur.execute(create_table_query)

@@ -275,6 +275,76 @@ def jwt_required(f):
         return f(*args, **kwargs)
     
     return decorated_function
+
+
+# def token_required(f):
+#     @wraps(f)
+#     def decorated(*args, **kwargs):
+#         token = request.headers.get('Authorization')
+#         if not token:
+#             return jsonify({'message': 'Token missing'}), 401
+
+#         token = token.replace('Bearer ', '')
+#         payload = JWTManager.decode_token(token)
+
+#         if 'error' in payload:
+#             return jsonify({'message': payload['error']}), 401
+
+#         login_id = payload.get('login_id')
+#         if not login_id:
+#             return jsonify({'message': 'Invalid token: missing login_id'}), 401
+
+#         try:
+#             conn = get_db_connection()
+#             cur = conn.cursor()
+#             cur.execute("""
+#                 SELECT login_status 
+#                 FROM login_history 
+#                 WHERE login_id = %s
+#             """, (login_id,))
+#             result = cur.fetchone()
+#             cur.close()
+#             conn.close()
+
+#             print(f"🪶 [TokenCheck] login_id={login_id}, DB result={result}")
+
+#             # ✅ Normalize and check case-insensitively
+#             if not result or (result[0] and result[0].lower() == 'logout'):
+#                 print(f"⚠️ [Session Expired] login_status={result[0] if result else None}")
+#                 return jsonify({'message': 'Session expired. Please log in again.'}), 401
+
+#         except Exception as e:
+#             print("❌ Database error in token_required:", e)
+#             return jsonify({'message': 'Internal server error'}), 500
+
+#         # Attach user info
+#         request.current_user = payload
+#         return f(*args, **kwargs)
+#     return decorated
+
+
+
+# def employee_required(f):
+#     """Decorator to require employee privileges (admin or employee)"""
+#     @wraps(f)
+#     @jwt_required
+#     def decorated_function(*args, **kwargs):
+#         try:
+#             user_type = request.current_user.get('user_type')
+#             if user_type not in ['admin', 'employee']:
+#                 return jsonify({'message': 'Employee privileges required'}), 403
+#             print(f"[AUTH SUCCESS] User '{request.current_user.get('username')}' "
+#                   f"({user_type}) passed employee access check.")
+#             return f(*args, **kwargs)
+#         except Exception as e:
+#             return jsonify({'message': 'Authorization check failed'}), 500
+    
+#     return decorated_function
+
+
+
+
+# 1. YOUR CUSTOM TOKEN CHECK (Strict "Last Login Wins" Logic)
 def token_required(f):
     @wraps(f)
     def decorated(*args, **kwargs):
@@ -306,32 +376,43 @@ def token_required(f):
 
             print(f"🪶 [TokenCheck] login_id={login_id}, DB result={result}")
 
-            # ✅ Normalize and check case-insensitively
-            if not result or (result[0] and result[0].lower() == 'logout'):
-                print(f"⚠️ [Session Expired] login_status={result[0] if result else None}")
-                return jsonify({'message': 'Session expired. Please log in again.'}), 401
+            # ✅ STRICTER FIX: Check if status is explicitly 'login'. 
+            # If it is 'logout', 'expired', or None, we block it.
+            if not result or result[0].lower() != 'login':
+                print(f"⚠️ [Session Terminated] Status is '{result[0] if result else 'None'}' - Access Denied")
+                return jsonify({
+                    'message': 'Session expired or active on another device. Please log in again.'
+                }), 401
 
         except Exception as e:
             print("❌ Database error in token_required:", e)
             return jsonify({'message': 'Internal server error'}), 500
 
-        # Attach user info
+        # Attach user info so next functions can use it
         request.current_user = payload
         return f(*args, **kwargs)
     return decorated
+
+
+# 2. UPDATED PERMISSION CHECK (Must use @token_required)
 def employee_required(f):
     """Decorator to require employee privileges (admin or employee)"""
     @wraps(f)
-    @jwt_required
+    @token_required  # <--- CRITICAL CHANGE: Use your custom decorator here!
     def decorated_function(*args, **kwargs):
         try:
+            # request.current_user is now guaranteed to exist because token_required ran first
             user_type = request.current_user.get('user_type')
+            
             if user_type not in ['admin', 'employee']:
                 return jsonify({'message': 'Employee privileges required'}), 403
-            print(f"[AUTH SUCCESS] User '{request.current_user.get('username')}' "
-                  f"({user_type}) passed employee access check.")
+            
+            # Optional: Log success for debugging
+            # print(f"[AUTH SUCCESS] User ({user_type}) passed check.")
+            
             return f(*args, **kwargs)
         except Exception as e:
+            print(f"Auth Error: {e}")
             return jsonify({'message': 'Authorization check failed'}), 500
     
     return decorated_function
@@ -1200,7 +1281,7 @@ def get_columns(table_name):
     print(f"Request Parameters - Database: {db_name}, Connection Type: {connectionType}, User: {selectedUser}")
     print("connectionType",connectionType)
     column_names = get_column_names(db_name, username, password, table_name,selectedUser, host, port,connectionType)
-    print("column_names====================",column_names)
+    # print("column_names====================",column_names)
     return jsonify(column_names)
 
 @app.route('/api/columns', methods=['GET'])
@@ -2351,7 +2432,9 @@ def get_bar_chart_route():
     selectedFrequency=data.get('selectedFrequency')
     connection_path = get_db_connection_or_path(selectedUser, db_nameeee, return_path=True)
     print("Connection path:", connection_path)
-    database_con = psycopg2.connect(connection_path)
+    database_con = get_db_connection_or_path(selectedUser, db_nameeee, return_path=False)
+    print("Connection path:", database_con)
+    # database_con = psycopg2.connect(connection_path)
     # print("database_con", connection_path)
     
     # Fetch chart data
@@ -2494,6 +2577,7 @@ def get_bar_chart_route():
         """
         try:
             connection = get_db_connection_or_path(selectedUser, db_nameeee)
+            print("connection established for WordCloud",connection)
 
             cursor = connection.cursor()
             cursor.execute(query)
@@ -5115,15 +5199,142 @@ def login():
                 'user_data': usersdata,
                 'login_id':login_id
             }), 200
+    # else:
+        # employeedata = fetch_company_login_data(email, password, company)
+        # print("employeedata====================", employeedata)
+        
+        # if employeedata:
+        #     user_info = employeedata['user']
+        #     company_id=employeedata['company_id']
+        #     conn=get_db_connection()
+        #     cur = conn.cursor()
+        #     cur.execute("""
+        #         SELECT  p.id,p.plan_name,p.storage_limit, cl.start_date, cl.end_date, cl.is_active
+        #         FROM organization_license cl
+        #         JOIN license_plan p ON cl.plan_id = p.id
+        #         WHERE cl.company_id = %s AND cl.is_active = TRUE
+        #     """, (company_id,))
+        #     active_plan = cur.fetchone()
+        #     print("active_plan",active_plan)
+            
+
+        #     if not active_plan:
+        #         cur.close()
+        #         conn.close()
+        #         return jsonify({
+        #             'message': f"Login failed. No active plan found for company '{company}'. Please contact your admin."
+        #         }), 403
+
+        #     plan_id = active_plan[0]
+        #     plan_name = active_plan[1]
+        #     storage_limit=active_plan[2]
+        #     start_date = active_plan[3]
+        #     end_date = active_plan[4]
+
+        #     # ✅ Fetch all enabled features for this plan
+        #     cur.execute("""
+        #         SELECT feature_name, is_enabled
+        #         FROM license_features
+        #         WHERE plan_id = %s
+        #     """, (plan_id,))
+        #     features = cur.fetchall()
+
+        #     cur.close()
+        #     conn.close()
+
+        #     # Convert features to list of dicts
+        #     features_list = [
+        #         {"feature_name": f[0], "is_enabled": f[1]} for f in features
+        #     ]
+
+        #     user_data = {
+        #         'employee_id': user_info[0],  # employee_id
+        #         'user_id': user_info[0],
+        #         'email': user_info[3],  # email
+        #         'user_type': 'employee',
+        #         'permissions': employeedata.get('permissions', []),
+        #         'company': company,
+        #         'role_id': user_info[2]  # role_id
+        #     }
+        #     login_id =insert_login_history(user_info[0], company_id, login_device, login_ip, 'login')
+           
+        #     tokens = JWTManager.generate_tokens(user_data,login_id, 'employee')
+        #     print("Employee Token------------------",tokens)
+        #     log_activity(email, 'login', f'Employee {email} logged into {company}', company_name=company)
+            
+        #     return jsonify({
+        #         'message': 'Login successful',
+        #         'user_type': 'employee',
+        #         'access_token': tokens['access_token'],
+        #         'refresh_token': tokens['refresh_token'],
+        #         'expires_in': tokens['expires_in'],
+        #         'user_data': employeedata,
+        #         'active_plan': {
+        #             'plan_name': plan_name,
+        #             'start_date': start_date,
+        #             'end_date': end_date,
+        #             'storage_limit':storage_limit
+        #         },
+        #         'features': features_list,
+        #         'login_id':login_id
+        #     }), 200
+    
+    # ... inside the else: block (Regular User/Employee Login) ...
     else:
         employeedata = fetch_company_login_data(email, password, company)
         print("employeedata====================", employeedata)
         
         if employeedata:
             user_info = employeedata['user']
-            company_id=employeedata['company_id']
-            conn=get_db_connection()
+            employee_id = user_info[0] # Get ID for checking
+            company_id = employeedata['company_id']
+            
+            conn = get_db_connection()
             cur = conn.cursor()
+
+            # ============================================================
+            # 1. NEW LOGIC: BLOCK MULTIPLE SESSIONS (First Login Wins)
+            # ============================================================
+            # Check for any active session for this employee
+            cur.execute("""
+                SELECT login_time 
+                FROM login_history 
+                WHERE employee_id = %s 
+                AND company_id = %s
+                AND login_status = 'login'
+                ORDER BY login_time DESC 
+                LIMIT 1
+            """, (employee_id, company_id))
+            
+            active_session = cur.fetchone()
+            
+            # DEFINE YOUR TIMEOUT (Must match your JWT expiry)
+            # Example: 8 Hours (28800 seconds). 
+            # 10 Minutes (600 seconds)
+
+            SESSION_TIMEOUT_SECONDS = 600 
+            
+            if active_session:
+                last_login_time = active_session[0]
+                current_time = datetime.now()
+                
+                # Calculate how much time has passed
+                time_difference = (current_time - last_login_time).total_seconds()
+                
+                # If the session is still within the valid time window, BLOCK the new login
+                if time_difference < SESSION_TIMEOUT_SECONDS:
+                    remaining_time = int((SESSION_TIMEOUT_SECONDS - time_difference) / 60) # Minutes
+                    
+                    cur.close()
+                    conn.close()
+                    return jsonify({
+                        'message': f'You are already logged in on another device. Please logout from the other device or wait {remaining_time} minutes for the session to expire.',
+                        'error_code': 'ALREADY_LOGGED_IN'
+                    }), 409 # 409 Conflict is the correct HTTP code
+            
+            # If no active session OR the active session is old/stale, proceed to login...
+            # ============================================================
+
             cur.execute("""
                 SELECT  p.id,p.plan_name,p.storage_limit, cl.start_date, cl.end_date, cl.is_active
                 FROM organization_license cl
@@ -5172,8 +5383,12 @@ def login():
                 'company': company,
                 'role_id': user_info[2]  # role_id
             }
-            login_id =insert_login_history(user_info[0], company_id, login_device, login_ip, 'login')
-           
+            
+            # NOTE: Your insert_login_history function probably sets old sessions to 'logout'.
+            # Since we already checked for active sessions above, this is fine.
+            # It will now clean up the "stale" sessions (older than 8 hours) if any.
+            login_id = insert_login_history(user_info[0], company_id, login_device, login_ip, 'login')
+            
             tokens = JWTManager.generate_tokens(user_data,login_id, 'employee')
             print("Employee Token------------------",tokens)
             log_activity(email, 'login', f'Employee {email} logged into {company}', company_name=company)
@@ -5194,7 +5409,6 @@ def login():
                 'features': features_list,
                 'login_id':login_id
             }), 200
-    
     return jsonify({'message': 'Invalid credentials'}), 401
 
 # Token Refresh Route
@@ -6178,13 +6392,12 @@ def receive_chart_details():
                 print(f"Filtered dataframe rows: {len(filtered_df)}")
 
                 # Now group the filtered dataframe (all rows)
-                # grouped_df = filtered_df.groupby(x_axis[0])[y_axis[0]].count().reset_index(name="count")
-                grouped_df = filtered_df.groupby(x_axis[0])[y_axis[0]].nunique().reset_index(name="count")
+                grouped_df = filtered_df.groupby(x_axis[0]).size().reset_index(name="count")
                 print("Grouped DataFrame with all rows:", grouped_df)
 
                 # For valid rows (non-null y_axis values)
                 filtered_df_valid = filtered_df[filtered_df[y_axis[0]].notnull()]
-                grouped_df_valid = filtered_df_valid.groupby(x_axis[0])[y_axis[0]].nunique().reset_index(name="count")
+                grouped_df_valid = filtered_df_valid.groupby(x_axis[0])[y_axis[0]].count().reset_index(name="count")
                 print("Grouped DataFrame with valid rows:", grouped_df_valid)
 
                 chosen_grouped_df = grouped_df_valid
@@ -8297,7 +8510,7 @@ def save_connection():
     dbUsername = data.get('dbUsername')
     dbPassword = data.get('dbPassword')
     saveName = data.get('saveName')
-    port = data.get('port')
+    port1 = data.get('port')
     dbName = data.get('dbName')
     company_name = data.get('company_name')
     user_id=data.get("user_id")
@@ -8318,7 +8531,7 @@ def save_connection():
             provider,
             dbUsername,
             dbPassword,
-            port,
+            port1,
             dbName,
             saveName,
             use_ssh,
@@ -8375,7 +8588,7 @@ def save_connection():
         return jsonify(success=False, error=f"Failed to save connection details: {str(e)}")
 
 
-def save_connection_details(company_name, dbType, provider, dbUsername, dbPassword, port, dbName,
+def save_connection_details(company_name, dbType, provider, dbUsername, dbPassword, port1, dbName,
                             saveName, use_ssh, ssh_host, ssh_port, ssh_username, ssh_key_path, created_at):
     try:
         conn = psycopg2.connect(
@@ -8418,7 +8631,7 @@ def save_connection_details(company_name, dbType, provider, dbUsername, dbPasswo
         cursor.execute(
             insert_query,
             (
-                saveName, dbType, provider, dbUsername, dbPassword, port, dbName,
+                saveName, dbType, provider, dbUsername, dbPassword, port1, dbName,
                 use_ssh, ssh_host, ssh_port, ssh_username, ssh_key_path, created_at
             )
         )
@@ -8447,6 +8660,8 @@ import paramiko
 from sshtunnel import SSHTunnelForwarder
 import socket
 import paramiko
+import pyodbc
+
 
 
 @app.route('/connect', methods=['POST'])
@@ -8576,6 +8791,46 @@ def connect_and_fetch_tables():
             db = client[db_name]
             tables = db.list_collection_names()
             client.close()
+        # ✅ MSSQL (SQL Server)
+        elif dbType.lower() in ["mssql", "sqlserver", "sql_server"]:
+            print(f"🧩 Connecting to MSSQL {host}:{port} ...")
+
+            # If user passes host like "localhost\SQLEXPRESS"
+            if "\\" in host:
+                server = host  # named instance
+            else:
+                server = f"{host},{port}"  # default/fixed port
+            
+
+            conn_str = (
+                "DRIVER={ODBC Driver 17 for SQL Server};"
+                f"SERVER={server};"
+                f"DATABASE={db_name};"
+                f"UID={username};"
+                f"PWD={password};"
+                "TrustServerCertificate=yes;"
+            )
+            # conn_str = (
+            #     "DRIVER={ODBC Driver 17 for SQL Server};"
+            #     "SERVER=192.168.18.11,1433;"
+            #     "DATABASE=comienzo;"
+            #     "UID=sa;"
+            #     "PWD=Gayu@123;"
+            #     "TrustServerCertificate=yes;"
+            # )
+
+            print("Connection String:", conn_str)
+
+            conn = pyodbc.connect(conn_str, timeout=30)
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT TABLE_NAME
+                FROM INFORMATION_SCHEMA.TABLES
+                WHERE TABLE_TYPE = 'BASE TABLE'
+            """)
+            tables = [row[0] for row in cursor.fetchall()]
+            conn.close()
+
         else:
             return jsonify(success=False, error="Unsupported database type.")
 
@@ -8634,7 +8889,9 @@ def fetch_table_names_from_external_db(db_details):
         ssh_host = db_details.get('ssh_host')
         ssh_username = db_details.get('ssh_username')
         ssh_key_path = db_details.get('ssh_key_path')
-        ssh_port = int(db_details.get('ssh_port', 22))
+        # ssh_port = int(db_details.get('ssh_port', 22))
+        ssh_port = int(db_details.get('ssh_port') or 22)
+
 
         # ✅ If SSH is enabled, start manual tunnel
         # ✅ If SSH is enabled, start manual tunnel
@@ -8741,6 +8998,30 @@ def fetch_table_names_from_external_db(db_details):
             cursor.execute("SELECT table_name FROM all_tables")
             table_names = [table[0] for table in cursor.fetchall()]
             conn.close()
+        elif db_type in ["MSSQL", "SQLServer", "sqlserver", "mssql"]:
+            print(f"🧩 Connecting to MSSQL {host}:{port} ...")
+
+            conn_str = (
+                "DRIVER={ODBC Driver 17 for SQL Server};"
+                f"SERVER={host},{port};"
+                f"DATABASE={db_name};"
+                f"UID={username};"
+                f"PWD={password};"
+                "TrustServerCertificate=yes;"
+            )
+            print("Connection String:", conn_str)
+            conn = pyodbc.connect(conn_str, timeout=10)
+            cursor = conn.cursor()
+
+            cursor.execute("""
+                SELECT TABLE_NAME
+                FROM INFORMATION_SCHEMA.TABLES
+                WHERE TABLE_TYPE = 'BASE TABLE'
+            """)
+
+            table_names = [row[0] for row in cursor.fetchall()]
+            conn.close()
+
 
         else:
             raise ValueError("Unsupported database type.")
@@ -8813,7 +9094,8 @@ def get_externaltable_data(table_name):
         "database": external_db_connection[7],
         "use_ssh": external_db_connection[8],
         "ssh_host": external_db_connection[9],
-        "ssh_port": int(external_db_connection[10]),
+        # "ssh_port": int(external_db_connection[10]),
+        "ssh_port": int(external_db_connection[10] or 22),
         "ssh_username": external_db_connection[11],
         "ssh_key_path": external_db_connection[12],
     }
@@ -8932,6 +9214,79 @@ def fetch_data_from_table(db_details, table_name):
                 database=db_details["database"],
                 port=db_details["port"]
             )
+        # ✅ MSSQL (SQL Server) Connection
+        elif dbType in ["MSSQL", "SQLServer", "sqlserver", "mssql"]:
+            if db_details.get("use_ssh"):
+                print("🔐 Establishing SSH tunnel for MSSQL connection...")
+
+                private_key = paramiko.RSAKey.from_private_key_file(db_details["ssh_key_path"])
+                ssh_client = paramiko.SSHClient()
+                ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+                ssh_client.connect(
+                    db_details["ssh_host"],
+                    username=db_details["ssh_username"],
+                    pkey=private_key,
+                    port=db_details["ssh_port"],
+                    timeout=10
+                )
+
+                local_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                local_sock.bind(('127.0.0.1', 0))
+                local_port = local_sock.getsockname()[1]
+                local_sock.listen(1)
+                print(f"✅ Local forwarder listening on 127.0.0.1:{local_port}")
+
+                transport = ssh_client.get_transport()
+
+                def pipe(src, dst):
+                    try:
+                        while True:
+                            data = src.recv(1024)
+                            if not data:
+                                break
+                            dst.sendall(data)
+                    except Exception:
+                        pass
+                    finally:
+                        src.close()
+                        dst.close()
+
+                def forward_tunnel():
+                    while not stop_event.is_set():
+                        try:
+                            client_sock, _ = local_sock.accept()
+                            chan = transport.open_channel(
+                                "direct-tcpip",
+                                ("127.0.0.1", db_details["port"]),  # ✅ MSSQL port (1433)
+                                client_sock.getsockname()
+                            )
+                            threading.Thread(target=pipe, args=(client_sock, chan), daemon=True).start()
+                            threading.Thread(target=pipe, args=(chan, client_sock), daemon=True).start()
+                        except Exception as e:
+                            print(f"❌ Channel open failed: {e}")
+
+                tunnel_thread = threading.Thread(target=forward_tunnel, daemon=True)
+                tunnel_thread.start()
+
+                host = "127.0.0.1"
+                port = local_port
+            else:
+                host = db_details["host"]
+                port = db_details["port"]
+
+            print(f"🧩 Connecting to MSSQL at {host}:{port} ...")
+
+            conn_str = (
+                "DRIVER={ODBC Driver 17 for SQL Server};"
+                f"SERVER={host},{port};"
+                f"DATABASE={db_details['database']};"
+                f"UID={db_details['user']};"
+                f"PWD={db_details['password']};"
+                "TrustServerCertificate=yes;"
+            )
+
+            conn = pyodbc.connect(conn_str, timeout=10)
+
 
         # ✅ Oracle Connection
         elif dbType == "Oracle":
@@ -8953,7 +9308,14 @@ def fetch_data_from_table(db_details, table_name):
 
         # ✅ Execute query and return first 10 rows
         cursor = conn.cursor()
-        query = f"SELECT * FROM {table_name} FETCH FIRST 10 ROWS ONLY" if dbType == "Oracle" else f"SELECT * FROM {table_name} LIMIT 10;"
+        if dbType == "Oracle":
+            query = f"SELECT * FROM {table_name} FETCH FIRST 10 ROWS ONLY"
+        elif dbType in ["MSSQL", "SQLServer", "sqlserver", "mssql"]:
+            query = f"SELECT TOP 10 * FROM {table_name}"
+        else:
+            query = f"SELECT * FROM {table_name} LIMIT 10"
+
+        # query = f"SELECT * FROM {table_name} FETCH FIRST 10 ROWS ONLY" if dbType == "Oracle" else f"SELECT * FROM {table_name} LIMIT 10;"
         cursor.execute(query)
         rows = cursor.fetchall()
         columns = [desc[0] for desc in cursor.description]
@@ -9791,6 +10153,30 @@ def connect_and_fetch_dbtables():
             cursor.execute("SHOW TABLES;")
             tables = [row[0] for row in cursor.fetchall()]
             conn.close()
+        elif db_type in ["MSSQL", "SQLServer", "sqlserver", "mssql"]:
+            print("🧩 Connecting to MSSQL...")
+
+            conn_str = (
+                "DRIVER={ODBC Driver 17 for SQL Server};"
+                f"SERVER={host},{port};"
+                f"DATABASE={db_name};"
+                f"UID={username};"
+                f"PWD={password};"
+                "TrustServerCertificate=yes;"
+            )
+
+            conn = pyodbc.connect(conn_str, timeout=10)
+            cursor = conn.cursor()
+
+            cursor.execute("""
+                SELECT TABLE_NAME
+                FROM INFORMATION_SCHEMA.TABLES
+                WHERE TABLE_TYPE = 'BASE TABLE'
+            """)
+
+            tables = [row[0] for row in cursor.fetchall()]
+            conn.close()
+
 
         else:
             return jsonify(success=False, error="Unsupported database type.")
@@ -10340,6 +10726,34 @@ def get_tables():
             tables = [row[0] for row in cursor.fetchall()]
             cursor.close()
             conn.close()
+        elif db_type in ['MSSQL', 'SQLServer', 'sqlserver', 'mssql']:
+            print("🧩 Connecting to MSSQL...")
+
+            server = host or 'localhost'
+            sql_port = port or '1433'
+
+            conn_str = (
+                "DRIVER={ODBC Driver 17 for SQL Server};"
+                f"SERVER={server},{sql_port};"
+                f"DATABASE={dbName};"
+                f"UID={username};"
+                f"PWD={password};"
+                "TrustServerCertificate=yes;"
+            )
+
+            conn = pyodbc.connect(conn_str, timeout=10)
+            cursor = conn.cursor()
+
+            cursor.execute("""
+                SELECT TABLE_NAME
+                FROM INFORMATION_SCHEMA.TABLES
+                WHERE TABLE_TYPE = 'BASE TABLE'
+            """)
+
+            tables = [row[0] for row in cursor.fetchall()]
+            cursor.close()
+            conn.close()
+
         else:
             return jsonify({"success": False, "error": f"Unsupported database type: {db_type}"}), 400
         return jsonify({"success": True, "tables": tables})
