@@ -454,6 +454,22 @@ def remove_symbols(value):
 #             stop_event.set()
 #             ssh_client.close()
 #             print("🔒 SSH Tunnel closed.")
+def prefer_masked_columns(columns_metadata):
+    """
+    If <col>_masked exists, hide <col> and use masked version instead
+    """
+    seen = {}
+    final_columns = []
+
+    for column_name, data_type in columns_metadata:
+        if column_name.endswith('_masked'):
+            base_col = column_name.replace('_masked', '')
+            seen[base_col] = (column_name, data_type)
+        else:
+            if column_name not in seen:
+                seen[column_name] = (column_name, data_type)
+
+    return list(seen.values())
 
 def get_column_names(db_name, username, password, table_name, selected_user, 
                      host='localhost', port='5432', connection_type='local'):
@@ -621,6 +637,7 @@ def get_column_names(db_name, username, password, table_name, selected_user,
         cursor = conn.cursor()
         cursor.execute(query, query_params)
         columns_metadata = cursor.fetchall()
+        columns_metadata = prefer_masked_columns(columns_metadata)
 
         numeric_columns = []
         text_columns = []

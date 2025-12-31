@@ -107,7 +107,7 @@ def fetch_table_columns(db_config, table_name):
                 f"PWD={db_config['dbPassword']};"
                 "TrustServerCertificate=yes;"
             )
-            conn = pyodbc.connect(conn_str, timeout=10)
+            conn = pyodbc.connect(conn_str, timeout=40)
             cursor = conn.cursor()
             cursor.execute(f"""
                 SELECT COLUMN_NAME 
@@ -501,7 +501,7 @@ def fetch_data_with_columns(db_config, table_name, selected_columns=None, chunk_
                 f"PWD={db_config['dbPassword']};"
                 "TrustServerCertificate=yes;"
             )
-            conn = pyodbc.connect(conn_str, timeout=10)
+            conn = pyodbc.connect(conn_str, timeout=40)
 
             # Determine primary key or fallback
             cursor = conn.cursor()
@@ -641,7 +641,7 @@ def get_primary_key_columns_dest(db_config, table_name):
                 f"PWD={db_config['dbPassword']};"
                 "TrustServerCertificate=yes;"
             )
-            conn = pyodbc.connect(conn_str, timeout=10)
+            conn = pyodbc.connect(conn_str, timeout=40)
             cursor = conn.cursor()
             sql = f"""
                 SELECT k.COLUMN_NAME
@@ -999,7 +999,7 @@ def fetch_table_details(db_config, table_name):
                 f"PWD={db_config['dbPassword']};"
                 "TrustServerCertificate=yes;"
             )
-            conn = pyodbc.connect(conn_str, timeout=10)
+            conn = pyodbc.connect(conn_str, timeout=40)
             cursor = conn.cursor()
             print("msconnection",conn)
             cursor.execute(f"""
