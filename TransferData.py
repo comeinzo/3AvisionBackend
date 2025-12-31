@@ -100,7 +100,7 @@ def fetch_table_columns(db_config, table_name):
             server = db_config['provider'] or 'localhost'
             sql_port = db_config['port'] or '1433'
             conn_str = (
-                "DRIVER={ODBC Driver 17 for SQL Server};"
+                "DRIVER={ODBC Driver 18 for SQL Server};"
                 f"SERVER={server},{sql_port};"
                 f"DATABASE={db_config['dbName']};"
                 f"UID={db_config['dbUsername']};"
@@ -284,7 +284,7 @@ def fetch_mssql_column_types(db_config, table_name):
     server = db_config['provider'] or 'localhost'
     sql_port = db_config['port'] or '1433'
     conn_str = (
-        "DRIVER={ODBC Driver 17 for SQL Server};"
+        "DRIVER={ODBC Driver 18 for SQL Server};"
         f"SERVER={server},{sql_port};"
         f"DATABASE={db_config['dbName']};"
         f"UID={db_config['dbUsername']};"
@@ -494,7 +494,7 @@ def fetch_data_with_columns(db_config, table_name, selected_columns=None, chunk_
             server = db_config['provider'] or 'localhost'
             sql_port = db_config['port'] or '1433'
             conn_str = (
-                "DRIVER={ODBC Driver 17 for SQL Server};"
+                "DRIVER={ODBC Driver 18 for SQL Server};"
                 f"SERVER={server},{sql_port};"
                 f"DATABASE={db_config['dbName']};"
                 f"UID={db_config['dbUsername']};"
@@ -634,7 +634,7 @@ def get_primary_key_columns_dest(db_config, table_name):
             server = db_config['provider'] or 'localhost'
             sql_port = db_config['port'] or '1433'
             conn_str = (
-                "DRIVER={ODBC Driver 17 for SQL Server};"
+                "DRIVER={ODBC Driver 18 for SQL Server};"
                 f"SERVER={server},{sql_port};"
                 f"DATABASE={db_config['dbName']};"
                 f"UID={db_config['dbUsername']};"
@@ -992,7 +992,7 @@ def fetch_table_details(db_config, table_name):
             server = db_config['provider'] or 'localhost'
             sql_port = db_config['port'] or '1433'
             conn_str = (
-                "DRIVER={ODBC Driver 17 for SQL Server};"
+                "DRIVER={ODBC Driver 18 for SQL Server};"
                 f"SERVER={server},{sql_port};"
                 f"DATABASE={db_config['dbName']};"
                 f"UID={db_config['dbUsername']};"

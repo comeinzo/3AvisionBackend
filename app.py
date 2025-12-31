@@ -8803,7 +8803,7 @@ def connect_and_fetch_tables():
             
 
             conn_str = (
-                "DRIVER={ODBC Driver 17 for SQL Server};"
+                "DRIVER={ODBC Driver 18 for SQL Server};"
                 f"SERVER={server};"
                 f"DATABASE={db_name};"
                 f"UID={username};"
@@ -8811,7 +8811,7 @@ def connect_and_fetch_tables():
                 "TrustServerCertificate=yes;"
             )
             # conn_str = (
-            #     "DRIVER={ODBC Driver 17 for SQL Server};"
+            #     "DRIVER={ODBC Driver 18 for SQL Server};"
             #     "SERVER=192.168.18.11,1433;"
             #     "DATABASE=comienzo;"
             #     "UID=sa;"
@@ -9002,7 +9002,7 @@ def fetch_table_names_from_external_db(db_details):
             print(f"🧩 Connecting to MSSQL {host}:{port} ...")
 
             conn_str = (
-                "DRIVER={ODBC Driver 17 for SQL Server};"
+                "DRIVER={ODBC Driver 18 for SQL Server};"
                 f"SERVER={host},{port};"
                 f"DATABASE={db_name};"
                 f"UID={username};"
@@ -9277,7 +9277,7 @@ def fetch_data_from_table(db_details, table_name):
             print(f"🧩 Connecting to MSSQL at {host}:{port} ...")
 
             conn_str = (
-                "DRIVER={ODBC Driver 17 for SQL Server};"
+                "DRIVER={ODBC Driver 18 for SQL Server};"
                 f"SERVER={host},{port};"
                 f"DATABASE={db_details['database']};"
                 f"UID={db_details['user']};"
@@ -10157,7 +10157,7 @@ def connect_and_fetch_dbtables():
             print("🧩 Connecting to MSSQL...")
 
             conn_str = (
-                "DRIVER={ODBC Driver 17 for SQL Server};"
+                "DRIVER={ODBC Driver 18 for SQL Server};"
                 f"SERVER={host},{port};"
                 f"DATABASE={db_name};"
                 f"UID={username};"
@@ -10733,7 +10733,7 @@ def get_tables():
             sql_port = port or '1433'
 
             conn_str = (
-                "DRIVER={ODBC Driver 17 for SQL Server};"
+                "DRIVER={ODBC Driver 18 for SQL Server};"
                 f"SERVER={server},{sql_port};"
                 f"DATABASE={dbName};"
                 f"UID={username};"

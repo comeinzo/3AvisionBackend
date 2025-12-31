@@ -380,7 +380,7 @@ def remove_symbols(value):
 
 #         if db_details['dbType'] == 'MSSQL':
 #             conn_str = (
-#                 f"DRIVER={{ODBC Driver 17 for SQL Server}};"
+#                 f"DRIVER={{ODBC Driver 18 for SQL Server}};"
 #                 f"SERVER={target_host},{target_port};"
 #                 f"DATABASE={db_details['database']};"
 #                 f"UID={db_details['user']};"
@@ -589,7 +589,7 @@ def get_column_names(db_name, username, password, table_name, selected_user,
             # --- Connect based on DB Type ---
             if db_details['dbType'] == 'MSSQL':
                 conn_str = (
-                    f"DRIVER={{ODBC Driver 17 for SQL Server}};"
+                    f"DRIVER={{ODBC Driver 18 for SQL Server}};"
                     f"SERVER={target_host},{target_port};"
                     f"DATABASE={db_details['database']};"
                     f"UID={db_details['user']};"
