@@ -275,6 +275,76 @@ def jwt_required(f):
         return f(*args, **kwargs)
     
     return decorated_function
+
+
+# def token_required(f):
+#     @wraps(f)
+#     def decorated(*args, **kwargs):
+#         token = request.headers.get('Authorization')
+#         if not token:
+#             return jsonify({'message': 'Token missing'}), 401
+
+#         token = token.replace('Bearer ', '')
+#         payload = JWTManager.decode_token(token)
+
+#         if 'error' in payload:
+#             return jsonify({'message': payload['error']}), 401
+
+#         login_id = payload.get('login_id')
+#         if not login_id:
+#             return jsonify({'message': 'Invalid token: missing login_id'}), 401
+
+#         try:
+#             conn = get_db_connection()
+#             cur = conn.cursor()
+#             cur.execute("""
+#                 SELECT login_status 
+#                 FROM login_history 
+#                 WHERE login_id = %s
+#             """, (login_id,))
+#             result = cur.fetchone()
+#             cur.close()
+#             conn.close()
+
+#             print(f"🪶 [TokenCheck] login_id={login_id}, DB result={result}")
+
+#             # ✅ Normalize and check case-insensitively
+#             if not result or (result[0] and result[0].lower() == 'logout'):
+#                 print(f"⚠️ [Session Expired] login_status={result[0] if result else None}")
+#                 return jsonify({'message': 'Session expired. Please log in again.'}), 401
+
+#         except Exception as e:
+#             print("❌ Database error in token_required:", e)
+#             return jsonify({'message': 'Internal server error'}), 500
+
+#         # Attach user info
+#         request.current_user = payload
+#         return f(*args, **kwargs)
+#     return decorated
+
+
+
+# def employee_required(f):
+#     """Decorator to require employee privileges (admin or employee)"""
+#     @wraps(f)
+#     @jwt_required
+#     def decorated_function(*args, **kwargs):
+#         try:
+#             user_type = request.current_user.get('user_type')
+#             if user_type not in ['admin', 'employee']:
+#                 return jsonify({'message': 'Employee privileges required'}), 403
+#             print(f"[AUTH SUCCESS] User '{request.current_user.get('username')}' "
+#                   f"({user_type}) passed employee access check.")
+#             return f(*args, **kwargs)
+#         except Exception as e:
+#             return jsonify({'message': 'Authorization check failed'}), 500
+    
+#     return decorated_function
+
+
+
+
+# 1. YOUR CUSTOM TOKEN CHECK (Strict "Last Login Wins" Logic)
 def token_required(f):
     @wraps(f)
     def decorated(*args, **kwargs):
@@ -306,32 +376,43 @@ def token_required(f):
 
             print(f"🪶 [TokenCheck] login_id={login_id}, DB result={result}")
 
-            # ✅ Normalize and check case-insensitively
-            if not result or (result[0] and result[0].lower() == 'logout'):
-                print(f"⚠️ [Session Expired] login_status={result[0] if result else None}")
-                return jsonify({'message': 'Session expired. Please log in again.'}), 401
+            # ✅ STRICTER FIX: Check if status is explicitly 'login'. 
+            # If it is 'logout', 'expired', or None, we block it.
+            if not result or result[0].lower() != 'login':
+                print(f"⚠️ [Session Terminated] Status is '{result[0] if result else 'None'}' - Access Denied")
+                return jsonify({
+                    'message': 'Session expired or active on another device. Please log in again.'
+                }), 401
 
         except Exception as e:
             print("❌ Database error in token_required:", e)
             return jsonify({'message': 'Internal server error'}), 500
 
-        # Attach user info
+        # Attach user info so next functions can use it
         request.current_user = payload
         return f(*args, **kwargs)
     return decorated
+
+
+# 2. UPDATED PERMISSION CHECK (Must use @token_required)
 def employee_required(f):
     """Decorator to require employee privileges (admin or employee)"""
     @wraps(f)
-    @jwt_required
+    @token_required  # <--- CRITICAL CHANGE: Use your custom decorator here!
     def decorated_function(*args, **kwargs):
         try:
+            # request.current_user is now guaranteed to exist because token_required ran first
             user_type = request.current_user.get('user_type')
+            
             if user_type not in ['admin', 'employee']:
                 return jsonify({'message': 'Employee privileges required'}), 403
-            print(f"[AUTH SUCCESS] User '{request.current_user.get('username')}' "
-                  f"({user_type}) passed employee access check.")
+            
+            # Optional: Log success for debugging
+            # print(f"[AUTH SUCCESS] User ({user_type}) passed check.")
+            
             return f(*args, **kwargs)
         except Exception as e:
+            print(f"Auth Error: {e}")
             return jsonify({'message': 'Authorization check failed'}), 500
     
     return decorated_function
@@ -5118,15 +5199,142 @@ def login():
                 'user_data': usersdata,
                 'login_id':login_id
             }), 200
+    # else:
+        # employeedata = fetch_company_login_data(email, password, company)
+        # print("employeedata====================", employeedata)
+        
+        # if employeedata:
+        #     user_info = employeedata['user']
+        #     company_id=employeedata['company_id']
+        #     conn=get_db_connection()
+        #     cur = conn.cursor()
+        #     cur.execute("""
+        #         SELECT  p.id,p.plan_name,p.storage_limit, cl.start_date, cl.end_date, cl.is_active
+        #         FROM organization_license cl
+        #         JOIN license_plan p ON cl.plan_id = p.id
+        #         WHERE cl.company_id = %s AND cl.is_active = TRUE
+        #     """, (company_id,))
+        #     active_plan = cur.fetchone()
+        #     print("active_plan",active_plan)
+            
+
+        #     if not active_plan:
+        #         cur.close()
+        #         conn.close()
+        #         return jsonify({
+        #             'message': f"Login failed. No active plan found for company '{company}'. Please contact your admin."
+        #         }), 403
+
+        #     plan_id = active_plan[0]
+        #     plan_name = active_plan[1]
+        #     storage_limit=active_plan[2]
+        #     start_date = active_plan[3]
+        #     end_date = active_plan[4]
+
+        #     # ✅ Fetch all enabled features for this plan
+        #     cur.execute("""
+        #         SELECT feature_name, is_enabled
+        #         FROM license_features
+        #         WHERE plan_id = %s
+        #     """, (plan_id,))
+        #     features = cur.fetchall()
+
+        #     cur.close()
+        #     conn.close()
+
+        #     # Convert features to list of dicts
+        #     features_list = [
+        #         {"feature_name": f[0], "is_enabled": f[1]} for f in features
+        #     ]
+
+        #     user_data = {
+        #         'employee_id': user_info[0],  # employee_id
+        #         'user_id': user_info[0],
+        #         'email': user_info[3],  # email
+        #         'user_type': 'employee',
+        #         'permissions': employeedata.get('permissions', []),
+        #         'company': company,
+        #         'role_id': user_info[2]  # role_id
+        #     }
+        #     login_id =insert_login_history(user_info[0], company_id, login_device, login_ip, 'login')
+           
+        #     tokens = JWTManager.generate_tokens(user_data,login_id, 'employee')
+        #     print("Employee Token------------------",tokens)
+        #     log_activity(email, 'login', f'Employee {email} logged into {company}', company_name=company)
+            
+        #     return jsonify({
+        #         'message': 'Login successful',
+        #         'user_type': 'employee',
+        #         'access_token': tokens['access_token'],
+        #         'refresh_token': tokens['refresh_token'],
+        #         'expires_in': tokens['expires_in'],
+        #         'user_data': employeedata,
+        #         'active_plan': {
+        #             'plan_name': plan_name,
+        #             'start_date': start_date,
+        #             'end_date': end_date,
+        #             'storage_limit':storage_limit
+        #         },
+        #         'features': features_list,
+        #         'login_id':login_id
+        #     }), 200
+    
+    # ... inside the else: block (Regular User/Employee Login) ...
     else:
         employeedata = fetch_company_login_data(email, password, company)
         print("employeedata====================", employeedata)
         
         if employeedata:
             user_info = employeedata['user']
-            company_id=employeedata['company_id']
-            conn=get_db_connection()
+            employee_id = user_info[0] # Get ID for checking
+            company_id = employeedata['company_id']
+            
+            conn = get_db_connection()
             cur = conn.cursor()
+
+            # ============================================================
+            # 1. NEW LOGIC: BLOCK MULTIPLE SESSIONS (First Login Wins)
+            # ============================================================
+            # Check for any active session for this employee
+            cur.execute("""
+                SELECT login_time 
+                FROM login_history 
+                WHERE employee_id = %s 
+                AND company_id = %s
+                AND login_status = 'login'
+                ORDER BY login_time DESC 
+                LIMIT 1
+            """, (employee_id, company_id))
+            
+            active_session = cur.fetchone()
+            
+            # DEFINE YOUR TIMEOUT (Must match your JWT expiry)
+            # Example: 8 Hours (28800 seconds). 
+            # 10 Minutes (600 seconds)
+
+            SESSION_TIMEOUT_SECONDS = 600 
+            
+            if active_session:
+                last_login_time = active_session[0]
+                current_time = datetime.now()
+                
+                # Calculate how much time has passed
+                time_difference = (current_time - last_login_time).total_seconds()
+                
+                # If the session is still within the valid time window, BLOCK the new login
+                if time_difference < SESSION_TIMEOUT_SECONDS:
+                    remaining_time = int((SESSION_TIMEOUT_SECONDS - time_difference) / 60) # Minutes
+                    
+                    cur.close()
+                    conn.close()
+                    return jsonify({
+                        'message': f'You are already logged in on another device. Please logout from the other device or wait {remaining_time} minutes for the session to expire.',
+                        'error_code': 'ALREADY_LOGGED_IN'
+                    }), 409 # 409 Conflict is the correct HTTP code
+            
+            # If no active session OR the active session is old/stale, proceed to login...
+            # ============================================================
+
             cur.execute("""
                 SELECT  p.id,p.plan_name,p.storage_limit, cl.start_date, cl.end_date, cl.is_active
                 FROM organization_license cl
@@ -5175,8 +5383,12 @@ def login():
                 'company': company,
                 'role_id': user_info[2]  # role_id
             }
-            login_id =insert_login_history(user_info[0], company_id, login_device, login_ip, 'login')
-           
+            
+            # NOTE: Your insert_login_history function probably sets old sessions to 'logout'.
+            # Since we already checked for active sessions above, this is fine.
+            # It will now clean up the "stale" sessions (older than 8 hours) if any.
+            login_id = insert_login_history(user_info[0], company_id, login_device, login_ip, 'login')
+            
             tokens = JWTManager.generate_tokens(user_data,login_id, 'employee')
             print("Employee Token------------------",tokens)
             log_activity(email, 'login', f'Employee {email} logged into {company}', company_name=company)
@@ -5197,7 +5409,6 @@ def login():
                 'features': features_list,
                 'login_id':login_id
             }), 200
-    
     return jsonify({'message': 'Invalid credentials'}), 401
 
 # Token Refresh Route
