@@ -106,6 +106,7 @@ def fetch_table_columns(db_config, table_name):
                 f"UID={db_config['dbUsername']};"
                 f"PWD={db_config['dbPassword']};"
                 "TrustServerCertificate=yes;"
+                "Encrypt=no;"
             )
             conn = pyodbc.connect(conn_str, timeout=40)
             cursor = conn.cursor()
@@ -290,6 +291,7 @@ def fetch_mssql_column_types(db_config, table_name):
         f"UID={db_config['dbUsername']};"
         f"PWD={db_config['dbPassword']};"
         "TrustServerCertificate=yes;"
+        "Encrypt=no;"
     )
 
     conn = pyodbc.connect(conn_str)
@@ -500,6 +502,7 @@ def fetch_data_with_columns(db_config, table_name, selected_columns=None, chunk_
                 f"UID={db_config['dbUsername']};"
                 f"PWD={db_config['dbPassword']};"
                 "TrustServerCertificate=yes;"
+                "Encrypt=no;"
             )
             conn = pyodbc.connect(conn_str, timeout=40)
 
@@ -640,6 +643,7 @@ def get_primary_key_columns_dest(db_config, table_name):
                 f"UID={db_config['dbUsername']};"
                 f"PWD={db_config['dbPassword']};"
                 "TrustServerCertificate=yes;"
+                "Encrypt=no;"
             )
             conn = pyodbc.connect(conn_str, timeout=40)
             cursor = conn.cursor()
@@ -998,6 +1002,7 @@ def fetch_table_details(db_config, table_name):
                 f"UID={db_config['dbUsername']};"
                 f"PWD={db_config['dbPassword']};"
                 "TrustServerCertificate=yes;"
+                "Encrypt=no;"
             )
             conn = pyodbc.connect(conn_str, timeout=40)
             cursor = conn.cursor()
