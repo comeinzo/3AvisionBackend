@@ -8940,6 +8940,7 @@ def connect_and_fetch_tables():
                 f"UID={username};"
                 f"PWD={password};"
                 "TrustServerCertificate=yes;"
+                "Encrypt=no;"
             )
             # conn_str = (
             #     "DRIVER={ODBC Driver 18 for SQL Server};"
