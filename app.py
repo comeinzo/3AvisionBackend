@@ -8953,7 +8953,7 @@ def connect_and_fetch_tables():
 
             print("Connection String:", conn_str)
 
-            conn = pyodbc.connect(conn_str, timeout=30)
+            conn = pyodbc.connect(conn_str, timeout=120)
             cursor = conn.cursor()
             cursor.execute("""
                 SELECT TABLE_NAME
