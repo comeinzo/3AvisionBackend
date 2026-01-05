@@ -2042,7 +2042,21 @@ def fetch_data_for_ts_decomposition(table_name, x_axis_columns, filter_options, 
             # to avoid code duplication, but for clarity, it's repeated here.
             # ... (the entire calculation logic for if, switch, iferror, calculate, etc.) ...
             if calc_formula.strip().lower().startswith("if"):
-                match = re.match(r"if\s*\((.+?)\)\s*then\s*'?(.*?)'?\s*else\s*'?(.*?)'?$", calc_formula.strip(), re.IGNORECASE)
+                match = (
+                    re.match(
+                        r"if\s*\(\s*(.+?)\s*\)\s*then\s*'?(.*?)'?\s*else\s*'?(.*?)'?$",
+                        calc_formula.strip(),
+                        re.IGNORECASE
+                    )
+                    or
+                    re.match(
+                        r"if\s*\(\s*(.+?)\s*,\s*'?(.*?)'?\s*,\s*'?(.*?)'?\s*\)$",
+                        calc_formula.strip(),
+                        re.IGNORECASE
+                    )
+                )
+
+                # match = re.match(r"if\s*\((.+?)\)\s*then\s*'?(.*?)'?\s*else\s*'?(.*?)'?$", calc_formula.strip(), re.IGNORECASE)
                 if not match:
                     raise ValueError("Invalid if-then-else format in calculation.")
 
@@ -3019,7 +3033,7 @@ def get_bar_chart_route():
         try:
 
             print("calculationData",calculationData)
-            data = fetch_data_for_duel(table_name, x_axis_columns, filter_options, y_axis_columns, agg_value, db_nameeee, selectedUser,calculationData= data.get('calculationData'),dateGranularity=dateGranularity)
+            data = fetch_data_for_duel(table_name, x_axis_columns, filter_options, y_axis_columns, agg_value, db_nameeee, selectedUser,calculationData= calculationData,dateGranularity=dateGranularity)
             
             # Debug: Print the structure of fetched data
             print(f"🔍 Dual Y-axis Chart - Original data length: {len(data)}")
@@ -5699,12 +5713,62 @@ def apply_calculation_to_df(df, calculation_data_list, x_axis=None, y_axis=None)
             formula_lower = calc_formula.strip().lower()
 
             if formula_lower.startswith("if"):
-                match = re.match(r"if\s*\((.+?)\)\s*then\s*'?(.*?)'?\s*else\s*'?(.*?)'?$", calc_formula.strip(), re.IGNORECASE)
+                match = (
+                    re.match(
+                        r"if\s*\(\s*(.+?)\s*\)\s*then\s*'?(.*?)'?\s*else\s*'?(.*?)'?$",
+                        calc_formula.strip(),
+                        re.IGNORECASE
+                    )
+                    or
+                    re.match(
+                        r"if\s*\(\s*(.+?)\s*,\s*'?(.*?)'?\s*,\s*'?(.*?)'?\s*\)$",
+                        calc_formula.strip(),
+                        re.IGNORECASE
+                    )
+                )
+
+                # match = re.match(r"if\s*\((.+?)\)\s*then\s*'?(.*?)'?\s*else\s*'?(.*?)'?$", calc_formula.strip(), re.IGNORECASE)
                 if not match:
                     raise ValueError("Invalid IF format")
                 condition_expr, then_val, else_val = match.groups()
                 condition_expr_python = re.sub(r'\[(.*?)\]', replace_column, condition_expr)
                 df[new_col_name] = np.where(eval(condition_expr_python), then_val.strip("'\""), else_val.strip("'\""))
+            elif calc_formula.lower().startswith("round"):
+                # Match formula: round(<expression>, <decimals>)
+                match = re.match(r'round\s*\(\s*(.+?)\s*,\s*(\d+)\s*\)', calc_formula, re.IGNORECASE)
+                if not match:
+                    raise ValueError(
+                        "Invalid ROUND format. Use round([col], decimals) or round([col1]/[col2], decimals)"
+                    )
+
+                expr, decimals = match.groups()
+                decimals = int(decimals)
+
+                # Replace [column] with numeric dataframe references
+                def replace_column(match):
+                    col_name = match.group(1)
+                    if col_name not in df.columns:
+                        raise ValueError(f"Missing column: {col_name}")
+                    # Convert to numeric
+                    df[col_name] = pd.to_numeric(df[col_name], errors='coerce')
+                    return f"df['{col_name}']"
+
+                expr_python = re.sub(r'\[([^\]]+)\]', replace_column, expr)
+
+                # Handle division by zero safely
+                expr_python = re.sub(
+                    r"df\['([^']+)'\]\s*/\s*df\['([^']+)'\]",
+                    r"np.divide(df['\1'], df['\2'].replace(0, np.nan))",
+                    expr_python
+                )
+
+                # Evaluate safely and round
+                try:
+                    df[new_col_name] = np.round(eval(expr_python), decimals)
+                except Exception as e:
+                    print(f"Error evaluating ROUND formula: {e}")
+                    df[new_col_name] = np.nan
+
 
             elif formula_lower.startswith("switch"):
                 switch_match = re.match(r"switch\s*\(\s*\[([^\]]+)\](.*?)\)", calc_formula, re.IGNORECASE)
@@ -5830,9 +5894,60 @@ def apply_calculation_to_df(df, calculation_data_list, x_axis=None, y_axis=None)
                 col = re.match(r"trim\s*\(\s*\[([^\]]+)\]\)", calc_formula, re.IGNORECASE).group(1)
                 df[new_col_name] = df[col].astype(str).str.strip()
 
+            elif calc_formula.lower().startswith(("sum", "avg", "min", "max")):
+                match = re.match(
+                    r'(sum|avg|min|max)\s*\(\s*\[([^\]]+)\]\s*\)',
+                    calc_formula,
+                    re.IGNORECASE
+                )
+                if not match:
+                    raise ValueError("Invalid aggregation format.")
+
+                agg_func, col = match.groups()
+                agg_func = agg_func.lower()
+
+                # DO NOT create calculated column
+                # Just mark aggregation intent
+                aggregation = agg_func
+                y_base_column = col
+
+                print(f"Detected aggregation: {aggregation}({col})")
+
+                # IMPORTANT: skip dataframe eval
+                skip_calculated_column = True
+
             else:
+                # calc_formula_python = re.sub(r'\[(.*?)\]', replace_column, calc_formula)
+                # print("Evaluating math formula:", calc_formula_python)
+                # Replace column references [col] → temp_df['col']
                 calc_formula_python = re.sub(r'\[(.*?)\]', replace_column, calc_formula)
-                df[new_col_name] = eval(calc_formula_python)
+
+                # Handle COUNT
+                calc_formula_python = re.sub(
+                    r'count\s*\(\s*(temp_df\[.*?\])\s*\)',
+                    r'\1.count()',
+                    calc_formula_python,
+                    flags=re.IGNORECASE
+                )
+
+                # Handle SUM
+                calc_formula_python = re.sub(
+                    r'sum\s*\(\s*(temp_df\[.*?\])\s*\)',
+                    r'\1.sum()',
+                    calc_formula_python,
+                    flags=re.IGNORECASE
+                )
+
+                # Handle AVG
+                calc_formula_python = re.sub(
+                    r'avg\s*\(\s*(temp_df\[.*?\])\s*\)',
+                    r'\1.mean()',
+                    calc_formula_python,
+                    flags=re.IGNORECASE
+                )
+
+                print("Evaluating math formula:", calc_formula_python)
+                temp_df[new_col_name] = eval(calc_formula_python)
 
             print(f"✅ New column '{new_col_name}' created.")
 
@@ -5841,6 +5956,8 @@ def apply_calculation_to_df(df, calculation_data_list, x_axis=None, y_axis=None)
                 y_axis = [new_col_name if col == replace_col_name else col for col in y_axis]
             if x_axis:
                 x_axis = [new_col_name if col == replace_col_name else col for col in x_axis]
+            if skip_calculated_column:
+                y_axis = [y_base_column if col == new_col_name else col for col in y_axis]
 
         except Exception as e:
             print(f"❌ Error applying calculation for column '{calculation_data.get('columnName')}': {e}")
