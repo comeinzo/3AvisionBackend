@@ -75,3 +75,4 @@ dashboard_save/__pycache__/
 ehthumbs.db
 Thumbs.db
 .env
+dashboard_save/berthee.py

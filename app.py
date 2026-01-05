@@ -2704,7 +2704,7 @@ def get_bar_chart_route():
         }.get(aggregation, 'sum') 
 
         try:
-            fetched_data = fetchText_data(db_nameeee, table_name, x_axis_columns[0], aggregate_py, selectedUser)
+            fetched_data = fetchText_data(db_nameeee, table_name, x_axis_columns[0], aggregate_py, selectedUser,filter_options)
             return jsonify({
                 "data": fetched_data,
                 "message": "Data received successfully!"
@@ -5638,6 +5638,7 @@ def receive_single_value_chart_data():
     databaseName = data.get('text_y_database')
     table_Name = data.get('text_y_table')
     selectedUser=data.get("selectedUser")
+    filter_options=data.get("filter_options")
     print("table_Name====================",table_Name)
     aggregate=data.get('text_y_aggregate')
     print("x_axis====================",x_axis)  
@@ -5657,7 +5658,7 @@ def receive_single_value_chart_data():
                 }.get(aggregate, 'sum') 
     print("aggregate_py====================",aggregate_py)
                 
-    fetched_data = fetchText_data(databaseName, table_Name, x_axis,aggregate_py,selectedUser)
+    fetched_data = fetchText_data(databaseName, table_Name, x_axis,aggregate_py,selectedUser,filter_options)
     print("Fetched Data:", fetched_data)
     print(f"Received x_axis: {x_axis}")
     print(f"Received databaseName: {databaseName}")
@@ -5679,6 +5680,7 @@ def receive_chart_data():
     print("table_Name====================", table_Name)
     aggregate=data.get('text_y_aggregate')
     selectedUser=data.get("selectedUser")
+    filter_options=data.get("filter_options")
     print("x_axis====================",x_axis)  
     print("databaseName====================",databaseName)  
     print("table_Name====================",table_Name)
@@ -5693,7 +5695,7 @@ def receive_chart_data():
                 }.get(aggregate, 'sum') 
     print("aggregate_py====================",aggregate_py)
     
-    fetched_data = fetchText_data(databaseName, table_Name, x_axis,aggregate_py,selectedUser)
+    fetched_data = fetchText_data(databaseName, table_Name, x_axis,aggregate_py,selectedUser,filter_options)
     print("Fetched Data:", fetched_data)
     print(f"Received x_axis: {x_axis}")
     print(f"Received databaseName: {databaseName}")
@@ -7103,14 +7105,143 @@ def get_dashboard_data(dashboard_name, company_name,user_id):
     else:
         return None
 
+# @app.route('/Dashboard_data/<dashboard_name>/<company_name>', methods=['GET'])
+# @token_required
+# def dashboard_data(dashboard_name,company_name):
+#     user_id, dashboard_name = dashboard_name.split(",", 1)  # Split only once
+#     view_mode = request.args.get('view_mode') 
+#     # user_id = request.args.get('user_id')
+#     data = get_dashboard_data(dashboard_name,company_name,user_id)
+#     # print("chart datas------------------------------------------------------------------------------------------------------------------",data) 
+#     if data is not None:
+#         chart_ids = data[4]
+#         positions=data[5]
+#         filter_options=data[11]
+#         areacolour=data[15]
+#         droppableBgColor=data[16]
+#         opacity=data[17]
+#         image_ids=data[18]
+#         chart_type=data[7]
+#         fontStyleLocal =data[20]
+#         fontColor =data[22]
+#         fontSize =data[21]
+#         wallpaper_id=data[23]
+#         dashboard_Filter=data[26]
+        
+#         print("chart_ids====================",chart_ids)    
+#         print("chart_areacolour====================",areacolour)   
+#         print("image_ids",image_ids)
+#         print("dashboard_Filter",dashboard_Filter)
+#         chart_datas=get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,droppableBgColor,opacity,image_ids,chart_type,dashboard_Filter,view_mode)
+#         # print("dashboarddata",data)
+#         # print("chart_datas====================",chart_datas)
+#         image_data_list = []
+#         conn = create_connection() 
+#         if image_ids:
+#             if isinstance(image_ids, str):
+#                 try:
+#                     image_ids = json.loads(image_ids)
+#                     print("Loaded JSON image_ids:", image_ids)
+#                 except json.JSONDecodeError:
+#                     # fallback: manually parse
+#                     image_ids = list(filter(None, map(str.strip, image_ids.strip('{}').split(','))))
+
+#             cursor = conn.cursor()
+#             print("Parsed image_ids:", image_ids)
+            
+
+#             for img_id in image_ids:
+#                 print("Looking for img_id:", img_id)
+
+#                 cursor.execute("""
+#                         SELECT image_id, src, x, y, width, height, zIndex, disableDragging 
+#                         FROM image_positions 
+#                         WHERE image_id = %s
+
+#                     """, (img_id,))
+#                 img_data = cursor.fetchone()
+
+                
+                
+#                 if img_data:
+#                     print(" img_data[0]", img_data[0])
+#                     image_data_list.append({
+#                             'image_id': img_data[0],
+#                             'src': img_data[1],
+#                             'x': img_data[2],
+#                             'y': img_data[3],
+#                             'width': img_data[4],
+#                             'height': img_data[5],
+#                             'zIndex': img_data[6],
+#                             'disableDragging': img_data[7]
+#                         })
+#             cursor.close()
+#             wallpaper_src = None
+#             if wallpaper_id:
+#                 cursor = conn.cursor()
+#                 cursor.execute("""
+#                     SELECT src FROM dashboard_wallpapers WHERE wallpaper_id = %s
+#                 """, (wallpaper_id,))
+#                 result = cursor.fetchone()
+#                 if result:
+#                     wallpaper_src = result[0]
+#                 cursor.close()
+#             conn.close()
+#             # print("fontStyleLocal",fontStyleLocal)
+#             # print("fontColor",fontColor)
+#             # print("fontSize",fontSize)
+#             # print("Chart Data=======>",data)
+#         user_email = None
+#         user_name=None
+#         emp_conn = psycopg2.connect(
+#             dbname=company_name,
+#             user=username,
+#             password=password,
+#             host=host,
+#             port=port
+#         )
+#         emp_cur = emp_conn.cursor()
+#         emp_cur.execute("SELECT email,username FROM employee_list WHERE employee_id = %s;", (user_id,))
+#         result = emp_cur.fetchone()
+#         if result:
+#             user_email = result[0]
+#             user_name=result[1]
+#         emp_cur.close()
+#         emp_conn.close()
+
+#         # 2️⃣ Fallback if email not found
+#         if not user_email:
+#             user_email = str(user_id)
+#         description = f"User {user_name} viewed dashboard '{dashboard_name}'"
+#         log_activity(
+#             user_email=user_email,
+#             action_type="View_Dashboard",
+#             description=description,
+#             table_name=None,
+#             company_name=company_name,
+#             dashboard_name=dashboard_name
+#         )
+#         # return jsonify(data,chart_datas)
+#         return jsonify({
+#             "data": data,
+#             "chart_datas": chart_datas,
+#             "positions": positions,
+#             "image_data_list":image_data_list,
+#             "fontStyleLocal":fontStyleLocal,
+#             "fontColor":fontColor,
+#             "fontSize":fontSize,
+#             "wallpaper_src": wallpaper_src 
+#         })
+#     else:
+#         return jsonify({'error': 'Failed to fetch data for Chart {}'.format(dashboard_name)})
+    
+
 @app.route('/Dashboard_data/<dashboard_name>/<company_name>', methods=['GET'])
 @token_required
 def dashboard_data(dashboard_name,company_name):
     user_id, dashboard_name = dashboard_name.split(",", 1)  # Split only once
     view_mode = request.args.get('view_mode') 
-    # user_id = request.args.get('user_id')
     data = get_dashboard_data(dashboard_name,company_name,user_id)
-    # print("chart datas------------------------------------------------------------------------------------------------------------------",data) 
     if data is not None:
         chart_ids = data[4]
         positions=data[5]
@@ -7126,13 +7257,9 @@ def dashboard_data(dashboard_name,company_name):
         wallpaper_id=data[23]
         dashboard_Filter=data[26]
         
-        print("chart_ids====================",chart_ids)    
-        print("chart_areacolour====================",areacolour)   
-        print("image_ids",image_ids)
-        print("dashboard_Filter",dashboard_Filter)
+
         chart_datas=get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,droppableBgColor,opacity,image_ids,chart_type,dashboard_Filter,view_mode)
-        # print("dashboarddata",data)
-        # print("chart_datas====================",chart_datas)
+
         image_data_list = []
         conn = create_connection() 
         if image_ids:
@@ -7141,26 +7268,16 @@ def dashboard_data(dashboard_name,company_name):
                     image_ids = json.loads(image_ids)
                     print("Loaded JSON image_ids:", image_ids)
                 except json.JSONDecodeError:
-                    # fallback: manually parse
                     image_ids = list(filter(None, map(str.strip, image_ids.strip('{}').split(','))))
 
             cursor = conn.cursor()
-            print("Parsed image_ids:", image_ids)
-            
-
             for img_id in image_ids:
-                print("Looking for img_id:", img_id)
-
                 cursor.execute("""
                         SELECT image_id, src, x, y, width, height, zIndex, disableDragging 
                         FROM image_positions 
                         WHERE image_id = %s
-
                     """, (img_id,))
                 img_data = cursor.fetchone()
-
-                
-                
                 if img_data:
                     print(" img_data[0]", img_data[0])
                     image_data_list.append({
@@ -7185,10 +7302,6 @@ def dashboard_data(dashboard_name,company_name):
                     wallpaper_src = result[0]
                 cursor.close()
             conn.close()
-            # print("fontStyleLocal",fontStyleLocal)
-            # print("fontColor",fontColor)
-            # print("fontSize",fontSize)
-            # print("Chart Data=======>",data)
         user_email = None
         user_name=None
         emp_conn = psycopg2.connect(
@@ -7206,7 +7319,6 @@ def dashboard_data(dashboard_name,company_name):
             user_name=result[1]
         emp_cur.close()
         emp_conn.close()
-
         # 2️⃣ Fallback if email not found
         if not user_email:
             user_email = str(user_id)
@@ -7232,15 +7344,15 @@ def dashboard_data(dashboard_name,company_name):
         })
     else:
         return jsonify({'error': 'Failed to fetch data for Chart {}'.format(dashboard_name)})
-    
-    
+     
+
 
 @app.route('/saved_dashboard_total_rows', methods=['GET'])
 @token_required
 def saved_dashboard_names():
     database_name = request.args.get('company')  # Getting the database_name
     project=request.args.get("project_name")
-    print(f"Received user_id:",database_name)
+    print(f"Received database name:",database_name)
     user_id = request.args.get('user_id')  # Retrieve user_id from query parameters
 
     print(f"Received user_id: {user_id}")  # Debugging output

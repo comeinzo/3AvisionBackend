@@ -370,6 +370,7 @@ def get_dashboard_names(user_id, database_name, project_name=None):
             conn_datasource.close()
 
     return dashboards
+
 def get_Edit_dashboard_names(user_id, database_name):
     """
     Fetch dashboards created only by the given user_id in the 'datasource' database,
@@ -1301,7 +1302,7 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                             'maximum': 'max'
                         }.get(aggregate, 'sum') 
                         
-                        single_value_result = fetchText_data(database_name, table_name, x_axis[0], aggregate_py,selected_user)
+                        single_value_result = fetchText_data(database_name, table_name, x_axis[0], aggregate_py,selected_user,filter_options)
                         print("Single Value Result for Chart ID", chart_id, ":", single_value_result)
                         # Append single value chart data
                         chart_data_list.append({
@@ -1337,7 +1338,7 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                             'minimum': 'min',
                             'maximum': 'max'
                         }.get(aggregate, 'sum') 
-                        single_value_result = fetchText_data(database_name, table_name, x_axis[0], aggregate_py,selected_user)
+                        single_value_result = fetchText_data(database_name, table_name, x_axis[0], aggregate_py,selected_user,filter_options)
                         print("Single Value Result for Chart ID", chart_id, ":", single_value_result)
                         # Append single value chart data
                         chart_data_list.append({
