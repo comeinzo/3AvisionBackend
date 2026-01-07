@@ -749,9 +749,172 @@ def apply_calculations(dataframe, calculationData, x_axis, y_axis):
     return dataframe
 
 
+def extract_filter_from_category(category_text):
+    """
+    Handles:
+    - region Asia
+    - {"region Asia"}
+    - {"region":"Asia"}
+    - ["region Asia"]
+    """
+
+    if not category_text:
+        return {}
+
+    # Normalize to string
+    category_text = str(category_text).strip()
+
+    # Remove wrapping {} or []
+    if (category_text.startswith("{") and category_text.endswith("}")) or \
+       (category_text.startswith("[") and category_text.endswith("]")):
+        category_text = category_text[1:-1].strip()
+
+    # Remove quotes
+    category_text = category_text.replace('"', '').replace("'", "").strip()
+
+    # Handle JSON-style key:value
+    if ":" in category_text:
+        key, value = category_text.split(":", 1)
+    else:
+        parts = category_text.split(None, 1)
+        if len(parts) != 2:
+            return {}
+        key, value = parts
+
+    return {
+        key.lower().strip(): [value.lower().strip()]
+    }
 
 
-def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,droppableBgColor,opacity,image_ids,chart_type,dashboard_Filter,view_mode):
+def is_restricted_role(role):
+    return role in ["viewer", "report viewer"]
+
+
+# def apply_employee_category_filter(chart_filters, employee_category_filter):
+#     """
+#     Restrict ONLY employee category column using intersection
+#     """
+#     if not employee_category_filter:
+#         return chart_filters
+
+#     for col, emp_vals in employee_category_filter.items():
+#         if col in chart_filters:
+#             chart_filters[col] = list(
+#                 set(chart_filters[col]) & set(emp_vals)
+#             )
+#         else:
+#             chart_filters[col] = emp_vals
+
+#     return chart_filters
+# def apply_employee_category_filter(chart_filters, employee_category_filter):
+#     """
+#     Restrict ONLY employee category column using intersection.
+#     Case-insensitive comparison is applied.
+#     """
+#     if not employee_category_filter:
+#         return chart_filters
+
+#     for col, emp_vals in employee_category_filter.items():
+#         if col in chart_filters:
+#             # Keep only values that match (case-insensitive)
+#             emp_vals_lower = {str(v).lower() for v in emp_vals}
+#             chart_filters[col] = [
+#                 v for v in chart_filters[col] 
+#                 if str(v).lower() in emp_vals_lower
+#             ]
+#         else:
+#             chart_filters[col] = emp_vals
+
+#     return chart_filters
+
+
+# def apply_employee_category_filter(chart_filters, employee_category_filter, data_columns=None):
+#     """
+#     Restrict ONLY employee category column using intersection.
+#     Case-insensitive comparison is applied.
+
+#     data_columns: Optional dict of actual column values from the table, e.g.
+#     {'region': ['Asia', 'Europe', 'ASIA', 'North America']}
+#     """
+#     if not employee_category_filter:
+#         return chart_filters
+
+#     for col, emp_vals in employee_category_filter.items():
+#         emp_vals_lower = {str(v).lower() for v in emp_vals}
+
+#         # If chart_filters already has values for this column, intersect them case-insensitively
+#         if col in chart_filters:
+#             chart_filters[col] = [
+#                 v for v in chart_filters[col]
+#                 if str(v).lower() in emp_vals_lower
+#             ]
+#         # If chart_filters does not have values, take them from data_columns or employee_category_filter
+#         else:
+#             if data_columns and col in data_columns:
+#                 chart_filters[col] = [
+#                     v for v in data_columns[col] if str(v).lower() in emp_vals_lower
+#                 ]
+#             else:
+#                 # fallback to lowercase filter values
+#                 chart_filters[col] = list(emp_vals_lower)
+
+#     return chart_filters
+def expand_filters_with_actual_values(df, chart_filters, employee_category_filter):
+    """
+    Replace employee_category_filter values with actual values from the dataframe
+    Case-insensitive matching.
+    
+    df: pandas DataFrame containing actual column values
+    chart_filters: dict, existing chart filters
+    employee_category_filter: dict, e.g., {'region': ['asia']}
+    """
+    chart_filters_clean = chart_filters.copy()
+    
+    for col, filter_vals in employee_category_filter.items():
+        if col not in df.columns:
+            continue  # skip if column not in dataframe
+        
+        # Get all unique values in the column (actual values)
+        actual_vals = df[col].dropna().unique()
+        actual_vals_lower = {str(v).lower(): v for v in actual_vals}  # map lowercase → actual
+        
+        # Match filter values case-insensitively
+        matched_vals = [actual_vals_lower[v.lower()] for v in filter_vals if v.lower() in actual_vals_lower]
+        
+        # Override/add to chart filters
+        chart_filters_clean[col] = matched_vals
+    
+    return chart_filters_clean
+
+def apply_employee_category_filter(chart_filters, employee_category_filter, data_columns=None):
+    """
+    Restrict ONLY employee category column using intersection.
+    Expands filter to include all case variations present in data_columns.
+
+    data_columns: Optional dict of actual column values from the table, e.g.
+    {'region': ['Asia', 'Europe', 'ASIA', 'North America']}
+    """
+    if not employee_category_filter:
+        return chart_filters
+
+    for col, emp_vals in employee_category_filter.items():
+        emp_vals_lower = {str(v).lower() for v in emp_vals}
+
+        # If we have actual column data, get all values matching case-insensitively
+        if data_columns and col in data_columns:
+            chart_filters[col] = [
+                val for val in data_columns[col] 
+                if str(val).lower() in emp_vals_lower
+            ]
+        else:
+            # fallback: use original employee filter, preserving original cases
+            chart_filters[col] = [v for v in emp_vals]
+            print("chartfiltere",chart_filters)
+
+    return chart_filters
+
+
+def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,droppableBgColor,opacity,image_ids,chart_type,dashboard_Filter,view_mode,company_name,employee_id):
     conn = create_connection()  # Initial connection to your main database
     print("Chart areacolour:", areacolour)
     print("Chart opacity received:", opacity)
@@ -870,6 +1033,35 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
 
             print("chart_positions",chart_positions)
             print("Chart Filters:", chart_filters)
+            user_role = None
+            employee_category_filter = {}
+
+            try:
+                company_conn = get_company_db_connection(company_name)
+                emp_cur = company_conn.cursor()
+
+                emp_cur.execute("""
+                            SELECT r.role_name, e.category
+                            FROM employee_list e
+                            JOIN role r ON e.role_id = r.role_id::text
+                            WHERE e.employee_id = %s
+                            LIMIT 1
+                        """, (employee_id,))
+
+                row = emp_cur.fetchone()
+                print("user_role,catagory",row)
+                emp_cur.close()
+                company_conn.close()
+
+                if row:
+                    user_role = row[0].lower().strip() if row[0] else None
+                    employee_category_filter = extract_filter_from_category(row[1])
+
+            except Exception as e:
+                print("Failed to fetch role/category:", e)
+
+            print("User role:", user_role)
+            print("Employee category filter:", employee_category_filter)
             print("Processed chart_areacolour:", chart_areacolour)
             for chart_id, position in chart_positions.items():
                 if not isinstance(position, dict) or 'x' not in position or 'y' not in position:
@@ -981,113 +1173,6 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                     
                     print("Chart OptimizationData:", OptimizationData)
                     print("final_opacity",final_opacity)
-                    # -----------------------------------------------
-                    # 🟦 APPLY DASHBOARD FILTER IF TABLE NAME MATCHES
-                    # -----------------------------------------------
-                    if view_mode == "edit":
-                        print("View mode is 'edit' → Skipping dashboard filters.")
-                    else:
-                        print("dashboard_Filter",dashboard_Filter)
-                        # Normalize dashboard_Filter into dict
-                        if dashboard_Filter is None:
-                            dashboard_Filter = {} # Initialize to an empty dictionary
-                        if isinstance(dashboard_Filter, str):
-                            try:
-                                dashboard_Filter = json.loads(dashboard_Filter.replace("'", '"'))
-                            except Exception:
-                                dashboard_Filter = ast.literal_eval(dashboard_Filter)
-
-                        print("Normalized Dashboard Filter:", dashboard_Filter)
-
-                        dashboard_table = dashboard_Filter.get("table_name")
-                        dashboard_filters_list = dashboard_Filter.get("filters", [])
-
-                        # Normalize dashboard filters into dict {column: values}
-                        dashboard_filters = {}
-                        for item in dashboard_filters_list:
-                            if isinstance(item, dict):
-                                dashboard_filters.update(item)
-
-                        print("Dashboard Filters:", dashboard_filters)
-
-                        # Only apply dashboard filters when table name matches
-                        if dashboard_table and dashboard_table == table_name:
-
-                            print(f"Applying dashboard filters to chart {chart_id} (table matched: {table_name})")
-
-                            # Parse chart filter_options (string → dict)
-                            chart_filters_clean = {}
-                            if isinstance(filter_options, str):
-                                try:
-                                    chart_filters_clean = json.loads(filter_options)
-                                except:
-                                    chart_filters_clean = ast.literal_eval(filter_options)
-                            elif isinstance(filter_options, dict):
-                                chart_filters_clean = filter_options
-
-                            # Merge dashboard filters into chart filters
-                            # for col, val_list in dashboard_filters.items():
-                            #     if col not in chart_filters_clean:
-                            #         chart_filters_clean[col] = val_list   # Add new filter
-                            #     else:
-                            #         # Merge without duplicates
-                            #         existing = set(chart_filters_clean[col])
-                            #         new_vals = set(val_list)
-                            #         chart_filters_clean[col] = list(existing | new_vals)
-                            # Suggested Override Logic (Replacing the 'else' block)
-                            for col, val_list in dashboard_filters.items():
-                                # If the column is not in the chart filters, add it (same as before)
-                                if col not in chart_filters_clean:
-                                    chart_filters_clean[col] = val_list
-                                else:
-                                    # === CHANGE THIS SECTION ===
-                                    # If the column IS in the chart filters, OVERRIDE it with the dashboard's filter values.
-                                    chart_filters_clean[col] = val_list
-                                    # The previous 'existing = set(chart_filters_clean[col]) | new_vals' logic is removed.
-                                    # ===========================
-
-                            # Replace old filter options
-                            filter_options = chart_filters_clean
-
-                            print("Merged filter_options (with override):", filter_options)
-
-                        #]
-
-
-                    # END Dashboard Filter Merge
-                    # ------------------------------------------------
-                                        
-                    # Determine the aggregation function
-                    aggregate_py = {
-                        'count': 'count',
-                        'sum': 'sum',
-                        'average': 'mean',
-                        'minimum': 'min',
-                        'maximum': 'max'
-                    }.get(aggregate, 'sum')  # Default to 'sum' if no match
-
-                    # Check if selectedUser is NULL
-                    # if selected_user is None:
-                    #     # Use the default local connection if selectedUser is NULL
-                    #     connection = get_db_connection_view(database_name)
-                    #     masterdatabasecon=create_connection()
-                    #     print('Using local database connection')
-
-                    # else:
-                    #     # Use external connection if selectedUser is provided
-                    #     connection = fetch_external_db_connection(database_name, selected_user)
-                    #     host = connection[3]
-                    #     dbname = connection[7]
-                    #     user = connection[4]
-                    #     password = connection[5]
-
-                    #     # Create a new psycopg2 connection using the details from the tuple
-                    #     connection = psycopg2.connect(
-                    #         dbname=dbname,
-                    #         user=user,
-                    #         password=password,
-                    #         host=host
-                    #     )
                     if not selected_user or selected_user.lower() == 'null':
                         print("🟢 Using default local database connection...")
                         connection = get_db_connection_view(database_name)
@@ -1231,6 +1316,140 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                         print("✅ External PostgreSQL connection established successfully!")
 
                         print('External Connection established:', connection)
+                    
+
+                    # -----------------------------------------------
+                    # 🟦 APPLY DASHBOARD FILTER IF TABLE NAME MATCHES
+                    # -----------------------------------------------
+                    if view_mode == "edit":
+                        print("View mode is 'edit' → Skipping dashboard filters.")
+                    else:
+                        print("dashboard_Filter",dashboard_Filter)
+                        # Normalize dashboard_Filter into dict
+                        if dashboard_Filter is None:
+                            dashboard_Filter = {} # Initialize to an empty dictionary
+                        if isinstance(dashboard_Filter, str):
+                            try:
+                                dashboard_Filter = json.loads(dashboard_Filter.replace("'", '"'))
+                            except Exception:
+                                dashboard_Filter = ast.literal_eval(dashboard_Filter)
+
+                        print("Normalized Dashboard Filter:", dashboard_Filter)
+
+                        dashboard_table = dashboard_Filter.get("table_name")
+                        dashboard_filters_list = dashboard_Filter.get("filters", [])
+
+                        # Normalize dashboard filters into dict {column: values}
+                        dashboard_filters = {}
+                        for item in dashboard_filters_list:
+                            if isinstance(item, dict):
+                                dashboard_filters.update(item)
+
+                        print("Dashboard Filters:", dashboard_filters)
+                        chart_filters_clean = {}
+                        if isinstance(filter_options, str):
+                            try:
+                                chart_filters_clean = json.loads(filter_options)
+                            except:
+                                chart_filters_clean = ast.literal_eval(filter_options)
+                        elif isinstance(filter_options, dict):
+                            chart_filters_clean = filter_options
+
+                        # Only apply dashboard filters when table name matches
+                        if dashboard_table and dashboard_table == table_name:
+
+                            print(f"Applying dashboard filters to chart {chart_id} (table matched: {table_name})")
+
+                            # Parse chart filter_options (string → dict)
+                            # chart_filters_clean = {}
+                            # if isinstance(filter_options, str):
+                            #     try:
+                            #         chart_filters_clean = json.loads(filter_options)
+                            #     except:
+                            #         chart_filters_clean = ast.literal_eval(filter_options)
+                            # elif isinstance(filter_options, dict):
+                            #     chart_filters_clean = filter_options
+
+                            # Merge dashboard filters into chart filters
+                            # for col, val_list in dashboard_filters.items():
+                            #     if col not in chart_filters_clean:
+                            #         chart_filters_clean[col] = val_list   # Add new filter
+                            #     else:
+                            #         # Merge without duplicates
+                            #         existing = set(chart_filters_clean[col])
+                            #         new_vals = set(val_list)
+                            #         chart_filters_clean[col] = list(existing | new_vals)
+                            # Suggested Override Logic (Replacing the 'else' block)
+                            for col, val_list in dashboard_filters.items():
+                                # If the column is not in the chart filters, add it (same as before)
+                                if col not in chart_filters_clean:
+                                    chart_filters_clean[col] = val_list
+                                else:
+                                    # === CHANGE THIS SECTION ===
+                                    # If the column IS in the chart filters, OVERRIDE it with the dashboard's filter values.
+                                    chart_filters_clean[col] = val_list
+                                    # The previous 'existing = set(chart_filters_clean[col]) | new_vals' logic is removed.
+                                    # ===========================
+                                    # ------------------------------------
+                            # 🔐 APPLY EMPLOYEE CATEGORY FILTER
+                            # ONLY FOR viewer / report viewer
+                            # ------------------------------------
+                        if is_restricted_role(user_role):
+                            print("Restricted role detected → applying employee category restriction")
+                            df = fetch_chart_data(connection, table_name)
+
+                            chart_filters_clean = expand_filters_with_actual_values(df,
+                                        chart_filters_clean,
+                                        employee_category_filter
+                                        
+                            )
+                            print("chart_filters_clean",chart_filters_clean)
+                        else:
+                            print("Non-restricted role → skipping employee category filter")
+
+                            # Replace old filter options
+                        filter_options = chart_filters_clean
+
+                        print("Merged filter_options (with override):", filter_options)
+
+                        #]
+
+
+                    # END Dashboard Filter Merge
+                    # ------------------------------------------------
+                                        
+                    # Determine the aggregation function
+                    aggregate_py = {
+                        'count': 'count',
+                        'sum': 'sum',
+                        'average': 'mean',
+                        'minimum': 'min',
+                        'maximum': 'max'
+                    }.get(aggregate, 'sum')  # Default to 'sum' if no match
+
+                    # Check if selectedUser is NULL
+                    # if selected_user is None:
+                    #     # Use the default local connection if selectedUser is NULL
+                    #     connection = get_db_connection_view(database_name)
+                    #     masterdatabasecon=create_connection()
+                    #     print('Using local database connection')
+
+                    # else:
+                    #     # Use external connection if selectedUser is provided
+                    #     connection = fetch_external_db_connection(database_name, selected_user)
+                    #     host = connection[3]
+                    #     dbname = connection[7]
+                    #     user = connection[4]
+                    #     password = connection[5]
+
+                    #     # Create a new psycopg2 connection using the details from the tuple
+                    #     connection = psycopg2.connect(
+                    #         dbname=dbname,
+                    #         user=user,
+                    #         password=password,
+                    #         host=host
+                    #     )
+                    
                     if chart_type == "wordCloud":
                         if len(y_axis) == 0:
                             x_axis_columns_str = ', '.join(x_axis)
@@ -2448,6 +2667,8 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                                             dataframe = dataframe[temp_dates.dt.month_name().isin(allowed_months)]
                                     else:
                                         # Normal filtering for non-date columns
+                                        # allowed_values_lower = [str(v).lower() for v in allowed_values]
+                                        # dataframe = dataframe[dataframe[col].str.lower().isin(allowed_values_lower)]
                                         dataframe = dataframe[dataframe[col].isin(allowed_values)]
 
                         print("DataFrame after dashboard filtering:-----")
@@ -2567,13 +2788,27 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                         else:
                             filtered_categories = []
                             filtered_values = []
+                            # allowed_values_lower = [str(v).strip().lower() for v in filter_options.get(axis_col, [])]
+                            # if not allowed_values_lower:
+                            #     filtered_categories = categories
+                            #     filtered_values = values
+                            # else:
+                            #     for category, value in zip(categories, values):
+                            #         if str(category).strip().lower() in allowed_values_lower:
+                            #             filtered_categories.append(category)
+                            #             filtered_values.append(value)
+
                             for category, value in zip(categories, values):
                                 print("filter_options",filter_options,axis_col)
+
                                 if not filter_options or axis_col not in filter_options:
                                     filtered_categories = categories
                                     filtered_values = values
+                                    # break  
 
                                 if axis_col in filter_options and category in filter_options[axis_col]:
+                                # allowed_values_lower = [str(v).lower() for v in filter_options[axis_col]]
+                                # if str(category).lower() in allowed_values_lower:
                                     
                                     filtered_categories.append(category)
                                     filtered_values.append(value)

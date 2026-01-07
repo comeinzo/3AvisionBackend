@@ -79,7 +79,7 @@ from dashboard_save.dashboard_save import (
     get_dashboard_names,
     get_dashboard_view_chart_data,
     get_Edit_dashboard_names,
-    insert_combined_chart_details
+    insert_combined_chart_details,expand_filters_with_actual_values,extract_filter_from_category,is_restricted_role
 )
 from excel_upload import upload_excel_to_postgresql
 from histogram_utils import generate_histogram_details, handle_column_data_types
@@ -5953,7 +5953,7 @@ def apply_calculation_to_df(df, calculation_data_list, x_axis=None, y_axis=None)
                 )
 
                 print("Evaluating math formula:", calc_formula_python)
-                temp_df[new_col_name] = eval(calc_formula_python)
+                df[new_col_name] = eval(calc_formula_python)
 
             print(f"✅ New column '{new_col_name}' created.")
 
@@ -6029,17 +6029,93 @@ def receive_chart_details():
     optimizeData= data.get('optimizeData')
     user_id=data.get('user_id')
     dateGranularity = data.get("selectedFrequency", {})
+    databaseName = data.get('databaseName')
+    # ------------------------------------
+    # Parse chart filter options FIRST
+    # ------------------------------------
     try:
-        filter_options_str = data.get('filter_options').replace('null', 'null') #this line is not needed.
-        filter_options = json.loads(data.get('filter_options')) #use json.loads instead of ast.literal_eval.
-        # print("filter_options====================", filter_options)
-    except (ValueError, SyntaxError, json.JSONDecodeError) as e:
-        print(f"Error parsing filter_options: {e}")
-        return jsonify({"message": "Invalid filter_options format", "error": str(e)}), 400
+        raw_filter_options = data.get('filter_options').replace('null', 'null') 
+        if raw_filter_options:
+            chart_filters_clean = json.loads(raw_filter_options)
+        else:
+            chart_filters_clean = {}
+    except Exception as e:
+        print("Invalid filter_options:", e)
+        chart_filters_clean = {}
+
+    # Fetch role and employee category filter
+    user_role = None
+    employee_category_filter = {}
+
+    try:
+        company_conn = get_company_db_connection(databaseName)
+        with company_conn.cursor() as emp_cur:
+            emp_cur.execute("""
+                SELECT r.role_name, e.category
+                FROM employee_list e
+                JOIN role r ON e.role_id = r.role_id::text
+                WHERE e.employee_id = %s
+                LIMIT 1
+            """, (user_id,))
+            row = emp_cur.fetchone()
+
+        if row:
+            user_role = row[0].lower().strip()
+            employee_category_filter = extract_filter_from_category(row[1])
+
+    except Exception as e:
+        print("Failed to fetch role/category:", e)
+    finally:
+        if company_conn:
+            company_conn.close()
+
+
+    if is_restricted_role(user_role):
+        print("Restricted role detected → applying employee category restriction")
+
+        # Get selectedUser
+        base_conn = get_db_connection()
+        with base_conn.cursor() as cursor:
+            cursor.execute(
+                "SELECT selectedUser FROM table_chart_save WHERE id = %s",
+                (chart_id,)
+            )
+            selectedUser = cursor.fetchone()
+
+        selectedUser = selectedUser[0] if selectedUser else None
+        print("selectedUser:", selectedUser)
+
+        # Resolve correct DB connection
+        data_conn = get_db_connection_or_path(selectedUser, databaseName)
+
+        # Fetch dataframe
+        df = fetch_chart_data(data_conn, tableName)
+
+        # 🔐 Apply case-insensitive employee filter
+        chart_filters_clean = expand_filters_with_actual_values(
+            df,
+            chart_filters_clean,
+            employee_category_filter
+        )
+
+    else:
+        print("Non-restricted role → skipping employee category filter")
+
+
+    # Update filter options for chart
+    filter_options = chart_filters_clean
+
+    # try:
+    #     filter_options_str = data.get('filter_options').replace('null', 'null') #this line is not needed.
+    #     filter_options = json.loads(data.get('filter_options')) #use json.loads instead of ast.literal_eval.
+    #     # print("filter_options====================", filter_options)
+    # except (ValueError, SyntaxError, json.JSONDecodeError) as e:
+    #     print(f"Error parsing filter_options: {e}")
+    #     return jsonify({"message": "Invalid filter_options format", "error": str(e)}), 400
 
 
     # print("filter_options====================", filter_options)
-    databaseName = data.get('databaseName')
+    
     
     print("optimizeData====================", optimizeData)
 
@@ -7020,7 +7096,9 @@ def get_dashboard_data(dashboard_name, company_name,user_id):
 def dashboard_data(dashboard_name,company_name):
     user_id, dashboard_name = dashboard_name.split(",", 1)  # Split only once
     view_mode = request.args.get('view_mode') 
-    # user_id = request.args.get('user_id')
+    # employee_id = request.args.get('user_id')
+    employee_id = request.args.get('user_id')
+    employee_id = int(employee_id) if employee_id else None  # 🔴 FIX
     data = get_dashboard_data(dashboard_name,company_name,user_id)
     # print("chart datas------------------------------------------------------------------------------------------------------------------",data) 
     if data is not None:
@@ -7042,7 +7120,8 @@ def dashboard_data(dashboard_name,company_name):
         print("chart_areacolour====================",areacolour)   
         print("image_ids",image_ids)
         print("dashboard_Filter",dashboard_Filter)
-        chart_datas=get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,droppableBgColor,opacity,image_ids,chart_type,dashboard_Filter,view_mode)
+        print("employee_id",employee_id)
+        chart_datas=get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,droppableBgColor,opacity,image_ids,chart_type,dashboard_Filter,view_mode,company_name,employee_id=employee_id)
         # print("dashboarddata",data)
         # print("chart_datas====================",chart_datas)
         image_data_list = []
@@ -13661,36 +13740,93 @@ def save_dashboard_filters_dashboard():
 #         print("Error fetching dashboard filters:", e)
 #         return jsonify({"error": "Failed to fetch filters"}), 500
 
+# @app.route('/api/get-dashboard-filters', methods=['GET'])
+# @token_required
+# def get_dashboard_filters():
+#     dashboard_name = request.args.get("dashboard_name")
+#     company_name = request.args.get("company_name")
+#     user_id = request.args.get("user_id")
+
+#     if not (dashboard_name and company_name and user_id):
+#         return jsonify({"error": "Required fields missing"}), 400
+
+#     conn = get_db_connection()
+#     if conn is None:
+#         return jsonify({"error": "Database connection error"}), 500
+
+#     try:
+#         with conn.cursor() as cur:
+#             # Only fetch dashboard_filter, limit 1
+#             cur.execute("""
+#                 SELECT dashboard_filter
+#                 FROM table_dashboard
+#                 WHERE file_name = %s
+#                   AND company_name = %s
+#                   AND user_id = %s
+#                 LIMIT 1
+#             """, (dashboard_name, company_name, user_id))
+
+#             row = cur.fetchone()
+
+#         filters = row[0] if row and row[0] else None
+#         return jsonify({"filters": filters}), 200
+
+#     except Exception as e:
+#         print("Error fetching dashboard filters:", e)
+#         return jsonify({"error": "Failed to fetch filters"}), 500
+
 @app.route('/api/get-dashboard-filters', methods=['GET'])
 @token_required
 def get_dashboard_filters():
     dashboard_name = request.args.get("dashboard_name")
     company_name = request.args.get("company_name")
+    # company_db = request.args.get("company_db")  # make sure to pass the company DB name
     user_id = request.args.get("user_id")
 
-    if not (dashboard_name and company_name and user_id):
+    if not (dashboard_name and company_name and user_id ):
         return jsonify({"error": "Required fields missing"}), 400
 
-    conn = get_db_connection()
+    # Connect to the company-specific database
+    conn = get_company_db_connection(company_name)
     if conn is None:
         return jsonify({"error": "Database connection error"}), 500
 
     try:
         with conn.cursor() as cur:
-            # Only fetch dashboard_filter, limit 1
+            # 1️⃣ Get reporting_id of the user from employee_list in company DB
             cur.execute("""
-                SELECT dashboard_filter
-                FROM table_dashboard
-                WHERE file_name = %s
-                  AND company_name = %s
-                  AND user_id = %s
-                LIMIT 1
-            """, (dashboard_name, company_name, user_id))
-
+                SELECT employee_id
+                FROM employee_list
+                WHERE reporting_id = %s
+            """, (user_id,))
             row = cur.fetchone()
+            reporting_id = row[0] if row and row[0] else None
+
+            # 2️⃣ Fetch dashboard filter from table_dashboard (global table) using company_name
+            global_conn = get_db_connection()
+            if global_conn is None:
+                return jsonify({"error": "Global DB connection error"}), 500
+
+            with global_conn.cursor() as global_cur:
+                user_ids_to_check = [user_id]
+                if reporting_id:
+                    user_ids_to_check.append(reporting_id)
+
+                global_cur.execute(f"""
+                    SELECT dashboard_filter, user_id
+                    FROM table_dashboard
+                    WHERE file_name = %s
+                      AND company_name = %s
+                      AND user_id = ANY(%s)
+                    ORDER BY user_id = %s DESC  -- prioritize original user_id
+                    LIMIT 1
+                """, (dashboard_name, company_name, user_ids_to_check, user_id))
+
+                row = global_cur.fetchone()
 
         filters = row[0] if row and row[0] else None
-        return jsonify({"filters": filters}), 200
+        applied_user_id = row[1] if row else None
+        return jsonify({"filters": filters, "applied_user_id": applied_user_id}), 200
 
     except Exception as e:
         print("Error fetching dashboard filters:", e)
@@ -17541,8 +17677,11 @@ def fetch_schedules():
     company_name = request.args.get("company_name")
     user_id=request.args.get("user_id")
 
-    if not company_name:
-        return jsonify({"success": False, "error": "company_name required"}), 400
+    if not company_name or not user_id:
+        return jsonify({
+            "success": False,
+            "error": "company_name and user_id are required"
+        }), 400
 
     try:
         conn = get_company_db_connection(company_name)
@@ -17586,15 +17725,26 @@ def fetch_schedules():
         } for r in rows]
 
         return jsonify({"success": True, "data": schedules})
-
+    except errors.UndefinedTable:
+        # table does not exist
+        return jsonify({"success": True, "data": []})
     except Exception as e:
-        return jsonify({"success": False, "error": str(e)}), 500
+        print("Schedules error:", e)
+        return jsonify({"success": True, "data": []})
+
+    # except Exception as e:
+    #     return jsonify({"success": False, "error": str(e)}), 500
 
 @app.route("/api/transfer-logs", methods=["GET"])
 @token_required
 def fetch_transfer_logs():
     company_name = request.args.get("company_name")
     user_id = request.args.get("user_id")  # always provided
+    if not company_name or not user_id:
+        return jsonify({
+            "success": False,
+            "error": "company_name and user_id are required"
+        }), 400
 
     try:
         conn = get_company_db_connection(company_name)
@@ -17633,9 +17783,17 @@ def fetch_transfer_logs():
                 "created_at": r[11]
             } for r in logs]
         })
+    except errors.UndefinedTable:
+        # ✅ Table missing → NO ERROR
+        return jsonify({"success": True, "data": []})
 
     except Exception as e:
-        return jsonify({"success": False, "error": str(e)}), 500
+        print("Transfer logs error:", e)
+        return jsonify({"success": True, "data": []})
+
+    # except Exception as e:
+    #     return jsonify({"success": False, "error": str(e)}), 500
+
 # @app.route("/api/schedule/update", methods=["PUT"])
 # @token_required
 # def update_schedule():
