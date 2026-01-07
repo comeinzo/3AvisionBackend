@@ -220,81 +220,57 @@ def get_dashboard_names(user_id, database_name):
     return dashboard_names
 
     
-def fetch_project_names(user_id, database_name):
-    conn_company = get_company_db_connection(database_name)
-    all_employee_ids = []
-
-    if conn_company:
-        try:
-            with conn_company.cursor() as cursor:
-                cursor.execute("""
-                    SELECT column_name FROM information_schema.columns
-                    WHERE table_name='employee_list' AND column_name='reporting_id'
-                """)
-                column_exists = cursor.fetchone()
-
-                if column_exists:
-                    cursor.execute("""
-                        WITH RECURSIVE subordinates AS (
-                            SELECT employee_id, reporting_id
-                            FROM employee_list
-                            WHERE reporting_id = %s
-
-                            UNION
-
-                            SELECT e.employee_id, e.reporting_id
-                            FROM employee_list e
-                            INNER JOIN subordinates s ON e.reporting_id = s.employee_id
-                        )
-                        SELECT employee_id FROM subordinates
-                        UNION
-                        SELECT %s;
-                    """, (user_id, user_id))
-                    reporting_employees = [row[0] for row in cursor.fetchall()]
-                    all_employee_ids = list(map(int, reporting_employees)) + [int(user_id)]
-                else:
-                    all_employee_ids = [int(user_id)] # If no reporting_id, just include user_id
-        except psycopg2.Error as e:
-            print(f"Error fetching reporting employees for project names: {e}")
-        finally:
-            conn_company.close()
-
-    conn_datasource = get_db_connection(DB_NAME)
-    project_names = []
-
-    if conn_datasource and all_employee_ids:
-        try:
-            with conn_datasource.cursor() as cursor:
-                placeholders = ', '.join(['%s'] * len(all_employee_ids))
-                query = f"""
-                    SELECT DISTINCT project_name FROM table_dashboard
-                    WHERE user_id IN ({placeholders}) AND company_name = %s;
-                """
-                cursor.execute(query, tuple(map(str, all_employee_ids)) + (database_name,))
-                project_names = [row[0] for row in cursor.fetchall()]
-        except psycopg2.Error as e:
-            print(f"Error fetching project names: {e}")
-        finally:
-            conn_datasource.close()
-
-    return project_names
-
-
 # def fetch_project_names(user_id, database_name):
+#     conn_company = get_company_db_connection(database_name)
+#     all_employee_ids = []
+
+#     if conn_company:
+#         try:
+#             with conn_company.cursor() as cursor:
+#                 cursor.execute("""
+#                     SELECT column_name FROM information_schema.columns
+#                     WHERE table_name='employee_list' AND column_name='reporting_id'
+#                 """)
+#                 column_exists = cursor.fetchone()
+
+#                 if column_exists:
+#                     cursor.execute("""
+#                         WITH RECURSIVE subordinates AS (
+#                             SELECT employee_id, reporting_id
+#                             FROM employee_list
+#                             WHERE reporting_id = %s
+
+#                             UNION
+
+#                             SELECT e.employee_id, e.reporting_id
+#                             FROM employee_list e
+#                             INNER JOIN subordinates s ON e.reporting_id = s.employee_id
+#                         )
+#                         SELECT employee_id FROM subordinates
+#                         UNION
+#                         SELECT %s;
+#                     """, (user_id, user_id))
+#                     reporting_employees = [row[0] for row in cursor.fetchall()]
+#                     all_employee_ids = list(map(int, reporting_employees)) + [int(user_id)]
+#                 else:
+#                     all_employee_ids = [int(user_id)] # If no reporting_id, just include user_id
+#         except psycopg2.Error as e:
+#             print(f"Error fetching reporting employees for project names: {e}")
+#         finally:
+#             conn_company.close()
+
 #     conn_datasource = get_db_connection(DB_NAME)
 #     project_names = []
 
-#     if conn_datasource:
+#     if conn_datasource and all_employee_ids:
 #         try:
 #             with conn_datasource.cursor() as cursor:
-#                 # Simply query for the specific user_id and company_name
-#                 query = """
-#                     SELECT DISTINCT project_name 
-#                     FROM table_dashboard
-#                     WHERE user_id = %s AND company_name = %s;
+#                 placeholders = ', '.join(['%s'] * len(all_employee_ids))
+#                 query = f"""
+#                     SELECT DISTINCT project_name FROM table_dashboard
+#                     WHERE user_id IN ({placeholders}) AND company_name = %s;
 #                 """
-#                 # passed user_id and database_name (which maps to company_name)
-#                 cursor.execute(query, (str(user_id), database_name))
+#                 cursor.execute(query, tuple(map(str, all_employee_ids)) + (database_name,))
 #                 project_names = [row[0] for row in cursor.fetchall()]
 #         except psycopg2.Error as e:
 #             print(f"Error fetching project names: {e}")
@@ -302,6 +278,30 @@ def fetch_project_names(user_id, database_name):
 #             conn_datasource.close()
 
 #     return project_names
+
+
+def fetch_project_names(user_id, database_name):
+    conn_datasource = get_db_connection(DB_NAME)
+    project_names = []
+
+    if conn_datasource:
+        try:
+            with conn_datasource.cursor() as cursor:
+                # Simply query for the specific user_id and company_name
+                query = """
+                    SELECT DISTINCT project_name 
+                    FROM table_dashboard
+                    WHERE user_id = %s AND company_name = %s;
+                """
+                # passed user_id and database_name (which maps to company_name)
+                cursor.execute(query, (str(user_id), database_name))
+                project_names = [row[0] for row in cursor.fetchall()]
+        except psycopg2.Error as e:
+            print(f"Error fetching project names: {e}")
+        finally:
+            conn_datasource.close()
+
+    return project_names
 
 
 
@@ -986,8 +986,11 @@ def start_dynamic_listener(db_name):
             active_listeners[db_name] = t
 
 
-def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,droppableBgColor,opacity,image_ids,chart_type,dashboard_Filter,view_mode):
+def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,droppableBgColor,opacity,image_ids,chart_type,dashboard_Filter,view_mode, temp_filters=None):
     conn = create_connection()  # Initial connection to your main database
+    
+    # Backup original dashboard_Filter to prevent loop contamination
+    original_dashboard_filter_arg = dashboard_Filter
     print("Chart areacolour:", areacolour)
     print("Chart opacity received:", opacity)
     print("positions",positions)
@@ -1118,6 +1121,9 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
             chart_data_list = []
             print("chart_data_list",chart_data_list)
             for chart_id in sorted_chart_ids:
+                # Reset dashboard_Filter for this iteration to avoid contamination
+                dashboard_Filter = original_dashboard_filter_arg
+                
                 cursor = conn.cursor()
                 cursor.execute("SELECT id, database_name, selected_table, x_axis, y_axis, aggregate, chart_type, filter_options, chart_heading, chart_color, selectedUser,xfontsize,fontstyle,categorycolor,valuecolor,yfontsize,headingColor,ClickedTool,Bgcolour,OptimizationData,calculationdata,selectedFrequency,chart_name,user_id,xAxisTitle, yAxisTitle  FROM table_chart_save WHERE id = %s", (chart_id,))
             #                 cursor.execute("""
@@ -1138,6 +1144,16 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                     # Extract chart data
                     database_name = chart_data[1]
                     table_name = chart_data[2]
+
+                    # --- TEMP FILTER OVERRIDE ---
+                    if temp_filters:
+                        # Construct a dynamic filter object for this table
+                        dashboard_Filter = {
+                            'table_name': table_name,
+                            'filters': temp_filters
+                        }
+                        print(f"🔄 [TempFilter] Applying override for {table_name}: {dashboard_Filter}")
+                    # ----------------------------
 
                     # --- ✅ REAL-TIME SETUP (DO NOT REMOVE) ---
                     # This starts the background thread that listens for DB changes.
