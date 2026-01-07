@@ -39,7 +39,8 @@ from flask import Flask, jsonify, request,url_for, session, send_file, current_a
 from flask_cors import CORS
 from flask_mail import Mail, Message
 from flask_session import Session  # Flask-Session for server-side session handling
-from flask_socketio import SocketIO, emit
+from flask_socketio import SocketIO, emit,join_room
+from dashboard_save.extensions import socketio
 from flask_apscheduler import APScheduler
 from psycopg2 import sql
 from sendgrid import SendGridAPIClient
@@ -189,7 +190,8 @@ app.config['SESSION_TYPE'] = 'filesystem'  # Store sessions on the server
 CORS(app, resources={r"/*": {"origins": "*"}})
 
 # Enable WebSockets
-socketio = SocketIO(app, cors_allowed_origins="*")
+# Enable WebSockets
+socketio.init_app(app, cors_allowed_origins="*")
 
 # ==============================
 # Database & Upload Settings
@@ -7347,6 +7349,34 @@ def dashboard_data(dashboard_name,company_name):
      
 
 
+# # --- Socket Event: Subscribe ---
+# @socketio.on('subscribe_to_table')
+# def handle_subscription(data):
+#     db_name = data.get('db_name')
+#     table_name = data.get('table_name')
+    
+#     if db_name and table_name:
+#         # Match the room ID format used in the listener
+#         room_id = f"{db_name}_{table_name}"
+#         join_room(room_id)
+#         print(f"🔌 Client joined room: {room_id}")
+
+
+@socketio.on('join')
+def on_join(data):
+    """
+    Handles the 'join' event sent from the Frontend.
+    The frontend sends: { 'room': 'dashboard_123_MyDashboard' }
+    """
+    room = data.get('room')
+    if room:
+        join_room(room)
+        print(f"✅ Client successfully joined room: {room}")
+    else:
+        print("⚠️ Client attempted to join without a room name.")
+
+        
+
 @app.route('/saved_dashboard_total_rows', methods=['GET'])
 @token_required
 def saved_dashboard_names():
@@ -7361,7 +7391,7 @@ def saved_dashboard_names():
 
     names = get_dashboard_names(user_id,database_name,project)
     
-    print("names====================", names)   
+    print("names===================+=", names)   
     if names is not None:
         return jsonify({'chart_names': names})
     else:
@@ -7554,7 +7584,7 @@ def get_all_users():
 
         # Fetch users for the specified company with pagination
         cursor.execute("""
-            SELECT employee_name, username, role_id, category,reporting_id 
+            SELECT  employee_name, username, role_id, category,reporting_id ,employee_id
             FROM employee_list
             LIMIT %s OFFSET %s;
         """, (limit, offset))
@@ -7572,7 +7602,8 @@ def get_all_users():
                 'username': user[1],
                 'role_id': user[2],
                 'category': user[3],
-                'reporting_id':user[4]
+                'reporting_id':user[4],
+                'employee_id':user[5],
             }
             for user in users
         ]
