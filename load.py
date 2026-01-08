@@ -416,8 +416,10 @@ def get_table_data_with_cache(company_name, table_name, date_column=None, start_
         #     if invalid_columns:
         #         raise ValueError(f'Invalid columns: {invalid_columns}. Available columns: {all_columns}')
         all_columns = get_table_columns(table_name, company_name)
+        print("all_columns",all_columns)
 
         resolved_columns = []
+        print("resolved_columns",resolved_columns)
 
         if selected_columns:
             for col in selected_columns:
@@ -429,12 +431,25 @@ def get_table_data_with_cache(company_name, table_name, date_column=None, start_
         else:
             # No selected columns → use all columns, but prefer masked
             used = set()
+            # for col in all_columns:
+            #     if col.endswith("_masked"):
+            #         used.add(col.replace("_masked", ""))
+            #         resolved_columns.append(col)
+            #     elif f"{col}_masked" not in all_columns:
+            #         resolved_columns.append(col)
             for col in all_columns:
-                if col.endswith("_masked"):
-                    used.add(col.replace("_masked", ""))
-                    resolved_columns.append(col)
-                elif f"{col}_masked" not in all_columns:
-                    resolved_columns.append(col)
+                # Check if column is masked (single or double underscore)
+                if col.endswith("_masked") or col.endswith("__masked"):
+                    # Determine base column name by removing masked suffix
+                    base_col = col.replace("_masked", "").replace("__", "")
+                    if base_col not in used:
+                        resolved_columns.append(col)
+                        used.add(base_col)
+                else:
+                    # Only add original column if no masked version exists
+                    if f"{col}_masked" not in all_columns and f"{col}__masked" not in all_columns:
+                        resolved_columns.append(col)
+                        used.add(col)
         if resolved_columns:
             # Use selected columns
             columns_str = ', '.join([f'"{col}"' for col in resolved_columns])

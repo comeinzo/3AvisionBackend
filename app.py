@@ -11,6 +11,10 @@ import os
 import re
 import threading
 import uuid
+from datetime import datetime, timezone
+from datetime import timezone, timedelta
+
+IST = timezone(timedelta(hours=5, minutes=30))
 
 import whisper
 import spacy
@@ -68,13 +72,15 @@ from audio import allowed_file, transcribe_audio_with_timestamps, save_file_to_d
 from config import ALLOWED_EXTENSIONS, DB_NAME, USER_NAME, PASSWORD, HOST, PORT
 from csv_upload import upload_csv_to_postgresql
 from dashboard_design import get_database_table_names,get_db_connection_or_path
+
+from security import encrypt_config,decrypt_config
 from dashboard_save.dashboard_save import (
     create_connection,
     fetch_project_names,
     get_dashboard_names,
     get_dashboard_view_chart_data,
     get_Edit_dashboard_names,
-    insert_combined_chart_details
+    insert_combined_chart_details,expand_filters_with_actual_values,extract_filter_from_category,is_restricted_role
 )
 from excel_upload import upload_excel_to_postgresql
 from histogram_utils import generate_histogram_details, handle_column_data_types
@@ -87,7 +93,7 @@ from signup.signup import (
     fetch_company_login_data,
     fetch_login_data,
     fetch_usersdata,
-    insert_user_data,
+    insert_user_data
 )
 from TransferData import fetch_data_with_columns, fetch_table_details, insert_dataframe_with_upsert
 from upload import is_table_used_in_charts
@@ -225,8 +231,8 @@ HOTMAIL_PASS = "Gaya@8sep"
 # ==============================
 # Scheduler Setup
 # ==============================
-scheduler = BackgroundScheduler()
-scheduler.start()
+# scheduler = BackgroundScheduler()
+# scheduler.start()
 
 
 
@@ -2125,7 +2131,21 @@ def fetch_data_for_ts_decomposition(table_name, x_axis_columns, filter_options, 
             # to avoid code duplication, but for clarity, it's repeated here.
             # ... (the entire calculation logic for if, switch, iferror, calculate, etc.) ...
             if calc_formula.strip().lower().startswith("if"):
-                match = re.match(r"if\s*\((.+?)\)\s*then\s*'?(.*?)'?\s*else\s*'?(.*?)'?$", calc_formula.strip(), re.IGNORECASE)
+                match = (
+                    re.match(
+                        r"if\s*\(\s*(.+?)\s*\)\s*then\s*'?(.*?)'?\s*else\s*'?(.*?)'?$",
+                        calc_formula.strip(),
+                        re.IGNORECASE
+                    )
+                    or
+                    re.match(
+                        r"if\s*\(\s*(.+?)\s*,\s*'?(.*?)'?\s*,\s*'?(.*?)'?\s*\)$",
+                        calc_formula.strip(),
+                        re.IGNORECASE
+                    )
+                )
+
+                # match = re.match(r"if\s*\((.+?)\)\s*then\s*'?(.*?)'?\s*else\s*'?(.*?)'?$", calc_formula.strip(), re.IGNORECASE)
                 if not match:
                     raise ValueError("Invalid if-then-else format in calculation.")
 
@@ -3102,7 +3122,7 @@ def get_bar_chart_route():
         try:
 
             print("calculationData",calculationData)
-            data = fetch_data_for_duel(table_name, x_axis_columns, filter_options, y_axis_columns, agg_value, db_nameeee, selectedUser,calculationData= data.get('calculationData'),dateGranularity=dateGranularity)
+            data = fetch_data_for_duel(table_name, x_axis_columns, filter_options, y_axis_columns, agg_value, db_nameeee, selectedUser,calculationData= calculationData,dateGranularity=dateGranularity)
             
             # Debug: Print the structure of fetched data
             print(f"🔍 Dual Y-axis Chart - Original data length: {len(data)}")
@@ -5914,12 +5934,62 @@ def apply_calculation_to_df(df, calculation_data_list, x_axis=None, y_axis=None)
             formula_lower = calc_formula.strip().lower()
 
             if formula_lower.startswith("if"):
-                match = re.match(r"if\s*\((.+?)\)\s*then\s*'?(.*?)'?\s*else\s*'?(.*?)'?$", calc_formula.strip(), re.IGNORECASE)
+                match = (
+                    re.match(
+                        r"if\s*\(\s*(.+?)\s*\)\s*then\s*'?(.*?)'?\s*else\s*'?(.*?)'?$",
+                        calc_formula.strip(),
+                        re.IGNORECASE
+                    )
+                    or
+                    re.match(
+                        r"if\s*\(\s*(.+?)\s*,\s*'?(.*?)'?\s*,\s*'?(.*?)'?\s*\)$",
+                        calc_formula.strip(),
+                        re.IGNORECASE
+                    )
+                )
+
+                # match = re.match(r"if\s*\((.+?)\)\s*then\s*'?(.*?)'?\s*else\s*'?(.*?)'?$", calc_formula.strip(), re.IGNORECASE)
                 if not match:
                     raise ValueError("Invalid IF format")
                 condition_expr, then_val, else_val = match.groups()
                 condition_expr_python = re.sub(r'\[(.*?)\]', replace_column, condition_expr)
                 df[new_col_name] = np.where(eval(condition_expr_python), then_val.strip("'\""), else_val.strip("'\""))
+            elif calc_formula.lower().startswith("round"):
+                # Match formula: round(<expression>, <decimals>)
+                match = re.match(r'round\s*\(\s*(.+?)\s*,\s*(\d+)\s*\)', calc_formula, re.IGNORECASE)
+                if not match:
+                    raise ValueError(
+                        "Invalid ROUND format. Use round([col], decimals) or round([col1]/[col2], decimals)"
+                    )
+
+                expr, decimals = match.groups()
+                decimals = int(decimals)
+
+                # Replace [column] with numeric dataframe references
+                def replace_column(match):
+                    col_name = match.group(1)
+                    if col_name not in df.columns:
+                        raise ValueError(f"Missing column: {col_name}")
+                    # Convert to numeric
+                    df[col_name] = pd.to_numeric(df[col_name], errors='coerce')
+                    return f"df['{col_name}']"
+
+                expr_python = re.sub(r'\[([^\]]+)\]', replace_column, expr)
+
+                # Handle division by zero safely
+                expr_python = re.sub(
+                    r"df\['([^']+)'\]\s*/\s*df\['([^']+)'\]",
+                    r"np.divide(df['\1'], df['\2'].replace(0, np.nan))",
+                    expr_python
+                )
+
+                # Evaluate safely and round
+                try:
+                    df[new_col_name] = np.round(eval(expr_python), decimals)
+                except Exception as e:
+                    print(f"Error evaluating ROUND formula: {e}")
+                    df[new_col_name] = np.nan
+
 
             elif formula_lower.startswith("switch"):
                 switch_match = re.match(r"switch\s*\(\s*\[([^\]]+)\](.*?)\)", calc_formula, re.IGNORECASE)
@@ -6045,8 +6115,59 @@ def apply_calculation_to_df(df, calculation_data_list, x_axis=None, y_axis=None)
                 col = re.match(r"trim\s*\(\s*\[([^\]]+)\]\)", calc_formula, re.IGNORECASE).group(1)
                 df[new_col_name] = df[col].astype(str).str.strip()
 
+            elif calc_formula.lower().startswith(("sum", "avg", "min", "max")):
+                match = re.match(
+                    r'(sum|avg|min|max)\s*\(\s*\[([^\]]+)\]\s*\)',
+                    calc_formula,
+                    re.IGNORECASE
+                )
+                if not match:
+                    raise ValueError("Invalid aggregation format.")
+
+                agg_func, col = match.groups()
+                agg_func = agg_func.lower()
+
+                # DO NOT create calculated column
+                # Just mark aggregation intent
+                aggregation = agg_func
+                y_base_column = col
+
+                print(f"Detected aggregation: {aggregation}({col})")
+
+                # IMPORTANT: skip dataframe eval
+                skip_calculated_column = True
+
             else:
+                # calc_formula_python = re.sub(r'\[(.*?)\]', replace_column, calc_formula)
+                # print("Evaluating math formula:", calc_formula_python)
+                # Replace column references [col] → temp_df['col']
                 calc_formula_python = re.sub(r'\[(.*?)\]', replace_column, calc_formula)
+
+                # Handle COUNT
+                calc_formula_python = re.sub(
+                    r'count\s*\(\s*(temp_df\[.*?\])\s*\)',
+                    r'\1.count()',
+                    calc_formula_python,
+                    flags=re.IGNORECASE
+                )
+
+                # Handle SUM
+                calc_formula_python = re.sub(
+                    r'sum\s*\(\s*(temp_df\[.*?\])\s*\)',
+                    r'\1.sum()',
+                    calc_formula_python,
+                    flags=re.IGNORECASE
+                )
+
+                # Handle AVG
+                calc_formula_python = re.sub(
+                    r'avg\s*\(\s*(temp_df\[.*?\])\s*\)',
+                    r'\1.mean()',
+                    calc_formula_python,
+                    flags=re.IGNORECASE
+                )
+
+                print("Evaluating math formula:", calc_formula_python)
                 df[new_col_name] = eval(calc_formula_python)
 
             print(f"✅ New column '{new_col_name}' created.")
@@ -6056,6 +6177,8 @@ def apply_calculation_to_df(df, calculation_data_list, x_axis=None, y_axis=None)
                 y_axis = [new_col_name if col == replace_col_name else col for col in y_axis]
             if x_axis:
                 x_axis = [new_col_name if col == replace_col_name else col for col in x_axis]
+            if skip_calculated_column:
+                y_axis = [y_base_column if col == new_col_name else col for col in y_axis]
 
         except Exception as e:
             print(f"❌ Error applying calculation for column '{calculation_data.get('columnName')}': {e}")
@@ -6121,17 +6244,93 @@ def receive_chart_details():
     optimizeData= data.get('optimizeData')
     user_id=data.get('user_id')
     dateGranularity = data.get("selectedFrequency", {})
+    databaseName = data.get('databaseName')
+    # ------------------------------------
+    # Parse chart filter options FIRST
+    # ------------------------------------
     try:
-        filter_options_str = data.get('filter_options').replace('null', 'null') #this line is not needed.
-        filter_options = json.loads(data.get('filter_options')) #use json.loads instead of ast.literal_eval.
-        # print("filter_options====================", filter_options)
-    except (ValueError, SyntaxError, json.JSONDecodeError) as e:
-        print(f"Error parsing filter_options: {e}")
-        return jsonify({"message": "Invalid filter_options format", "error": str(e)}), 400
+        raw_filter_options = data.get('filter_options').replace('null', 'null') 
+        if raw_filter_options:
+            chart_filters_clean = json.loads(raw_filter_options)
+        else:
+            chart_filters_clean = {}
+    except Exception as e:
+        print("Invalid filter_options:", e)
+        chart_filters_clean = {}
+
+    # Fetch role and employee category filter
+    user_role = None
+    employee_category_filter = {}
+
+    try:
+        company_conn = get_company_db_connection(databaseName)
+        with company_conn.cursor() as emp_cur:
+            emp_cur.execute("""
+                SELECT r.role_name, e.category
+                FROM employee_list e
+                JOIN role r ON e.role_id = r.role_id::text
+                WHERE e.employee_id = %s
+                LIMIT 1
+            """, (user_id,))
+            row = emp_cur.fetchone()
+
+        if row:
+            user_role = row[0].lower().strip()
+            employee_category_filter = extract_filter_from_category(row[1])
+
+    except Exception as e:
+        print("Failed to fetch role/category:", e)
+    finally:
+        if company_conn:
+            company_conn.close()
+
+
+    if is_restricted_role(user_role):
+        print("Restricted role detected → applying employee category restriction")
+
+        # Get selectedUser
+        base_conn = get_db_connection()
+        with base_conn.cursor() as cursor:
+            cursor.execute(
+                "SELECT selectedUser FROM table_chart_save WHERE id = %s",
+                (chart_id,)
+            )
+            selectedUser = cursor.fetchone()
+
+        selectedUser = selectedUser[0] if selectedUser else None
+        print("selectedUser:", selectedUser)
+
+        # Resolve correct DB connection
+        data_conn = get_db_connection_or_path(selectedUser, databaseName)
+
+        # Fetch dataframe
+        df = fetch_chart_data(data_conn, tableName)
+
+        # 🔐 Apply case-insensitive employee filter
+        chart_filters_clean = expand_filters_with_actual_values(
+            df,
+            chart_filters_clean,
+            employee_category_filter
+        )
+
+    else:
+        print("Non-restricted role → skipping employee category filter")
+
+
+    # Update filter options for chart
+    filter_options = chart_filters_clean
+
+    # try:
+    #     filter_options_str = data.get('filter_options').replace('null', 'null') #this line is not needed.
+    #     filter_options = json.loads(data.get('filter_options')) #use json.loads instead of ast.literal_eval.
+    #     # print("filter_options====================", filter_options)
+    # except (ValueError, SyntaxError, json.JSONDecodeError) as e:
+    #     print(f"Error parsing filter_options: {e}")
+    #     return jsonify({"message": "Invalid filter_options format", "error": str(e)}), 400
 
 
     # print("filter_options====================", filter_options)
-    databaseName = data.get('databaseName')
+    
     
     print("optimizeData====================", optimizeData)
 
@@ -7242,34 +7441,10 @@ def get_dashboard_data(dashboard_name, company_name,user_id):
 @token_required
 def dashboard_data(dashboard_name,company_name):
     user_id, dashboard_name = dashboard_name.split(",", 1)  # Split only once
-    view_mode = request.args.get('view_mode')
-    
-    # --- NEW: Parse Temporary Filters ---
-    temp_filters_param = request.args.get('filters')
-    active_temp_filters = []
-    
-    if temp_filters_param:
-        try:
-            print(f"📥 Received Temporary Filters Param: {temp_filters_param}")
-            # The frontend sends a JSON string representing a list of strings/dicts
-            raw_list = json.loads(temp_filters_param)
-            
-            # Normalize to list of dicts
-            for item in raw_list:
-                if isinstance(item, str):
-                    try:
-                        active_temp_filters.append(json.loads(item))
-                    except:
-                        pass # Ignore invalid JSON strings
-                elif isinstance(item, dict):
-                    active_temp_filters.append(item)
-            
-            print(f"✅ Active Override Filters: {active_temp_filters}")
-        except Exception as e:
-            print(f"⚠️ Error parsing temporary filters: {e}")
-            active_temp_filters = []
-    # ------------------------------------
-
+    view_mode = request.args.get('view_mode') 
+    # employee_id = request.args.get('user_id')
+    employee_id = request.args.get('user_id')
+    employee_id = int(employee_id) if employee_id else None  # 🔴 FIX
     data = get_dashboard_data(dashboard_name,company_name,user_id)
     if data is not None:
         chart_ids = data[4]
@@ -7286,16 +7461,14 @@ def dashboard_data(dashboard_name,company_name):
         wallpaper_id=data[23]
         dashboard_Filter=data[26]
         
-
-        # Pass 'active_temp_filters' to the data handling function
-        # We pass it as a named argument or append it - checks definition
-        chart_datas=get_dashboard_view_chart_data(
-            chart_ids, positions, filter_options, areacolour, 
-            droppableBgColor, opacity, image_ids, chart_type, 
-            dashboard_Filter, view_mode, 
-            temp_filters=active_temp_filters # <--- INJECTED
-        )
-
+        print("chart_ids====================",chart_ids)    
+        print("chart_areacolour====================",areacolour)   
+        print("image_ids",image_ids)
+        print("dashboard_Filter",dashboard_Filter)
+        print("employee_id",employee_id)
+        chart_datas=get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,droppableBgColor,opacity,image_ids,chart_type,dashboard_Filter,view_mode,company_name,employee_id=employee_id)
+        # print("dashboarddata",data)
+        # print("chart_datas====================",chart_datas)
         image_data_list = []
         conn = create_connection() 
         if image_ids:
@@ -7531,6 +7704,60 @@ def get_roles():
     except Exception as e:
         print(f"Error fetching roles: {e}")
         return jsonify({'message': 'Failed to fetch roles'}), 500
+@app.route('/api/roles_edit', methods=['GET'])
+@token_required
+def get_roles_with_permissions():
+    company_name = request.args.get('companyName')
+    if not company_name:
+        return jsonify({'message': 'Missing companyName'}), 400
+
+    try:
+        conn = get_company_db_connection(company_name)
+        cur = conn.cursor()
+
+        # Join role and role_permission to fetch permissions
+        cur.execute("""
+            SELECT r.role_id, r.role_name,
+                   rp.can_datasource,
+                   rp.can_view,
+                   rp.can_edit,
+                   rp.can_design,
+                   rp.can_load,
+                   rp.can_update,
+                   rp.can_edit_profile
+            FROM role r
+            JOIN role_permission rp
+              ON r.permissions = rp.role_permission_code
+            ORDER BY r.role_name
+        """)
+
+        roles = cur.fetchall()
+        cur.close()
+        conn.close()
+
+        # Format result
+        role_list = []
+        for role in roles:
+            role_list.append({
+                'id': role[0],
+                'name': role[1],
+                'permissions': {
+                    'can_datasource': role[2],
+                    'can_view': role[3],
+                    'can_edit': role[4],
+                    'can_design': role[5],
+                    'can_load': role[6],
+                    'can_update': role[7],
+                    'can_edit_profile': role[8],
+                }
+            })
+
+        return jsonify(role_list)
+
+    except Exception as e:
+        print(f"Error fetching roles: {e}")
+        return jsonify({'message': 'Failed to fetch roles'}), 500
+
 
 @app.route('/fetchglobeldataframe', methods=['GET'])
 @token_required
@@ -8403,26 +8630,40 @@ def get_date_columns():
         cursor = connection.cursor()
 
         # Query to get date/datetime/timestamp columns from the table
+        # cursor.execute("""
+        #     SELECT column_name 
+        #     FROM information_schema.columns 
+        #     WHERE table_name = %s 
+        #     AND (data_type IN ('date', 'timestamp', 'datetime', 'timestamp without time zone', 'timestamp with time zone')
+        #          OR data_type LIKE '%%time%%'
+        #          OR data_type LIKE '%%date%%')
+        #     ORDER BY column_name
+        # """, (table_name,))
         cursor.execute("""
             SELECT column_name 
             FROM information_schema.columns 
-            WHERE table_name = %s 
+            WHERE table_name = %s
+            AND table_schema = 'public'
             AND (data_type IN ('date', 'timestamp', 'datetime', 'timestamp without time zone', 'timestamp with time zone')
-                 OR data_type LIKE '%%time%%'
-                 OR data_type LIKE '%%date%%')
+                OR data_type LIKE '%%time%%'
+                OR data_type LIKE '%%date%%')
             ORDER BY column_name
         """, (table_name,))
+
         
         # columns = [row[0] for row in cursor.fetchall()]
         all_columns = [row[0] for row in cursor.fetchall()]
+        print("all_columns",all_columns)
+        
 
         # 🔐 Identify masked columns
         masked_columns = {col for col in all_columns if col.endswith('__masked')}
-
+        print("masked_columns",masked_columns)
         # 🔐 Identify originals that have masked versions
         originals_with_mask = {
             col.replace('__masked', '') for col in masked_columns
         }
+        print("originals_with_mask",originals_with_mask)
 
         # ✅ Final list:
         # - include masked columns
@@ -8431,6 +8672,7 @@ def get_date_columns():
             col for col in all_columns
             if col.endswith('__masked') or col not in originals_with_mask
         ]
+        print("columns",columns)
 
         # Close the connection
         cursor.close()
@@ -10046,6 +10288,69 @@ def add_role():
     except Exception as e:
         logging.error(f"Error adding role: {str(e)}")
         return jsonify({"error": str(e)}), 500
+@app.route('/updaterolepermissions', methods=['POST'])
+@token_required
+def update_role_permissions():
+    try:
+        data = request.json
+        print("data",data)
+        role_name = data.get('role_name')
+        permissions = data.get('permissions', {})
+        company_name = data.get('company_name')
+
+        if not role_name or not company_name:
+            return jsonify({"error": "Missing role_name or company_name"}), 400
+
+        # Connect to company database
+        conn = get_company_db_connection(company_name)
+        cursor = conn.cursor()
+
+        # 1️⃣ Get the existing role_permission_code for this role
+        cursor.execute("""
+            SELECT permissions 
+            FROM role 
+            WHERE role_name = %s
+        """, (role_name,))
+        result = cursor.fetchone()
+
+        if not result:
+            return jsonify({"error": "Role not found"}), 404
+
+        role_permission_code = result[0]
+        print("role_permission_code",role_permission_code)
+
+        # 2️⃣ Update permissions in role_permission table
+        cursor.execute("""
+            UPDATE role_permission SET
+                can_datasource = %s,
+                can_view = %s,
+                can_edit = %s,
+                can_design = %s,
+                can_load = %s,
+                can_update = %s,
+                can_edit_profile = %s
+            WHERE role_permission_code = %s
+        """, (
+            permissions.get('can_datasource', False),
+            permissions.get('can_view', False),
+            permissions.get('can_edit', False),
+            permissions.get('can_design', False),
+            permissions.get('can_load', False),
+            permissions.get('can_update', False),
+            permissions.get('can_edit_profile', False),
+            role_permission_code
+        ))
+
+        conn.commit()
+        cursor.close()
+        conn.close()
+
+        return jsonify({"message": f"Permissions for role '{role_name}' updated successfully!"}), 200
+
+    except Exception as e:
+        logging.error(f"Error updating role permissions: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+
 
 
 @app.route('/api/update-chart-position', methods=['POST'])
@@ -10560,7 +10865,7 @@ def create_log_table_if_not_exists(destination_config):
                 source_table VARCHAR,
                 destination_table VARCHAR,
                 schedule_type VARCHAR,
-                run_time TIMESTAMP,
+                run_time TIMESTAMPTZ,
                 status VARCHAR,
                 message TEXT,
                 record_count INTEGER,
@@ -10569,10 +10874,12 @@ def create_log_table_if_not_exists(destination_config):
                 user_id INTEGER REFERENCES employee_list(employee_id),
                 job_id VARCHAR,
                 time_taken_seconds FLOAT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                created_at TIMESTAMPTZ DEFAULT NOW(),
                 inserted_count INTEGER DEFAULT 0,
                 updated_count INTEGER DEFAULT 0,
-                skipped_count INTEGER DEFAULT 0
+                skipped_count INTEGER DEFAULT 0,
+                source_config TEXT,
+                destination_config TEXT,selected_columns JSONB
             );
         """)
         conn.commit()
@@ -10587,26 +10894,31 @@ def create_log_table_if_not_exists(destination_config):
 def log_data_transfer(source_table, dest_table, schedule_type, run_time,
                       status, message, record_count, data_size_mb, email, job_id,
                       time_taken_seconds, destination_config, user_id=None,
-                      inserted_count=0, updated_count=0, skipped_count=0):
+                      inserted_count=0, updated_count=0, skipped_count=0,source_config=None, selected_columns=None):
     try:
         dbname = destination_config.get("dbName")
         conn = get_company_db_connection(dbname)
         cur = conn.cursor()
+        actual_run_time = datetime.now(timezone.utc)  # ✅ FIX
+        encrypted_source_config = encrypt_config(source_config)
+        encrypted_destination_config = encrypt_config(destination_config)
+
         insert_query = """
             INSERT INTO data_transfer_logs (
                 company_name, source_table, destination_table, schedule_type, run_time,
                 status, message, record_count, data_size_mb,
                 user_email, user_id, job_id, time_taken_seconds,
-                inserted_count, updated_count, skipped_count
+                inserted_count, updated_count, skipped_count,source_config,destination_config,selected_columns
             )
-            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
             RETURNING id;
         """
         values = (
-            dbname, source_table, dest_table, schedule_type, run_time,
+            dbname, source_table, dest_table, schedule_type, actual_run_time,
             status, message, record_count, data_size_mb,
             email, user_id, job_id, time_taken_seconds,
-            inserted_count, updated_count, skipped_count
+            inserted_count, updated_count, skipped_count, encrypted_source_config, encrypted_destination_config,   # ✅ correct
+            json.dumps(selected_columns)   
         )
         # cur.execute(insert_query, tuple(values))
         cur.execute(insert_query, tuple(to_native(v) for v in values))
@@ -10639,17 +10951,18 @@ def update_last_transfer_status(source_table, dest_table, status, message, desti
                 company_name VARCHAR NOT NULL,
                 source_table VARCHAR NOT NULL,
                 destination_table VARCHAR NOT NULL,
-                last_transfer_time TIMESTAMP,
+                last_transfer_time TIMESTAMPTZ,
                 status VARCHAR,
                 message TEXT,
                 log_id INT REFERENCES data_transfer_logs(id) ON DELETE CASCADE,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMPTZ DEFAULT NOW(),
                 UNIQUE (company_name, source_table, destination_table)
             );
         """)
         conn.commit()
 
         company_name = dbname
+        actual_run_time = datetime.now(timezone.utc) 
         upsert_query = """
             INSERT INTO last_transfer_status (
                 company_name, source_table, destination_table, last_transfer_time, status, message, log_id
@@ -10657,11 +10970,11 @@ def update_last_transfer_status(source_table, dest_table, status, message, desti
             VALUES (%s,%s,%s,%s,%s,%s,%s)
             ON CONFLICT (company_name, source_table, destination_table)
             DO UPDATE SET
-                last_transfer_time = EXCLUDED.last_transfer_time,
+                last_transfer_time = NOW(),
                 status = EXCLUDED.status,
                 message = EXCLUDED.message,
                 log_id = EXCLUDED.log_id,
-                updated_at = CURRENT_TIMESTAMP;
+                updated_at = NOW();
         """
         cur.execute(upsert_query, (
             company_name, source_table, dest_table, datetime.utcnow(), status, message, log_id
@@ -10673,12 +10986,153 @@ def update_last_transfer_status(source_table, dest_table, status, message, desti
     except Exception as e:
         print(f"❌ Failed to update last transfer status: {str(e)}")
 
+def save_scheduled_job_company(job_id, company_name):
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        INSERT INTO scheduled_transfer_jobs (job_id, company_name)
+        VALUES (%s, %s)
+        ON CONFLICT (job_id)
+        DO UPDATE SET
+            company_name = EXCLUDED.company_name,
+            updated_at = NOW();
+    """, (job_id, company_name))
+
+    conn.commit()
+    cur.close()
+    conn.close()
 
 # --- Main job logic ---
 def job_logic(cols=None, source_config=None, destination_config=None,
               source_table_name=None, dest_table_name=None,
               update_existing_table=False, create_view_if_exists=False,
-              email=None, schedule_type=None, job_id=None, user_id=None):
+              email=None, schedule_type=None, job_id=None, user_id=None, company_name=None):
+    print("job_id",job_id)
+    # if job_id and not source_config:
+    #     try:
+    #         print("company_name",destination_config,company_name)
+    #         company_db = company_name or (
+    #             destination_config.get("dbName") if destination_config else None
+    #         )
+
+    #         conn = get_company_db_connection(company_name)
+
+    #         # conn = get_company_db_connection(destination_config.get("dbName"))
+    #         cur = conn.cursor()
+    #         print("job_id",job_id)
+
+    #         cur.execute("""
+    #             SELECT source_config, destination_config, selected_columns,
+    #                    source_table, destination_table,
+    #                    schedule_type, user_email, user_id
+               
+    #             ORDER BY created_at DESC
+    #             LIMIT 1
+    #         """, (job_id,))
+
+    #         row = cur.fetchone()
+    #         print("row",row)
+    #         cur.close()
+    #         conn.close()
+
+    #         if not row:
+    #             raise Exception("Job config not found")
+
+    #         source_config = row[0]
+    #         destination_config = row[1]
+    #         cols = row[2]
+    #         source_table_name = row[3]
+    #         dest_table_name = row[4]
+    #         schedule_type = row[5]
+    #         email = row[6]
+    #         user_id = row[7]
+
+    #         print("🔁 Loaded scheduled job config from DB")
+
+    #     except Exception as e:
+    #         print("❌ Scheduler config load failed:", e)
+    #         return {"success": False, "error": str(e)}
+    if job_id and not company_name:
+        try:
+            conn = get_db_connection()  # central / scheduler DB
+            cur = conn.cursor()
+
+            cur.execute("""
+                SELECT company_name
+                FROM scheduled_transfer_jobs
+                WHERE job_id = %s
+                  AND is_active = TRUE
+            """, (job_id,))
+
+            row = cur.fetchone()
+            cur.close()
+            conn.close()
+
+            if not row:
+                raise Exception(f"No company found for job_id: {job_id}")
+
+            company_name = row[0]
+            print(f"🔁 Loaded company_name '{company_name}' for job {job_id}")
+
+        except Exception as e:
+            print("❌ Scheduler company_name load failed:", e)
+            return {
+                "success": False,
+                "error": f"Scheduler recovery failed: {str(e)}"
+            }
+   
+    if job_id and not source_config:
+        try:
+            print("company_name",destination_config,company_name)
+            company_db = company_name or (
+                destination_config.get("dbName") if destination_config else None
+            )
+
+            conn = get_company_db_connection(company_name)
+
+            # conn = get_company_db_connection(destination_config.get("dbName"))
+            cur = conn.cursor()
+            print("job_id",job_id)
+
+            cur.execute("""
+                SELECT source_config, destination_config, selected_columns,
+                       source_table, destination_table,
+                       schedule_type, user_email, user_id
+                FROM data_transfer_logs
+                WHERE job_id = %s
+                ORDER BY created_at DESC
+                LIMIT 1
+            """, (job_id,))
+
+            row = cur.fetchone()
+            print("row",row)
+            cur.close()
+            conn.close()
+
+            if not row:
+                raise Exception("Job config not found")
+            source_config = decrypt_config(row[0])
+            destination_config = decrypt_config(row[1])
+            # source_config = row[0]
+            # destination_config = row[1]
+            cols = row[2]
+            source_table_name = row[3]
+            dest_table_name = row[4]
+            schedule_type = row[5]
+            email = row[6]
+            user_id = row[7]
+
+            print("🔁 Loaded scheduled job config from DB")
+
+        except Exception as e:
+            print("❌ Scheduler config load failed:", e)
+            return {"success": False, "error": str(e)}
+    if not source_config or not destination_config or not source_table_name:
+        return {
+            "success": False,
+            "error": "Missing source/destination configuration or source table name"
+        }
     start_time = datetime.utcnow()
     print(f"[{datetime.now()}] Job triggered for table: {source_table_name}")
 
@@ -10699,7 +11153,8 @@ def job_logic(cols=None, source_config=None, destination_config=None,
                 send_notification_email(email, "Data Transfer Skipped", msg)
             log_id = log_data_transfer(source_table_name, dest_table_name, schedule_type,
                                        datetime.utcnow(), "Skipped", msg, 0, 0.0, email,
-                                       job_id, 0.0, destination_config, user_id)
+                                       job_id, 0.0, destination_config, user_id,source_config=source_config,
+                selected_columns=cols)
             update_last_transfer_status(source_table_name, dest_table_name, "Skipped", msg, destination_config, log_id)
             return {"success": True, "message": msg}
 
@@ -10716,7 +11171,7 @@ def job_logic(cols=None, source_config=None, destination_config=None,
             log_id = log_data_transfer(source_table_name, dest_table_name, schedule_type,
                                        datetime.utcnow(), "Failed", msg, 0, 0.0, email,
                                        job_id, 0.0, destination_config, user_id,
-                                       inserted_count, updated_count, skipped_count)
+                                       inserted_count, updated_count, skipped_count,source_config, cols)
             update_last_transfer_status(source_table_name, dest_table_name, "Failed", msg, destination_config, log_id)
             return {"success": False, "error": msg}
 
@@ -10731,7 +11186,7 @@ def job_logic(cols=None, source_config=None, destination_config=None,
         log_id = log_data_transfer(source_table_name, dest_table_name, schedule_type,
                                    datetime.utcnow(), "Success", msg, records_count, data_size, email,
                                    job_id, time_taken_seconds, destination_config, user_id,
-                                   inserted_count, updated_count, skipped_count)
+                                   inserted_count, updated_count, skipped_count,source_config, cols)
         # Update last status
         update_last_transfer_status(source_table_name, dest_table_name, "Success", msg, destination_config, log_id)
         if schedule_type and schedule_type != "instant":
@@ -10796,9 +11251,39 @@ Regards,
             send_notification_email(email, "Data Transfer Failed", error_msg)
         log_id = log_data_transfer(source_table_name, dest_table_name, schedule_type,
                                    datetime.utcnow(), "Failed", error_msg, 0, 0.0, email,
-                                   job_id, 0.0, destination_config, user_id, 0, 0, 0)
+                                   job_id, 0.0, destination_config, user_id, 0, 0, 0,source_config, cols)
         update_last_transfer_status(source_table_name, dest_table_name, "Failed", error_msg, destination_config, log_id)
         return {"success": False, "error": error_msg, "inserted": 0, "updated": 0, "skipped": 0}
+def create_scheduled_transfer_jobs_table():
+    """
+    Creates scheduled_transfer_jobs table if it does not exist.
+    Stores ONLY job_id → company_name mapping.
+    """
+
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS scheduled_transfer_jobs (
+                id SERIAL PRIMARY KEY,
+                job_id TEXT UNIQUE NOT NULL,
+                company_name TEXT NOT NULL,
+                is_active BOOLEAN DEFAULT TRUE,
+                created_at TIMESTAMPTZ DEFAULT NOW(),
+                updated_at TIMESTAMPTZ DEFAULT NOW()
+            );
+        """)
+
+        conn.commit()
+        cur.close()
+        conn.close()
+
+        print("✅ scheduled_transfer_jobs table ensured")
+
+    except Exception as e:
+        print(f"❌ Failed to create scheduled_transfer_jobs table: {str(e)}")
+        raise
 
 @app.route('/api/transfer_data', methods=['POST'])
 @token_required
@@ -10820,6 +11305,7 @@ def transfer_and_verify_data():
     if not source_config or not destination_config or not source_table_name:
         return jsonify({"success": False, "error": "Missing configuration or table names"}), 400
     # If destination table name is not provided, determine it dynamically
+    create_scheduled_transfer_jobs_table()
     if not dest_table_name:
         try:
             conn = psycopg2.connect(
@@ -10875,6 +11361,8 @@ def transfer_and_verify_data():
     
 
     job_id = f"{source_table_name}_to_{dest_table_name}_{datetime.utcnow().strftime('%Y%m%d%H%M%S')}"
+    save_scheduled_job_company(job_id, company_name)
+
     job_kwargs = {
         "cols": selected_columns,
         "source_config": source_config,
@@ -10886,7 +11374,8 @@ def transfer_and_verify_data():
         "email": email,
         "schedule_type": schedule_type or "instant",
         "job_id": job_id,
-        "user_id":user_id
+        "user_id":user_id,
+        "company_name": company_name
     }
     print("job_kwargs",job_kwargs)
     if not schedule_type or schedule_type == '':
@@ -10925,8 +11414,22 @@ def transfer_and_verify_data():
             if run_time < now:
                 run_time += timedelta(days=1)
             scheduler.add_job(func=job_logic, trigger='date', run_date=run_time, id=job_id, kwargs=job_kwargs)
+        # elif schedule_type == 'hourly':
+        #     scheduler.add_job(func=job_logic, trigger='interval', hours=1, id=job_id, kwargs=job_kwargs, next_run_time=now)
         elif schedule_type == 'hourly':
-            scheduler.add_job(func=job_logic, trigger='interval', hours=1, id=job_id, kwargs=job_kwargs, next_run_time=now)
+            scheduler.add_job(
+                id=job_id,
+                func=job_logic,
+                trigger='interval',
+                hours=1,
+                start_date=datetime.now(IST) + timedelta(hours=1),  # ⏱️ first run after 1 hour
+                replace_existing=True,
+                coalesce=True,          # ⛑️ merge missed runs
+                max_instances=1,        # 🚫 no overlap
+                misfire_grace_time=3600,
+                kwargs=job_kwargs
+            )
+
         elif schedule_type == 'daily':
             scheduler.add_job(func=job_logic, trigger='cron', hour=schedule_hour, minute=schedule_minute, id=job_id, kwargs=job_kwargs, next_run_time=now)
         else:
@@ -13597,36 +14100,93 @@ def save_dashboard_filters_dashboard():
 #         print("Error fetching dashboard filters:", e)
 #         return jsonify({"error": "Failed to fetch filters"}), 500
 
+# @app.route('/api/get-dashboard-filters', methods=['GET'])
+# @token_required
+# def get_dashboard_filters():
+#     dashboard_name = request.args.get("dashboard_name")
+#     company_name = request.args.get("company_name")
+#     user_id = request.args.get("user_id")
+
+#     if not (dashboard_name and company_name and user_id):
+#         return jsonify({"error": "Required fields missing"}), 400
+
+#     conn = get_db_connection()
+#     if conn is None:
+#         return jsonify({"error": "Database connection error"}), 500
+
+#     try:
+#         with conn.cursor() as cur:
+#             # Only fetch dashboard_filter, limit 1
+#             cur.execute("""
+#                 SELECT dashboard_filter
+#                 FROM table_dashboard
+#                 WHERE file_name = %s
+#                   AND company_name = %s
+#                   AND user_id = %s
+#                 LIMIT 1
+#             """, (dashboard_name, company_name, user_id))
+
+#             row = cur.fetchone()
+
+#         filters = row[0] if row and row[0] else None
+#         return jsonify({"filters": filters}), 200
+
+#     except Exception as e:
+#         print("Error fetching dashboard filters:", e)
+#         return jsonify({"error": "Failed to fetch filters"}), 500
+
 @app.route('/api/get-dashboard-filters', methods=['GET'])
 @token_required
 def get_dashboard_filters():
     dashboard_name = request.args.get("dashboard_name")
     company_name = request.args.get("company_name")
+    # company_db = request.args.get("company_db")  # make sure to pass the company DB name
     user_id = request.args.get("user_id")
 
-    if not (dashboard_name and company_name and user_id):
+    if not (dashboard_name and company_name and user_id ):
         return jsonify({"error": "Required fields missing"}), 400
 
-    conn = get_db_connection()
+    # Connect to the company-specific database
+    conn = get_company_db_connection(company_name)
     if conn is None:
         return jsonify({"error": "Database connection error"}), 500
 
     try:
         with conn.cursor() as cur:
-            # Only fetch dashboard_filter, limit 1
+            # 1️⃣ Get reporting_id of the user from employee_list in company DB
             cur.execute("""
-                SELECT dashboard_filter
-                FROM table_dashboard
-                WHERE file_name = %s
-                  AND company_name = %s
-                  AND user_id = %s
-                LIMIT 1
-            """, (dashboard_name, company_name, user_id))
-
+                SELECT employee_id
+                FROM employee_list
+                WHERE reporting_id = %s
+            """, (user_id,))
             row = cur.fetchone()
+            reporting_id = row[0] if row and row[0] else None
+
+            # 2️⃣ Fetch dashboard filter from table_dashboard (global table) using company_name
+            global_conn = get_db_connection()
+            if global_conn is None:
+                return jsonify({"error": "Global DB connection error"}), 500
+
+            with global_conn.cursor() as global_cur:
+                user_ids_to_check = [user_id]
+                if reporting_id:
+                    user_ids_to_check.append(reporting_id)
+
+                global_cur.execute(f"""
+                    SELECT dashboard_filter, user_id
+                    FROM table_dashboard
+                    WHERE file_name = %s
+                      AND company_name = %s
+                      AND user_id = ANY(%s)
+                    ORDER BY user_id = %s DESC  -- prioritize original user_id
+                    LIMIT 1
+                """, (dashboard_name, company_name, user_ids_to_check, user_id))
+
+                row = global_cur.fetchone()
 
         filters = row[0] if row and row[0] else None
-        return jsonify({"filters": filters}), 200
+        applied_user_id = row[1] if row else None
+        return jsonify({"filters": filters, "applied_user_id": applied_user_id}), 200
 
     except Exception as e:
         print("Error fetching dashboard filters:", e)
@@ -17248,58 +17808,6 @@ def get_kpi_insights(table_name):
         }), 500
 
 
-# @app.route("/api/get-source-data", methods=["POST"])
-# def get_source_data():
-#     payload = request.json
-
-#     # db_details = get_company_db_connection(payload["databaseName"])
-#     database_name = payload["databaseName"]
-#     conn = get_company_db_connection(database_name)
-#     table_name = payload["tableName"]
-#     x_axis = payload.get("xAxis")
-#     y_axis = payload.get("yAxis")
-#     filter_options= payload.get("filter_options", {})
-
-#     data = fetch_source_data_from_table(
-#         db_details=conn,
-#         table_name=table_name,
-#         x_axis=x_axis,
-#         y_axis=y_axis,
-#         limit=1000
-#     )
-
-#     return jsonify(data)
-
-# def fetch_source_data_from_table(db_details, table_name, x_axis=None, y_axis=None, limit=1000):
-#     conn = None
-#     try:
-#         conn = db_details
-
-#         # ----------------------------
-#         # ✅ SQL Execution (ALL COLUMNS)
-#         # ----------------------------
-#         cursor = conn.cursor()
-
-#         query = f"SELECT * FROM {table_name}"
-#         cursor.execute(query)
-
-#         rows = cursor.fetchall()
-#         columns = [desc[0] for desc in cursor.description]
-
-#         print(f"✅ Source data fetched: {len(rows)} rows")
-
-#         return {
-#             "columns": columns,
-#             "rows": [dict(zip(columns, row)) for row in rows]
-#         }
-
-#     except Exception as e:
-#         raise Exception(f"❌ Error fetching source data: {str(e)}")
-
-#     finally:
-#         if conn:
-#             conn.close()
-       
 @app.route("/api/get-source-data", methods=["POST"])
 def get_source_data():
     payload = request.json
@@ -17319,53 +17827,597 @@ def get_source_data():
     )
 
     return jsonify(data)
+#============================1/6/2026(calulation validation and edit datatransfer)=================================#
+@app.post("/api/validate-calculation")
+def validate_calculation():
+    global global_df
+    payload = request.json
+    calculation = payload.get("calculation")
+    column_name = payload.get("columnName")
+    db_name = payload.get("databaseName")
+    table_name = payload.get("tableName")
+    selectedUser = payload.get("selectedUser")  # optional if needed for multi-user
 
 
-# def fetch_source_data_from_table(db_details, table_name, filter_options=None, limit=1000):
-#     conn = None
+    # if global_df is None:
+    #     return {"valid": False, "message": "No data loaded yet."}
+
+    try:
+        if global_df is None or global_df.empty:
+            # Get connection or path
+            connection_path = get_db_connection_or_path(selectedUser, db_name, return_path=True)
+            print("Connection path:", connection_path)
+
+            database_con = get_db_connection_or_path(selectedUser, db_name, return_path=False)
+            print("Database connection:", database_con)
+
+            # Fetch the table data
+            new_df = fetch_chart_data(database_con, table_name)
+
+            if new_df is None or new_df.empty:
+                return {"valid": False, "message": f"No data found in table {table_name}."}
+
+            global_df = new_df  # store globally
+        
+        temp_df = global_df.copy()
+        # bc.global_df = new_df
+        # new_df = fetch_chart_data(database_con, table_name)
+    
+        # Example: perform your calculation safely
+        print("Performing calculation on temp_df...",temp_df)
+        perform_calculation(temp_df, column_name, calculation)
+        print("Calculation successful. Column added:", column_name)
+
+        return {"valid": True, "message": "Formula is valid"}
+
+    except Exception as e:
+        return {"valid": False, "message": str(e)}
+@app.route("/api/fix-calculation", methods=["POST"])
+def fix_calculation():
+    payload = request.json  # <-- Fetch JSON from request
+    calculation = payload.get("calculation")
+    column_name = payload.get("columnName")
+
+
+    try:
+    
+        fixed_calc = auto_fix_formula(calculation)
+        return {"fixedCalculation": fixed_calc}
+        print("fixed_calc",fixed_calc)
+    except Exception as e:
+        return {"fixedCalculation": None, "message": str(e)}
+def auto_fix_formula(calc: str) -> str:
+    """
+    Auto-fix common calculation syntax issues:
+    - Adds missing END in CASE WHEN
+    - Normalizes IF, SWITCH, IFERROR, MAXX/MINX, ROUND, DATEDIFF, DATEADD
+    - Fixes TODAY(), NOW(), FORMATDATE(), REPLACE(), CONCAT(), ISNULL(), IN expressions
+    """
+    calc = calc.strip()
+
+    # --------- 0. Normalize CASE WHEN ---------
+    # Ensure CASE WHEN ... THEN ... ELSE ... END
+    if re.match(r'case\s+when', calc, re.IGNORECASE) and not re.search(r'end\s*$', calc, re.IGNORECASE):
+        calc = calc + " END"
+
+    # Normalize keywords spacing
+    calc = re.sub(r'\s+then\s+', ' THEN ', calc, flags=re.IGNORECASE)
+    calc = re.sub(r'\s+else\s+', ' ELSE ', calc, flags=re.IGNORECASE)
+    calc = re.sub(r'\s+end\s*$', ' END', calc, flags=re.IGNORECASE)
+
+    # --------- 1. IF(condition, then, else) ---------
+    calc = re.sub(
+        r'if\s*\(\s*(.+?)\s*,\s*(.+?)\s*,\s*(.+?)\s*\)',
+        r'IF(\1, \2, \3)',
+        calc,
+        flags=re.IGNORECASE
+    )
+
+    # --------- 2. SWITCH ---------
+    calc = re.sub(
+        r'switch\s*\(\s*\[([^\]]+)\](.*?)\)',
+        lambda m: f"SWITCH([{m.group(1)}]{m.group(2)})",
+        calc,
+        flags=re.IGNORECASE
+    )
+
+    # --------- 3. IFERROR ---------
+    calc = re.sub(
+        r'iferror\s*\(\s*(.+?)\s*,\s*(.+?)\s*\)',
+        r'IFERROR(\1, \2)',
+        calc,
+        flags=re.IGNORECASE
+    )
+
+    # --------- 4. MAXX / MINX ---------
+    calc = re.sub(r'(maxx|minx)\s*\(\s*\[([^\]]+)\]\s*\)', r'\1([\2])', calc, flags=re.IGNORECASE)
+
+    # --------- 5. ROUND ---------
+    calc = re.sub(r'round\s*\(\s*(.+?)\s*,\s*(\d+)\s*\)', r'ROUND(\1, \2)', calc, flags=re.IGNORECASE)
+
+    # --------- 6. DATEDIFF ---------
+    calc = re.sub(r'datediff\s*\(\s*\[([^\]]+)\]\s*,\s*\[([^\]]+)\]\s*\)', r'DATEDIFF([\1], [\2])', calc, flags=re.IGNORECASE)
+
+    # --------- 7. DATEADD ---------
+    calc = re.sub(
+        r'dateadd\s*\(\s*\[([^\]]+)\]\s*,\s*(-?\d+)\s*,\s*["\']?(day|month|year)["\']?\s*\)',
+        r'DATEADD([\1], \2, "\3")',
+        calc,
+        flags=re.IGNORECASE
+    )
+
+    # --------- 8. TODAY / NOW ---------
+    calc = re.sub(r'today\(\)', 'TODAY()', calc, flags=re.IGNORECASE)
+    calc = re.sub(r'now\(\)', 'NOW()', calc, flags=re.IGNORECASE)
+
+    # --------- 9. FORMATDATE ---------
+    calc = re.sub(
+        r'formatdate\s*\(\s*\[([^\]]+)\]\s*,\s*["\'](.+?)["\']\s*\)',
+        r'FORMATDATE([\1], "\2")',
+        calc,
+        flags=re.IGNORECASE
+    )
+
+    # --------- 10. Text functions ---------
+    for func in ["upper", "lower", "len", "trim"]:
+        calc = re.sub(
+            rf'{func}\s*\(\s*\[([^\]]+)\]\s*\)',
+            rf'{func.upper()}([\1])',
+            calc,
+            flags=re.IGNORECASE
+        )
+
+    # --------- 11. REPLACE ---------
+    calc = re.sub(
+        r'replace\s*\(\s*\[([^\]]+)\]\s*,\s*["\'](.*?)["\']\s*,\s*["\'](.*?)["\']\s*\)',
+        r'REPLACE([\1], "\2", "\3")',
+        calc,
+        flags=re.IGNORECASE
+    )
+
+    # --------- 12. CONCAT ---------
+    concat_match = re.match(r'concat\s*\((.+)\)', calc, re.IGNORECASE)
+    if concat_match:
+        inner = concat_match.group(1)
+        parts = [p.strip() for p in re.split(r',(?![^\[]*\])', inner)]
+        calc = f"CONCAT({', '.join(parts)})"
+
+    # --------- 13. ISNULL ---------
+    calc = re.sub(
+        r'isnull\s*\(\s*\[([^\]]+)\]\s*,\s*["\']?(.*?)["\']?\s*\)',
+        r'ISNULL([\1], "\2")',
+        calc,
+        flags=re.IGNORECASE
+    )
+
+    # --------- 14. IN expression ---------
+    calc = re.sub(
+        r'\[([^\]]+)\]\s+in\s+\((.*?)\)',
+        lambda m: f"[{m.group(1)}] IN ({m.group(2)})",
+        calc,
+        flags=re.IGNORECASE
+    )
+
+    calc = balance_brackets(calc)
+
+    return calc
+def balance_brackets(expr: str) -> str:
+    # Balance parentheses ()
+    open_paren = expr.count("(")
+    close_paren = expr.count(")")
+    if open_paren > close_paren:
+        expr += ")" * (open_paren - close_paren)
+
+    # Balance square brackets []
+    open_sq = expr.count("[")
+    close_sq = expr.count("]")
+    if open_sq > close_sq:
+        expr += "]" * (open_sq - close_sq)
+
+    return expr
+
+@app.route("/api/db/destination-config", methods=["GET"])
+@token_required
+def get_destination_config():
+    return jsonify({
+        "success": True,
+        "data": {
+            "dbType": "PostgreSQL",
+            "username": USER_NAME,
+            "password": PASSWORD,   # send only if really needed
+            "host": HOST,
+            "port": PORT
+        }
+    })
+
+
+@app.route("/api/schedules", methods=["GET"])
+@token_required
+def fetch_schedules():
+    company_name = request.args.get("company_name")
+    user_id=request.args.get("user_id")
+
+    if not company_name or not user_id:
+        return jsonify({
+            "success": False,
+            "error": "company_name and user_id are required"
+        }), 400
+
+    try:
+        conn = get_company_db_connection(company_name)
+        cur = conn.cursor()
+
+        # Fetch schedule info with last transfer status
+        cur.execute("""
+            SELECT
+                lts.id,
+                lts.source_table,
+                lts.destination_table,
+                dtl.schedule_type,
+                dtl.run_time,
+                lts.status,
+                lts.log_id,
+                lts.last_transfer_time,
+                dtl.user_email
+            FROM last_transfer_status lts
+            LEFT JOIN data_transfer_logs dtl
+                ON lts.log_id = dtl.id
+            WHERE dtl.user_id = %s
+            ORDER BY lts.last_transfer_time DESC
+        """,(user_id,))
+
+        rows = cur.fetchall()
+        print("row",rows)
+        cur.close()
+        conn.close()
+
+
+        schedules = [{
+            "id": r[0],
+            "source_table": r[1],
+            "destination_table": r[2],
+            "schedule_type": r[3],
+            "run_time": r[4].astimezone(IST).strftime("%Y-%m-%d %H:%M:%S") if r[4] else None,
+            "status": r[5],
+            "log_id": r[6],
+            "last_transfer_time": r[7].astimezone(IST).strftime("%Y-%m-%d %H:%M:%S") if r[7] else None,
+            "user_email": r[8]
+        } for r in rows]
+
+        return jsonify({"success": True, "data": schedules})
+    except errors.UndefinedTable:
+        # table does not exist
+        return jsonify({"success": True, "data": []})
+    except Exception as e:
+        print("Schedules error:", e)
+        return jsonify({"success": True, "data": []})
+
+    # except Exception as e:
+    #     return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route("/api/transfer-logs", methods=["GET"])
+@token_required
+def fetch_transfer_logs():
+    company_name = request.args.get("company_name")
+    user_id = request.args.get("user_id")  # always provided
+    if not company_name or not user_id:
+        return jsonify({
+            "success": False,
+            "error": "company_name and user_id are required"
+        }), 400
+
+    try:
+        conn = get_company_db_connection(company_name)
+        cur = conn.cursor()
+
+        cur.execute("""
+            SELECT
+                id, source_table, destination_table, schedule_type,
+                run_time, status, record_count,
+                inserted_count, updated_count, skipped_count,
+                message, created_at
+            FROM data_transfer_logs
+            WHERE user_id = %s
+            ORDER BY created_at DESC
+        """, (user_id,))
+
+        logs = cur.fetchall()
+        print("logs",logs)
+        cur.close()
+        conn.close()
+
+        return jsonify({
+            "success": True,
+            "data": [{
+                "id": r[0],
+                "source_table": r[1],
+                "destination_table": r[2],
+                "schedule_type": r[3],
+                "run_time": r[4],
+                "status": r[5],
+                "record_count": r[6],
+                "inserted": r[7],
+                "updated": r[8],
+                "skipped": r[9],
+                "message": r[10],
+                "created_at": r[11]
+            } for r in logs]
+        })
+    except errors.UndefinedTable:
+        # ✅ Table missing → NO ERROR
+        return jsonify({"success": True, "data": []})
+
+    except Exception as e:
+        print("Transfer logs error:", e)
+        return jsonify({"success": True, "data": []})
+
+    # except Exception as e:
+    #     return jsonify({"success": False, "error": str(e)}), 500
+
+# @app.route("/api/schedule/update", methods=["PUT"])
+# @token_required
+# def update_schedule():
+#     data = request.json
+#     log_id = data.get("log_id")
+#     schedule_type = data.get("schedule_type")
+#     run_time = data.get("run_time")
+#     company_name = data.get("company_name")
+#     print("data",data)
+
+#     if not log_id:
+#         return jsonify({"success": False, "error": "log_id required"}), 400
+
 #     try:
-#         conn = db_details
-#         cursor = conn.cursor()
-#         print("Filter options received:", filter_options)
+#         conn = get_company_db_connection(company_name)
+#         cur = conn.cursor()
 
-#         # Base query
-#         query = f"SELECT * FROM {table_name}"
+#         cur.execute("""
+#             UPDATE data_transfer_logs
+#             SET schedule_type = %s,
+#                 run_time = %s
+#             WHERE id = %s
+#         """, (schedule_type, run_time, log_id))
 
-#         # ----------------------------
-#         # ✅ Add filter conditions dynamically
-#         # ----------------------------
-#         where_clauses = []
-#         params = []
+#         conn.commit()
+#         cur.close()
+#         conn.close()
 
-#         if filter_options:
-#             for col, values in filter_options.items():
-#                 if isinstance(values, list) and values:
-#                     placeholders = ", ".join(["%s"] * len(values))
-#                     where_clauses.append(f"{col} IN ({placeholders})")
-#                     params.extend(values)
-
-#         if where_clauses:
-#             query += " WHERE " + " AND ".join(where_clauses)
-
-#         query += f" LIMIT {limit}"
-
-#         cursor.execute(query, tuple(params))
-#         rows = cursor.fetchall()
-#         columns = [desc[0] for desc in cursor.description]
-
-#         print(f"✅ Source data fetched: {len(rows)} rows with filters {filter_options}")
-
-#         return {
-#             "columns": columns,
-#             "rows": [dict(zip(columns, row)) for row in rows]
-#         }
+#         return jsonify({"success": True, "message": "Schedule updated"})
 
 #     except Exception as e:
-#         raise Exception(f"❌ Error fetching source data: {str(e)}")
+#         return jsonify({"success": False, "error": str(e)}), 500
 
-#     finally:
-#         if conn:
-#             conn.close()
+# @app.route("/api/schedule/update", methods=["PUT"])
+# @token_required
+# def update_schedule():
+#     data = request.json
+#     log_id = data.get("log_id")
+#     schedule_type = data.get("schedule_type")
+#     run_time = data.get("run_time")  # e.g., "14:50"
+#     company_name = data.get("company_name")
+#     print("data", data)
+
+#     if not log_id:
+#         return jsonify({"success": False, "error": "log_id required"}), 400
+
+#     try:
+#         # Convert run_time to full timestamp if necessary
+#         print("data",data)
+#         if run_time:
+#             # Keep the original date from DB or use today’s date
+#             today = datetime.today().date()
+#             run_time_dt = datetime.strptime(run_time, "%H:%M")
+#             run_time_full = datetime.combine(today, run_time_dt.time())
+#         else:
+#             run_time_full = None
+#         print("run_time_full",run_time_full)
+
+#         conn = get_company_db_connection(company_name)
+#         cur = conn.cursor()
+
+#         cur.execute("""
+#             UPDATE data_transfer_logs
+#             SET schedule_type = %s,
+#                 run_time = %s
+#             WHERE id = %s
+#         """, (schedule_type, run_time_full, log_id))
+
+#         conn.commit()
+#         cur.close()
+#         conn.close()
+
+#         return jsonify({"success": True, "message": "Schedule updated"})
+
+#     except Exception as e:
+#         print("Error updating schedule:", e)
+#         return jsonify({"success": False, "error": str(e)}), 500
+@app.route("/api/schedule/update", methods=["PUT"])
+@token_required
+def update_schedule():
+    data = request.json
+    log_id = data.get("log_id")
+    schedule_type = data.get("schedule_type")  # once | hourly | daily
+    run_time = data.get("run_time")            # "14:30"
+    company_name = data.get("company_name")
+
+    if not log_id:
+        return jsonify({"success": False, "error": "log_id required"}), 400
+
+    try:
+        actual_run_time = datetime.now(timezone.utc)
+        conn = get_company_db_connection(company_name)
+        cur = conn.cursor()
+
+        # 1️⃣ Get job_id + job kwargs
+        
+        cur.execute("""
+            SELECT job_id,user_email,source_table
+            FROM data_transfer_logs
+            WHERE id = %s
+        """, (log_id,))
+        row = cur.fetchone()
+        print("log_id",log_id)
+        print("job_id",row)
+
+        if not row:
+            return jsonify({"success": False, "error": "Job not found"}), 404
+
+        # job_id = row[0]
+        job_id, user_email,source_table = row 
+        cur.execute("""
+            SELECT username
+            FROM employee_list
+            WHERE email = %s
+            LIMIT 1
+        """, (user_email,))
+        user_row = cur.fetchone()
+        if user_row:
+            user_name = user_row[0]
+        else:
+            user_name = "User"
+
+        # 2️⃣ Update DB (for UI)
+        if run_time:
+            now = datetime.now(IST) 
+            minute = int(run_time.split(":")[1])
+            start_date = now.replace(minute=minute, second=0, microsecond=0)
+            if start_date <= now:
+                start_date += timedelta(hours=1)
+        else:
+            start_date = now + timedelta(hours=1)
+        run_time_full = None
+        if run_time:
+            today = datetime.utcnow().date()
+            t = datetime.strptime(run_time, "%H:%M").time()
+            run_time_full = datetime.combine(today, t)
+        print("log_id",log_id)
+
+        cur.execute("""
+            UPDATE data_transfer_logs
+            SET schedule_type = %s,
+                run_time = %s
+            WHERE id = %s
+        """, (schedule_type, run_time_full, log_id))
+        print("schedule_type",schedule_type,run_time_full,log_id)
+
+        conn.commit()
+        cur.close()
+        conn.close()
+
+        # 3️⃣ Remove old scheduler job
+        if scheduler.get_job(job_id):
+            scheduler.remove_job(job_id)
+
+        # 4️⃣ Recreate scheduler job
+        now = datetime.utcnow()
+        hour, minute = (0, 0)
+
+        if run_time:
+            hour, minute = map(int, run_time.split(":"))
+
+        if schedule_type == "once":
+            run_date = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+            if run_date < now:
+                run_date += timedelta(days=1)
+
+            scheduler.add_job(
+                id=job_id,
+                func=job_logic,
+                trigger="date",
+                run_date=run_date,
+                kwargs={"job_id": job_id}
+            )
+        
+
+        # elif schedule_type == "hourly":
+        #     scheduler.add_job(
+        #         id=job_id,
+        #         func=job_logic,
+        #         trigger="interval",
+        #         next_run_time=now,
+        #         hours=1,
+        #         replace_existing=True,
+        #         kwargs={"job_id": job_id}
+        #     )
+        elif schedule_type == "hourly":
+            scheduler.add_job(
+                id=job_id,
+                func=job_logic,
+                trigger="interval",
+                hours=1,
+                start_date=start_date,  # ⏱️ first run after 1 hour
+                replace_existing=True,
+                coalesce=True,          # run once if missed
+                max_instances=1,        # no overlapping
+                misfire_grace_time=3600,
+                kwargs={"job_id": job_id}
+            )
+
+
+        elif schedule_type == "daily":
+            scheduler.add_job(
+                id=job_id,
+                func=job_logic,
+                trigger="cron",
+                hour=hour,
+                minute=minute,
+                replace_existing=True,
+                kwargs={"job_id": job_id}
+            )
+        else:
+            return jsonify({"success": False, "error": f"Invalid schedule type: {schedule_type}"}), 400
+
+        # 5️⃣ Log activity
+        action_msg = f"Scheduled data transfer job updated to '{schedule_type}'"
+        if run_time:
+            action_msg += f" at {run_time}"
+        log_activity(
+            user_email=user_email,
+            action_type="Scheduled Data Transfer Updated",
+            description=action_msg,
+            table_name=source_table,
+            company_name=company_name,
+            dashboard_name=None
+        )
+
+        # 6️⃣ Optional: Send email notification
+        if user_email:
+            email_body = f"""
+            Subject: 3A Vision Data Transfer Schedule Updated
+
+            Hello {user_name},
+
+            Your data transfer job (Job ID: {job_id}) has been updated.
+
+            Schedule Type: {schedule_type}
+            Scheduled Time: {run_time if run_time else 'N/A'}
+
+            Regards,
+            3A Vision Team
+            """
+            send_notification_email(user_email, "3A Vision Data Transfer Schedule Updated", email_body)
+
+        return jsonify({
+            "success": True,
+            "message": "Schedule updated, job rescheduled, activity logged, and notification sent"
+        })
+
+    except Exception as e:
+        print("❌ Schedule update error:", e)
+        if user_email:
+            send_notification_email(user_email, "Data Transfer Schedule Update Failed", str(e))
+        return jsonify({"success": False, "error": str(e)}), 500
+
+    #     return jsonify({
+    #         "success": True,
+    #         "message": "Schedule updated & will run at next scheduled time"
+    #     })
+
+    # except Exception as e:
+    #     print("❌ Schedule update error:", e)
+    #     return jsonify({"success": False, "error": str(e)}), 500
+
+#==================================================================#
 from datetime import datetime, date
 def fetch_source_data_from_table(db_details, table_name, filter_options=None, limit=1000):
     conn = None

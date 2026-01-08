@@ -501,10 +501,24 @@ def apply_calculations(dataframe, calculationData, x_axis, y_axis):
 
             # Handle different calculation formulas
             if calc_formula.startswith("if"):
-                match = re.match(
-                    r"if\s*\((.+?)\)\s*then\s*'?(.*?)'?\s*else\s*'?(.*?)'?$",
-                    calc_formula, re.IGNORECASE
+                # match = re.match(
+                #     r"if\s*\((.+?)\)\s*then\s*'?(.*?)'?\s*else\s*'?(.*?)'?$",
+                #     calc_formula, re.IGNORECASE
+                # )
+                match = (
+                    re.match(
+                        r"if\s*\(\s*(.+?)\s*\)\s*then\s*'?(.*?)'?\s*else\s*'?(.*?)'?$",
+                        calc_formula.strip(),
+                        re.IGNORECASE
+                    )
+                    or
+                    re.match(
+                        r"if\s*\(\s*(.+?)\s*,\s*'?(.*?)'?\s*,\s*'?(.*?)'?\s*\)$",
+                        calc_formula.strip(),
+                        re.IGNORECASE
+                    )
                 )
+
                 if not match:
                     raise ValueError("Invalid IF format")
                 condition_expr, then_val, else_val = match.groups()
@@ -526,6 +540,44 @@ def apply_calculations(dataframe, calculationData, x_axis, y_axis):
                 default_match = re.search(r'default\s*,\s*["\']?(.*?)["\']?$', rest, re.IGNORECASE)
                 default_val = default_match.group(1) if default_match else None
                 dataframe[new_col_name] = dataframe[col_name].map(dict(cases)).fillna(default_val)
+            elif calc_formula.lower().startswith("round"):
+                # Match formula: round(<expression>, <decimals>)
+                match = re.match(r'round\s*\(\s*(.+?)\s*,\s*(\d+)\s*\)', calc_formula, re.IGNORECASE)
+                if not match:
+                    raise ValueError(
+                        "Invalid ROUND format. Use round([col], decimals) or round([col1]/[col2], decimals)"
+                    )
+
+                expr, decimals = match.groups()
+                decimals = int(decimals)
+
+                # Replace [column] with numeric dataframe references
+                def replace_column(match):
+                    col_name = match.group(1)
+                    if col_name not in dataframe.columns:
+                        raise ValueError(f"Missing column: {col_name}")
+                    # Convert to numeric
+                    dataframe[col_name] = pd.to_numeric(dataframe[col_name], errors='coerce')
+                    return f"dataframe['{col_name}']"
+
+                # Replace [col] references in the expression
+                expr_python = re.sub(r'\[([^\]]+)\]', replace_column, expr)
+
+                # Handle division by zero safely
+                expr_python = re.sub(
+                    r"dataframe\['([^']+)'\]\s*/\s*dataframe\['([^']+)'\]",
+                    r"np.divide(dataframe['\1'], dataframe['\2'].replace(0, np.nan))",
+                    expr_python
+                )
+
+                # Evaluate expression safely and round
+                try:
+                    dataframe[new_col_name] = np.round(eval(expr_python), decimals)
+                except Exception as e:
+                    print(f"Error evaluating ROUND formula: {e}")
+                    dataframe[new_col_name] = np.nan
+
+            
 
             elif calc_formula.startswith("iferror"):
                 match = re.match(r"iferror\s*\((.+?)\s*,\s*(.+?)\)", calc_formula, re.IGNORECASE)
@@ -649,11 +701,67 @@ def apply_calculations(dataframe, calculationData, x_axis, y_axis):
             elif calc_formula.startswith("trim"):
                 col = re.match(r"trim\s*\(\s*\[([^\]]+)\]\)", calc_formula, re.IGNORECASE).group(1)
                 dataframe[new_col_name] = dataframe[col].astype(str).str.strip()
+            elif calc_formula.lower().startswith(("sum", "avg", "min", "max")):
+                match = re.match(
+                    r'(sum|avg|min|max)\s*\(\s*\[([^\]]+)\]\s*\)',
+                    calc_formula,
+                    re.IGNORECASE
+                )
+                if not match:
+                    raise ValueError("Invalid aggregation format.")
+
+                agg_func, col = match.groups()
+                agg_func = agg_func.lower()
+
+                # DO NOT create calculated column
+                # Just mark aggregation intent
+                aggregation = agg_func
+                y_base_column = col
+
+                print(f"Detected aggregation: {aggregation}({col})")
+
+                # IMPORTANT: skip dataframe eval
+                skip_calculated_column = True
 
             else:
-                # Default fallback: eval with replaced columns
+                # calc_formula_python = re.sub(r'\[(.*?)\]', replace_column, calc_formula)
+                # print("Evaluating math formula:", calc_formula_python)
+                # Replace column references [col] → temp_df['col']
                 calc_formula_python = re.sub(r'\[(.*?)\]', replace_column, calc_formula)
-                dataframe[new_col_name] = eval(calc_formula_python)
+
+                # Handle COUNT
+                calc_formula_python = re.sub(
+                    r'count\s*\(\s*(temp_df\[.*?\])\s*\)',
+                    r'\1.count()',
+                    calc_formula_python,
+                    flags=re.IGNORECASE
+                )
+
+                # Handle SUM
+                calc_formula_python = re.sub(
+                    r'sum\s*\(\s*(temp_df\[.*?\])\s*\)',
+                    r'\1.sum()',
+                    calc_formula_python,
+                    flags=re.IGNORECASE
+                )
+
+                # Handle AVG
+                calc_formula_python = re.sub(
+                    r'avg\s*\(\s*(temp_df\[.*?\])\s*\)',
+                    r'\1.mean()',
+                    calc_formula_python,
+                    flags=re.IGNORECASE
+                )
+
+                print("Evaluating math formula:", calc_formula_python)
+                temp_df[new_col_name] = eval(calc_formula_python)
+
+            print(f"✅ New column '{new_col_name}' created.")
+
+            # else:
+            #     # Default fallback: eval with replaced columns
+            #     calc_formula_python = re.sub(r'\[(.*?)\]', replace_column, calc_formula)
+            #     dataframe[new_col_name] = eval(calc_formula_python)
 
             print(f"✅ Created new column: {new_col_name}")
 
@@ -662,6 +770,9 @@ def apply_calculations(dataframe, calculationData, x_axis, y_axis):
                 y_axis = [new_col_name if col == replace_col_name else col for col in y_axis]
             if x_axis:
                 x_axis = [new_col_name if col == replace_col_name else col for col in x_axis]
+            if skip_calculated_column:
+                y_axis = [y_base_column if col == new_col_name else col for col in y_axis]
+            
 
         except Exception as e:
             print(f"Error processing formula '{calc_formula}': {e}")
@@ -669,324 +780,172 @@ def apply_calculations(dataframe, calculationData, x_axis, y_axis):
     return dataframe
 
 
-
-
-DB_CONFIG_TEMPLATE = {
-    'user': 'postgres',
-    'password': 'jaTHU@12',
-    'host': 'localhost',
-    'port': 5432
-}
-
-# --- GLOBAL VARIABLES ---
-active_listeners = {}
-listener_lock = threading.Lock()
-
-# --- REAL-TIME HELPER FUNCTIONS ---
-
-def ensure_trigger_exists(db_name, table_name):
-    """Creates the PostgreSQL trigger if missing."""
-    print(f"🔍 Ensuring trigger exists for {table_name} in DB: {db_name}")
-    try:
-        conn = psycopg2.connect(dbname=db_name, **DB_CONFIG_TEMPLATE)
-        conn.set_isolation_level(psycopg2.extensions.ISOLATION_LEVEL_AUTOCOMMIT)
-        cursor = conn.cursor()
-        
-        # 1. Generic Notification Function
-        cursor.execute("""
-            CREATE OR REPLACE FUNCTION notify_chart_update() RETURNS TRIGGER AS $$
-            BEGIN
-                PERFORM pg_notify('chart_update', TG_TABLE_NAME);
-                RETURN NEW;
-            END;
-            $$ LANGUAGE plpgsql;
-        """)
-        
-        # 2. Check for Trigger
-        trigger_name = f"trg_notify_{table_name}"
-        cursor.execute("SELECT 1 FROM pg_trigger WHERE tgname = %s", (trigger_name,))
-        
-        if not cursor.fetchone():
-            print(f"🛠️ Creating trigger for {table_name}")
-            # NOTE: Removed quotes around table_name to handle case sensitivity automatically
-            cursor.execute(f"""
-                CREATE TRIGGER "{trigger_name}"
-                AFTER INSERT OR UPDATE OR DELETE ON {table_name}
-                FOR EACH ROW EXECUTE FUNCTION notify_chart_update();
-            """)
-            print(f"✅ Trigger created for {table_name}")
-        
-        cursor.close(); conn.close()
-    except Exception as e:
-        print(f"⚠️ Trigger Error: {e}")
-
-
-
-
-def get_dashboards_for_table(table_name, database_name_param):
+def extract_filter_from_category(category_text):
     """
-    Finds all dashboards (charts) that rely on a specific table in a specific database.
-    Returns a list of dashboard config objects so we can re-run data fetching.
+    Handles:
+    - region Asia
+    - {"region Asia"}
+    - {"region":"Asia"}
+    - ["region Asia"]
     """
-    conn = create_connection() # Connects to MASTER DB
-    if not conn:
-        return []
+
+    if not category_text:
+        return {}
+
+    # Normalize to string
+    category_text = str(category_text).strip()
+
+    # Remove wrapping {} or []
+    if (category_text.startswith("{") and category_text.endswith("}")) or \
+       (category_text.startswith("[") and category_text.endswith("]")):
+        category_text = category_text[1:-1].strip()
+
+    # Remove quotes
+    category_text = category_text.replace('"', '').replace("'", "").strip()
+
+    # Handle JSON-style key:value
+    if ":" in category_text:
+        key, value = category_text.split(":", 1)
+    else:
+        parts = category_text.split(None, 1)
+        if len(parts) != 2:
+            return {}
+        key, value = parts
+
+    return {
+        key.lower().strip(): [value.lower().strip()]
+    }
+
+
+def is_restricted_role(role):
+    return role in ["viewer", "report viewer"]
+
+
+# def apply_employee_category_filter(chart_filters, employee_category_filter):
+#     """
+#     Restrict ONLY employee category column using intersection
+#     """
+#     if not employee_category_filter:
+#         return chart_filters
+
+#     for col, emp_vals in employee_category_filter.items():
+#         if col in chart_filters:
+#             chart_filters[col] = list(
+#                 set(chart_filters[col]) & set(emp_vals)
+#             )
+#         else:
+#             chart_filters[col] = emp_vals
+
+#     return chart_filters
+# def apply_employee_category_filter(chart_filters, employee_category_filter):
+#     """
+#     Restrict ONLY employee category column using intersection.
+#     Case-insensitive comparison is applied.
+#     """
+#     if not employee_category_filter:
+#         return chart_filters
+
+#     for col, emp_vals in employee_category_filter.items():
+#         if col in chart_filters:
+#             # Keep only values that match (case-insensitive)
+#             emp_vals_lower = {str(v).lower() for v in emp_vals}
+#             chart_filters[col] = [
+#                 v for v in chart_filters[col] 
+#                 if str(v).lower() in emp_vals_lower
+#             ]
+#         else:
+#             chart_filters[col] = emp_vals
+
+#     return chart_filters
+
+
+# def apply_employee_category_filter(chart_filters, employee_category_filter, data_columns=None):
+#     """
+#     Restrict ONLY employee category column using intersection.
+#     Case-insensitive comparison is applied.
+
+#     data_columns: Optional dict of actual column values from the table, e.g.
+#     {'region': ['Asia', 'Europe', 'ASIA', 'North America']}
+#     """
+#     if not employee_category_filter:
+#         return chart_filters
+
+#     for col, emp_vals in employee_category_filter.items():
+#         emp_vals_lower = {str(v).lower() for v in emp_vals}
+
+#         # If chart_filters already has values for this column, intersect them case-insensitively
+#         if col in chart_filters:
+#             chart_filters[col] = [
+#                 v for v in chart_filters[col]
+#                 if str(v).lower() in emp_vals_lower
+#             ]
+#         # If chart_filters does not have values, take them from data_columns or employee_category_filter
+#         else:
+#             if data_columns and col in data_columns:
+#                 chart_filters[col] = [
+#                     v for v in data_columns[col] if str(v).lower() in emp_vals_lower
+#                 ]
+#             else:
+#                 # fallback to lowercase filter values
+#                 chart_filters[col] = list(emp_vals_lower)
+
+#     return chart_filters
+def expand_filters_with_actual_values(df, chart_filters, employee_category_filter):
+    """
+    Replace employee_category_filter values with actual values from the dataframe
+    Case-insensitive matching.
     
-    dashboards_to_update = []
-    try:
-        cursor = conn.cursor()
-        # Find charts using this table AND this database
-        cursor.execute("SELECT id FROM table_chart_save WHERE selected_table = %s AND database_name = %s", (table_name, database_name_param))
-        chart_ids = [row[0] for row in cursor.fetchall()]
-        
-        if not chart_ids:
-            return []
-
-        # database columns from insert: 
-        # id, chart_ids, position, chart_type, filterdata, chartcolor, droppableBgColor, opacity, image_ids, file_name, company_name
-        
-        cursor.execute("""
-            SELECT id, chart_ids, position, filterdata, chartcolor, droppableBgColor, opacity, image_ids, 
-                   chart_type, user_id, file_name, company_name, filterdata 
-            FROM table_dashboard
-        """)
-        all_dashboards = cursor.fetchall()
-        
-        for row in all_dashboards:
-            (dash_id, dash_chart_ids_str, positions, filterdata, chartcolor, droppableBgColor, 
-             opacity, image_ids, dashboard_chart_type, user_id, file_name, company_name, dashboard_filter_raw) = row
-
-            if not dash_chart_ids_str: continue
-            
-            try:
-                curr_ids = list(map(int, re.findall(r'\d+', dash_chart_ids_str)))
-            except:
-                continue
-            
-            affected_chart_ids = set(curr_ids).intersection(chart_ids)
-            
-            if affected_chart_ids:
-                dashboards_to_update.append({
-                    "dashboard_id": dash_id,
-                    "chart_ids": curr_ids, # Keep full list for index mapping
-                    "positions": positions,
-                    "filter_options": filterdata,
-                    "areacolour": chartcolor,
-                    "droppableBgColor": droppableBgColor,
-                    "opacity": opacity,
-                    "image_ids": image_ids,
-                    "chart_type": dashboard_chart_type,
-                    "user_id": user_id,
-                    "file_name": file_name,
-                    "company_name": company_name,
-                    "dashboard_Filter": dashboard_filter_raw,
-                    "view_mode": "view",
-                    
-                    # Store which IDs are actually affected for filtering
-                    "affected_ids_set": affected_chart_ids
-                })
-                
-        cursor.close()
-        conn.close()
-        return dashboards_to_update
-        
-    except Exception as e:
-        print(f"Error finding dashboards for table {table_name}: {e}")
-        return []
-
-def filter_list_by_indices(data_list, indices):
-    """Helper to filter a list (or string rep of list) by keeping only specific indices."""
-    if not data_list: return []
+    df: pandas DataFrame containing actual column values
+    chart_filters: dict, existing chart filters
+    employee_category_filter: dict, e.g., {'region': ['asia']}
+    """
+    chart_filters_clean = chart_filters.copy()
     
-    # Handle string format if necessary (though simple lists are expected here usually)
-    is_str = isinstance(data_list, str)
-    if is_str:
-        try:
-            parsed = ast.literal_eval(data_list)
-            if not isinstance(parsed, list): parsed = []
-        except:
-             # Try regex or simple split if AST fails
-             parsed = []
-             
-        data_list = parsed
-
-    if not isinstance(data_list, list): return []
+    for col, filter_vals in employee_category_filter.items():
+        if col not in df.columns:
+            continue  # skip if column not in dataframe
+        
+        # Get all unique values in the column (actual values)
+        actual_vals = df[col].dropna().unique()
+        actual_vals_lower = {str(v).lower(): v for v in actual_vals}  # map lowercase → actual
+        
+        # Match filter values case-insensitively
+        matched_vals = [actual_vals_lower[v.lower()] for v in filter_vals if v.lower() in actual_vals_lower]
+        
+        # Override/add to chart filters
+        chart_filters_clean[col] = matched_vals
     
-    return [data_list[i] for i in indices if i < len(data_list)]
+    return chart_filters_clean
 
-def background_db_listener(db_name):
-    """Background thread that listens for DB updates."""
-    try:
-        conn = psycopg2.connect(dbname=db_name, **DB_CONFIG_TEMPLATE)
-        conn.set_isolation_level(psycopg2.extensions.ISOLATION_LEVEL_AUTOCOMMIT)
-        cursor = conn.cursor()
-        cursor.execute("LISTEN chart_update;")
-        print(f"✅ [Listener] Started listening to DB: {db_name}")
+def apply_employee_category_filter(chart_filters, employee_category_filter, data_columns=None):
+    """
+    Restrict ONLY employee category column using intersection.
+    Expands filter to include all case variations present in data_columns.
 
-        while True:
-            # Wait 5s for notification
-            if select.select([conn], [], [], 5) != ([], [], []):
-                conn.poll()
-                while conn.notifies:
-                    notify = conn.notifies.pop(0)
-                    changed_table = notify.payload
-                    
-                    # ⚠️ Silent unless we find a matching active dashboard
-                    # print(f"🔔 TRIGGER FIRED! DB: {db_name} | Table: {changed_table}")
-                    
-                    # 1. Find affected dashboards (Pass DB Name!)
-                    affected_dashboards = get_dashboards_for_table(changed_table, db_name)
-                    
-                    if not affected_dashboards:
-                        # Log only if verbose or debugging specific table issues
-                        # print(f"ℹ️ Table {changed_table} updated, but no dashboards use it.")
-                        continue
+    data_columns: Optional dict of actual column values from the table, e.g.
+    {'region': ['Asia', 'Europe', 'ASIA', 'North America']}
+    """
+    if not employee_category_filter:
+        return chart_filters
 
-                    # Pre-check: Are ANY of these dashboards active?
-                    active_update_count = 0
-                    
-                    for dash in affected_dashboards:
-                         try:
-                             # Room 2: Name based (user_id_dashboard_name) match URL structure roughly
-                             # URL: /Dashboard_data/<user_id>,<name>/...
-                             # We'll use a standardized room name: "dashboard_updates_<user_id>_<file_name>"
-                             room_name_str = f"dashboard_{dash['user_id']}_{dash['file_name']}"
-                             
-                             # ----------------------------------------------------
-                             # ACTIVE USER CHECK (Optimization)
-                             # ----------------------------------------------------
-                             try:
-                                 import socketio as sio_lib
-                                 namespace = '/'
-                                 rooms = socketio.server.manager.rooms
-                                 
-                                 current_room_participants = set()
-                                 if isinstance(rooms, dict):
-                                     ns_rooms = rooms.get(namespace, {})
-                                     current_room_participants = ns_rooms.get(room_name_str, set())
-                                 
-                                 if not current_room_participants:
-                                     # SILENT SKIP
-                                     continue
-                                 
-                                 # ONLY NOW do we announce the trigger
-                                 print(f"🔔 TRIGGER FIRED! DB: {db_name} | Table: {changed_table}")
-                                 print(f"👀 ACTIVE USERS DETECTED in {room_name_str}: {len(current_room_participants)}")
-                                 active_update_count += 1
-                             except Exception as check_err:
-                                 print(f"⚠️ Could not check room participants ({check_err}). Proceeding anyway.")
-                             # ----------------------------------------------------
+    for col, emp_vals in employee_category_filter.items():
+        emp_vals_lower = {str(v).lower() for v in emp_vals}
 
-                             print(f"🔄 Calculating Data for Dashboard: {dash.get('file_name')} (ID: {dash['dashboard_id']})")
-                             
-                             # 2. Filter input lists to ONLY include affected charts
-                             full_chart_ids = dash['chart_ids']
-                             affected_set = dash['affected_ids_set']
-                             
-                             # Find indices of affected charts
-                             indices_to_keep = [i for i, cid in enumerate(full_chart_ids) if cid in affected_set]
-                             
-                             if not indices_to_keep: continue
-                             
-                             # Prepare filtered inputs
-                             def safe_filter(val, idxs):
-                                 try:
-                                     lst = val
-                                     if isinstance(lst, str):
-                                         lst = lst.strip()
-                                         if lst.startswith("[") or lst.startswith("{"):
-                                             try: import json; lst = json.loads(lst)
-                                             except: lst = ast.literal_eval(lst)
-                                     
-                                     if isinstance(lst, list):
-                                          return [lst[i] for i in idxs if i < len(lst)]
-                                     return []
-                                 except:
-                                     return []
+        # If we have actual column data, get all values matching case-insensitively
+        if data_columns and col in data_columns:
+            chart_filters[col] = [
+                val for val in data_columns[col] 
+                if str(val).lower() in emp_vals_lower
+            ]
+        else:
+            # fallback: use original employee filter, preserving original cases
+            chart_filters[col] = [v for v in emp_vals]
+            print("chartfiltere",chart_filters)
 
-                             # Filter everything
-                             filtered_chart_ids = [full_chart_ids[i] for i in indices_to_keep]
-                             filtered_positions = safe_filter(dash['positions'], indices_to_keep)
-                             filtered_filters = safe_filter(dash['filter_options'], indices_to_keep)
-                             filtered_areacolour = safe_filter(dash['areacolour'], indices_to_keep)
-                             filtered_opacity = safe_filter(dash['opacity'], indices_to_keep)
-                             filtered_types = safe_filter(dash['chart_type'], indices_to_keep)
-                             
-                             # 3. Calculate new data (filtered)
-                             # Only calling this IF users are active
-                             new_data = get_dashboard_view_chart_data(
-                                 chart_ids=filtered_chart_ids,
-                                 positions=filtered_positions,
-                                 filter_options=filtered_filters,
-                                 areacolour=filtered_areacolour,
-                                 droppableBgColor=dash['droppableBgColor'], 
-                                 opacity=filtered_opacity,
-                                 image_ids=dash['image_ids'], 
-                                 chart_type=filtered_types,
-                                 dashboard_Filter=dash['dashboard_Filter'],
-                                 view_mode=dash['view_mode']
-                             )
-                             
-                             print(f"🔥 DATA FETCHED for {dash['file_name']}! Count: {len(new_data) if new_data else 0}")
-                             print(f"📡 EMITTING 'dashboard_update' to Room: '{room_name_str}'")
-                             
-                             raw_payload = {
-                                 'dashboard_id': dash['dashboard_id'],
-                                 'dashboard_name': dash['file_name'],
-                                 'user_id': dash['user_id'],
-                                 'table': changed_table,
-                                 'data': new_data,
-                                 'message': 'Data refreshed',
-                                 'timestamp': str(datetime.now())
-                             }
-
-                             # --- SERIALIZATION HELPER ---
-                             def clean_for_json(obj):
-                                 if isinstance(obj, (datetime, pd.Timestamp)):
-                                     return obj.isoformat()
-                                 if isinstance(obj, (np.integer, np.int64)):
-                                     return int(obj)
-                                 if isinstance(obj, (np.floating, np.float64)):
-                                     return float(obj)
-                                 if isinstance(obj, np.ndarray):
-                                     return obj.tolist()
-                                 if isinstance(obj, dict):
-                                     return {k: clean_for_json(v) for k, v in obj.items()}
-                                 if isinstance(obj, list):
-                                     return [clean_for_json(i) for i in obj]
-                                 if isinstance(obj, tuple):
-                                     return [clean_for_json(i) for i in obj]
-                                 return obj
-
-                             try:
-                                 payload = clean_for_json(raw_payload)
-                                 socketio.emit('dashboard_update', payload, room=room_name_str)
-                                 print(f"📢 Emitted to room: {room_name_str}")
-                             except Exception as serialization_err:
-                                 print(f"❌ JSON SERIALIZATION FAILED: {serialization_err}")
-                             
-                         except Exception as inner_e:
-                             print(f"❌ Error updating dashboard {dash.get('dashboard_id')}: {inner_e}")
-                             import traceback
-                             traceback.print_exc()
-                    
-    except Exception as e:
-        print(f"❌ Listener died for {db_name}: {e}")
-        with listener_lock:
-            if db_name in active_listeners: del active_listeners[db_name]
-
-def start_dynamic_listener(db_name):
-    """Starts the listener thread if not already running."""
-    with listener_lock:
-        if db_name not in active_listeners or not active_listeners[db_name].is_alive():
-            print(f"🚀 Spawning new listener thread for DB: {db_name}")
-            t = threading.Thread(target=background_db_listener, args=(db_name,))
-            t.daemon = True
-            t.start()
-            active_listeners[db_name] = t
+    return chart_filters
 
 
-def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,droppableBgColor,opacity,image_ids,chart_type,dashboard_Filter,view_mode, temp_filters=None):
+def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,droppableBgColor,opacity,image_ids,chart_type,dashboard_Filter,view_mode,company_name,employee_id):
     conn = create_connection()  # Initial connection to your main database
     
     # Backup original dashboard_Filter to prevent loop contamination
@@ -1108,6 +1067,35 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
 
             print("chart_positions",chart_positions)
             print("Chart Filters:", chart_filters)
+            user_role = None
+            employee_category_filter = {}
+
+            try:
+                company_conn = get_company_db_connection(company_name)
+                emp_cur = company_conn.cursor()
+
+                emp_cur.execute("""
+                            SELECT r.role_name, e.category
+                            FROM employee_list e
+                            JOIN role r ON e.role_id = r.role_id::text
+                            WHERE e.employee_id = %s
+                            LIMIT 1
+                        """, (employee_id,))
+
+                row = emp_cur.fetchone()
+                print("user_role,catagory",row)
+                emp_cur.close()
+                company_conn.close()
+
+                if row:
+                    user_role = row[0].lower().strip() if row[0] else None
+                    employee_category_filter = extract_filter_from_category(row[1])
+
+            except Exception as e:
+                print("Failed to fetch role/category:", e)
+
+            print("User role:", user_role)
+            print("Employee category filter:", employee_category_filter)
             print("Processed chart_areacolour:", chart_areacolour)
             for chart_id, position in chart_positions.items():
                 if not isinstance(position, dict) or 'x' not in position or 'y' not in position:
@@ -1266,143 +1254,6 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                     
                     print("Chart OptimizationData:", OptimizationData)
                     print("final_opacity",final_opacity)
-                    # -----------------------------------------------
-                    # 🟦 APPLY DASHBOARD FILTER IF TABLE NAME MATCHES
-                    # -----------------------------------------------
-                    if view_mode == "edit":
-                        print("View mode is 'edit' → Skipping dashboard filters.")
-                    else:
-                        print("dashboard_Filter",dashboard_Filter)
-                        # Normalize dashboard_Filter into dict
-                        if dashboard_Filter is None:
-                            dashboard_Filter = {} # Initialize to an empty dictionary
-                        
-                        if isinstance(dashboard_Filter, list):
-                            # The user reported it coming as a list ['{"region": ...}', ...]
-                            # If it's a list, it might be a list of filter strings?
-                            # For now, if it's a list, we'll try to use the first item or default to empty dict
-                            # to avoid the crash.
-                            print("⚠️ dashboard_Filter is a LIST. Attempting to parse first item...")
-                            try:
-                                if len(dashboard_Filter) > 0:
-                                    item = dashboard_Filter[0]
-                                    if isinstance(item, str):
-                                        dashboard_Filter = json.loads(item.replace("'", '"'))
-                                    elif isinstance(item, dict):
-                                        dashboard_Filter = item
-                                    else:
-                                        dashboard_Filter = {}
-                                else:
-                                    dashboard_Filter = {}
-                            except Exception as e:
-                                print(f"⚠️ Failed to parse dashboard_Filter list: {e}")
-                                dashboard_Filter = {}
-
-                        if isinstance(dashboard_Filter, str):
-                            try:
-                                dashboard_Filter = json.loads(dashboard_Filter.replace("'", '"'))
-                            except Exception:
-                                try:
-                                    dashboard_Filter = ast.literal_eval(dashboard_Filter)
-                                except:
-                                    dashboard_Filter = {}
-
-                        print("Normalized Dashboard Filter:", dashboard_Filter)
-                        
-                        # Ensure it's a dict before calling .get()
-                        if not isinstance(dashboard_Filter, dict):
-                            print(f"⚠️ dashboard_Filter is still not a dict ({type(dashboard_Filter)}). Resetting to empty.")
-                            dashboard_Filter = {}
-
-                        dashboard_table = dashboard_Filter.get("table_name")
-                        dashboard_filters_list = dashboard_Filter.get("filters", [])
-
-                        # Normalize dashboard filters into dict {column: values}
-                        dashboard_filters = {}
-                        for item in dashboard_filters_list:
-                            if isinstance(item, dict):
-                                dashboard_filters.update(item)
-
-                        print("Dashboard Filters:", dashboard_filters)
-
-                        # Only apply dashboard filters when table name matches
-                        if dashboard_table and dashboard_table == table_name:
-
-                            print(f"Applying dashboard filters to chart {chart_id} (table matched: {table_name})")
-
-                            # Parse chart filter_options (string → dict)
-                            chart_filters_clean = {}
-                            if isinstance(filter_options, str):
-                                try:
-                                    chart_filters_clean = json.loads(filter_options)
-                                except:
-                                    chart_filters_clean = ast.literal_eval(filter_options)
-                            elif isinstance(filter_options, dict):
-                                chart_filters_clean = filter_options
-
-                            # Merge dashboard filters into chart filters
-                            # for col, val_list in dashboard_filters.items():
-                            #     if col not in chart_filters_clean:
-                            #         chart_filters_clean[col] = val_list   # Add new filter
-                            #     else:
-                            #         # Merge without duplicates
-                            #         existing = set(chart_filters_clean[col])
-                            #         new_vals = set(val_list)
-                            #         chart_filters_clean[col] = list(existing | new_vals)
-                            # Suggested Override Logic (Replacing the 'else' block)
-                            for col, val_list in dashboard_filters.items():
-                                # If the column is not in the chart filters, add it (same as before)
-                                if col not in chart_filters_clean:
-                                    chart_filters_clean[col] = val_list
-                                else:
-                                    # === CHANGE THIS SECTION ===
-                                    # If the column IS in the chart filters, OVERRIDE it with the dashboard's filter values.
-                                    chart_filters_clean[col] = val_list
-                                    # The previous 'existing = set(chart_filters_clean[col]) | new_vals' logic is removed.
-                                    # ===========================
-
-                            # Replace old filter options
-                            filter_options = chart_filters_clean
-
-                            print("Merged filter_options (with override):", filter_options)
-
-                        #]
-
-
-                    # END Dashboard Filter Merge
-                    # ------------------------------------------------
-                                        
-                    # Determine the aggregation function
-                    aggregate_py = {
-                        'count': 'count',
-                        'sum': 'sum',
-                        'average': 'mean',
-                        'minimum': 'min',
-                        'maximum': 'max'
-                    }.get(aggregate, 'sum')  # Default to 'sum' if no match
-
-                    # Check if selectedUser is NULL
-                    # if selected_user is None:
-                    #     # Use the default local connection if selectedUser is NULL
-                    #     connection = get_db_connection_view(database_name)
-                    #     masterdatabasecon=create_connection()
-                    #     print('Using local database connection')
-
-                    # else:
-                    #     # Use external connection if selectedUser is provided
-                    #     connection = fetch_external_db_connection(database_name, selected_user)
-                    #     host = connection[3]
-                    #     dbname = connection[7]
-                    #     user = connection[4]
-                    #     password = connection[5]
-
-                    #     # Create a new psycopg2 connection using the details from the tuple
-                    #     connection = psycopg2.connect(
-                    #         dbname=dbname,
-                    #         user=user,
-                    #         password=password,
-                    #         host=host
-                    #     )
                     if not selected_user or selected_user.lower() == 'null':
                         print("🟢 Using default local database connection...")
                         connection = get_db_connection_view(database_name)
@@ -1546,6 +1397,140 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                         print("✅ External PostgreSQL connection established successfully!")
 
                         print('External Connection established:', connection)
+                    
+
+                    # -----------------------------------------------
+                    # 🟦 APPLY DASHBOARD FILTER IF TABLE NAME MATCHES
+                    # -----------------------------------------------
+                    if view_mode == "edit":
+                        print("View mode is 'edit' → Skipping dashboard filters.")
+                    else:
+                        print("dashboard_Filter",dashboard_Filter)
+                        # Normalize dashboard_Filter into dict
+                        if dashboard_Filter is None:
+                            dashboard_Filter = {} # Initialize to an empty dictionary
+                        if isinstance(dashboard_Filter, str):
+                            try:
+                                dashboard_Filter = json.loads(dashboard_Filter.replace("'", '"'))
+                            except Exception:
+                                dashboard_Filter = ast.literal_eval(dashboard_Filter)
+
+                        print("Normalized Dashboard Filter:", dashboard_Filter)
+
+                        dashboard_table = dashboard_Filter.get("table_name")
+                        dashboard_filters_list = dashboard_Filter.get("filters", [])
+
+                        # Normalize dashboard filters into dict {column: values}
+                        dashboard_filters = {}
+                        for item in dashboard_filters_list:
+                            if isinstance(item, dict):
+                                dashboard_filters.update(item)
+
+                        print("Dashboard Filters:", dashboard_filters)
+                        chart_filters_clean = {}
+                        if isinstance(filter_options, str):
+                            try:
+                                chart_filters_clean = json.loads(filter_options)
+                            except:
+                                chart_filters_clean = ast.literal_eval(filter_options)
+                        elif isinstance(filter_options, dict):
+                            chart_filters_clean = filter_options
+
+                        # Only apply dashboard filters when table name matches
+                        if dashboard_table and dashboard_table == table_name:
+
+                            print(f"Applying dashboard filters to chart {chart_id} (table matched: {table_name})")
+
+                            # Parse chart filter_options (string → dict)
+                            # chart_filters_clean = {}
+                            # if isinstance(filter_options, str):
+                            #     try:
+                            #         chart_filters_clean = json.loads(filter_options)
+                            #     except:
+                            #         chart_filters_clean = ast.literal_eval(filter_options)
+                            # elif isinstance(filter_options, dict):
+                            #     chart_filters_clean = filter_options
+
+                            # Merge dashboard filters into chart filters
+                            # for col, val_list in dashboard_filters.items():
+                            #     if col not in chart_filters_clean:
+                            #         chart_filters_clean[col] = val_list   # Add new filter
+                            #     else:
+                            #         # Merge without duplicates
+                            #         existing = set(chart_filters_clean[col])
+                            #         new_vals = set(val_list)
+                            #         chart_filters_clean[col] = list(existing | new_vals)
+                            # Suggested Override Logic (Replacing the 'else' block)
+                            for col, val_list in dashboard_filters.items():
+                                # If the column is not in the chart filters, add it (same as before)
+                                if col not in chart_filters_clean:
+                                    chart_filters_clean[col] = val_list
+                                else:
+                                    # === CHANGE THIS SECTION ===
+                                    # If the column IS in the chart filters, OVERRIDE it with the dashboard's filter values.
+                                    chart_filters_clean[col] = val_list
+                                    # The previous 'existing = set(chart_filters_clean[col]) | new_vals' logic is removed.
+                                    # ===========================
+                                    # ------------------------------------
+                            # 🔐 APPLY EMPLOYEE CATEGORY FILTER
+                            # ONLY FOR viewer / report viewer
+                            # ------------------------------------
+                        if is_restricted_role(user_role):
+                            print("Restricted role detected → applying employee category restriction")
+                            df = fetch_chart_data(connection, table_name)
+
+                            chart_filters_clean = expand_filters_with_actual_values(df,
+                                        chart_filters_clean,
+                                        employee_category_filter
+                                        
+                            )
+                            print("chart_filters_clean",chart_filters_clean)
+                        else:
+                            print("Non-restricted role → skipping employee category filter")
+
+                            # Replace old filter options
+                        filter_options = chart_filters_clean
+
+                        print("Merged filter_options (with override):", filter_options)
+
+                        #]
+
+
+                    # END Dashboard Filter Merge
+                    # ------------------------------------------------
+                                        
+                    # Determine the aggregation function
+                    aggregate_py = {
+                        'count': 'count',
+                        'sum': 'sum',
+                        'average': 'mean',
+                        'minimum': 'min',
+                        'maximum': 'max'
+                    }.get(aggregate, 'sum')  # Default to 'sum' if no match
+
+                    # Check if selectedUser is NULL
+                    # if selected_user is None:
+                    #     # Use the default local connection if selectedUser is NULL
+                    #     connection = get_db_connection_view(database_name)
+                    #     masterdatabasecon=create_connection()
+                    #     print('Using local database connection')
+
+                    # else:
+                    #     # Use external connection if selectedUser is provided
+                    #     connection = fetch_external_db_connection(database_name, selected_user)
+                    #     host = connection[3]
+                    #     dbname = connection[7]
+                    #     user = connection[4]
+                    #     password = connection[5]
+
+                    #     # Create a new psycopg2 connection using the details from the tuple
+                    #     connection = psycopg2.connect(
+                    #         dbname=dbname,
+                    #         user=user,
+                    #         password=password,
+                    #         host=host
+                    #     )
+                    
                     if chart_type == "wordCloud":
                         if len(y_axis) == 0:
                             x_axis_columns_str = ', '.join(x_axis)
@@ -1811,6 +1796,8 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                     # ----------------------------------------------------
                     
                     print("Chart ID", chart_id)
+                    skip_calculated_column = False
+                    y_base_column = None
                  
                     if calculationData and isinstance(calculationData, list):
                         for calc_entry in calculationData:
@@ -1840,12 +1827,63 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                                     raise ValueError(f"Column {col_name} not found in DataFrame.")
 
                             if calc_formula.startswith("if"):
-                                match = re.match(r"if\s*\((.+?)\)\s*then\s*'?(.*?)'?\s*else\s*'?(.*?)'?$", calc_formula.strip(), re.IGNORECASE)
+                                match = (
+                                    re.match(
+                                        r"if\s*\(\s*(.+?)\s*\)\s*then\s*'?(.*?)'?\s*else\s*'?(.*?)'?$",
+                                        calc_formula.strip(),
+                                        re.IGNORECASE
+                                    )
+                                    or
+                                    re.match(
+                                        r"if\s*\(\s*(.+?)\s*,\s*'?(.*?)'?\s*,\s*'?(.*?)'?\s*\)$",
+                                        calc_formula.strip(),
+                                        re.IGNORECASE
+                                    )
+                                )
+
+                                # match = re.match(r"if\s*\((.+?)\)\s*then\s*'?(.*?)'?\s*else\s*'?(.*?)'?$", calc_formula.strip(), re.IGNORECASE)
                                 if not match:
                                     raise ValueError("Invalid IF format")
                                 condition_expr, then_val, else_val = match.groups()
                                 condition_expr_python = re.sub(r'\[(.*?)\]', replace_column, condition_expr)
                                 dataframe[new_col_name] = np.where(eval(condition_expr_python), then_val.strip("'\""), else_val.strip("'\""))
+                            elif calc_formula.lower().startswith("round"):
+                                # Match formula: round(<expression>, <decimals>)
+                                match = re.match(r'round\s*\(\s*(.+?)\s*,\s*(\d+)\s*\)', calc_formula, re.IGNORECASE)
+                                if not match:
+                                    raise ValueError(
+                                        "Invalid ROUND format. Use round([col], decimals) or round([col1]/[col2], decimals)"
+                                    )
+
+                                expr, decimals = match.groups()
+                                decimals = int(decimals)
+
+                                # Replace [column] with numeric dataframe references
+                                def replace_column(match):
+                                    col_name = match.group(1)
+                                    if col_name not in dataframe.columns:
+                                        raise ValueError(f"Missing column: {col_name}")
+                                    # Convert to numeric
+                                    dataframe[col_name] = pd.to_numeric(dataframe[col_name], errors='coerce')
+                                    return f"dataframe['{col_name}']"
+
+                                # Replace [col] references in the expression
+                                expr_python = re.sub(r'\[([^\]]+)\]', replace_column, expr)
+
+                                # Handle division by zero safely
+                                expr_python = re.sub(
+                                    r"dataframe\['([^']+)'\]\s*/\s*dataframe\['([^']+)'\]",
+                                    r"np.divide(dataframe['\1'], dataframe['\2'].replace(0, np.nan))",
+                                    expr_python
+                                )
+
+                                # Evaluate expression safely and round
+                                try:
+                                    dataframe[new_col_name] = np.round(eval(expr_python), decimals)
+                                except Exception as e:
+                                    print(f"Error evaluating ROUND formula: {e}")
+                                    dataframe[new_col_name] = np.nan
+
 
                             elif calc_formula.startswith("switch"):
                                 switch_match = re.match(r"switch\s*\(\s*\[([^\]]+)\](.*?)\)", calc_formula, re.IGNORECASE)
@@ -1972,17 +2010,74 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                                 col = re.match(r"trim\s*\(\s*\[([^\]]+)\]\)", calc_formula, re.IGNORECASE).group(1)
                                 dataframe[new_col_name] = dataframe[col].astype(str).str.strip()
 
+                            # else:
+                            #     calc_formula_python = re.sub(r'\[(.*?)\]', replace_column, calc_formula)
+                            #     dataframe[new_col_name] = eval(calc_formula_python)
+                            elif calc_formula.lower().startswith(("sum", "avg", "min", "max")):
+                                match = re.match(
+                                    r'(sum|avg|min|max)\s*\(\s*\[([^\]]+)\]\s*\)',
+                                    calc_formula,
+                                    re.IGNORECASE
+                                )
+                                if not match:
+                                    raise ValueError("Invalid aggregation format.")
+
+                                agg_func, col = match.groups()
+                                agg_func = agg_func.lower()
+
+                                # DO NOT create calculated column
+                                # Just mark aggregation intent
+                                aggregation = agg_func
+                                y_base_column = col
+
+                                print(f"Detected aggregation: {aggregation}({col})")
+
+                                # IMPORTANT: skip dataframe eval
+                                skip_calculated_column = True
+
                             else:
+                                # calc_formula_python = re.sub(r'\[(.*?)\]', replace_column, calc_formula)
+                                # print("Evaluating math formula:", calc_formula_python)
+                                # Replace column references [col] → temp_df['col']
                                 calc_formula_python = re.sub(r'\[(.*?)\]', replace_column, calc_formula)
-                                dataframe[new_col_name] = eval(calc_formula_python)
+
+                                # Handle COUNT
+                                calc_formula_python = re.sub(
+                                    r'count\s*\(\s*(temp_df\[.*?\])\s*\)',
+                                    r'\1.count()',
+                                    calc_formula_python,
+                                    flags=re.IGNORECASE
+                                )
+
+                                # Handle SUM
+                                calc_formula_python = re.sub(
+                                    r'sum\s*\(\s*(temp_df\[.*?\])\s*\)',
+                                    r'\1.sum()',
+                                    calc_formula_python,
+                                    flags=re.IGNORECASE
+                                )
+
+                                # Handle AVG
+                                calc_formula_python = re.sub(
+                                    r'avg\s*\(\s*(temp_df\[.*?\])\s*\)',
+                                    r'\1.mean()',
+                                    calc_formula_python,
+                                    flags=re.IGNORECASE
+                                )
+
+                                print("Evaluating math formula:", calc_formula_python)
+                                temp_df[new_col_name] = eval(calc_formula_python)
 
                             print(f"✅ New column '{new_col_name}' created.")
+
 
                             # Replace in axes
                             if y_axis:
                                 y_axis = [new_col_name if col == replace_col_name else col for col in y_axis]
                             if x_axis:
                                 x_axis = [new_col_name if col == replace_col_name else col for col in x_axis]
+                            if skip_calculated_column:
+                                y_axis = [y_base_column if col == new_col_name else col for col in y_axis]
 
                     for axis in y_axis:
                         try:
@@ -2677,6 +2772,8 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                                             dataframe = dataframe[temp_dates.dt.month_name().isin(allowed_months)]
                                     else:
                                         # Normal filtering for non-date columns
+                                        # allowed_values_lower = [str(v).lower() for v in allowed_values]
+                                        # dataframe = dataframe[dataframe[col].str.lower().isin(allowed_values_lower)]
                                         dataframe = dataframe[dataframe[col].isin(allowed_values)]
 
                         print("DataFrame after dashboard filtering:-----")
@@ -2796,13 +2893,27 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                         else:
                             filtered_categories = []
                             filtered_values = []
+                            # allowed_values_lower = [str(v).strip().lower() for v in filter_options.get(axis_col, [])]
+                            # if not allowed_values_lower:
+                            #     filtered_categories = categories
+                            #     filtered_values = values
+                            # else:
+                            #     for category, value in zip(categories, values):
+                            #         if str(category).strip().lower() in allowed_values_lower:
+                            #             filtered_categories.append(category)
+                            #             filtered_values.append(value)
+
                             for category, value in zip(categories, values):
                                 print("filter_options",filter_options,axis_col)
+
                                 if not filter_options or axis_col not in filter_options:
                                     filtered_categories = categories
                                     filtered_values = values
+                                    # break  
 
                                 if axis_col in filter_options and category in filter_options[axis_col]:
+                                # allowed_values_lower = [str(v).lower() for v in filter_options[axis_col]]
+                                # if str(category).lower() in allowed_values_lower:
                                     
                                     filtered_categories.append(category)
                                     filtered_values.append(value)
@@ -2931,7 +3042,21 @@ def fetch_data_for_ts_decomposition(table_name, x_axis_columns, filter_options, 
             # to avoid code duplication, but for clarity, it's repeated here.
             # ... (the entire calculation logic for if, switch, iferror, calculate, etc.) ...
             if calc_formula.strip().lower().startswith("if"):
-                match = re.match(r"if\s*\((.+?)\)\s*then\s*'?(.*?)'?\s*else\s*'?(.*?)'?$", calc_formula.strip(), re.IGNORECASE)
+                match = (
+                    re.match(
+                        r"if\s*\(\s*(.+?)\s*\)\s*then\s*'?(.*?)'?\s*else\s*'?(.*?)'?$",
+                        calc_formula.strip(),
+                        re.IGNORECASE
+                    )
+                    or
+                    re.match(
+                        r"if\s*\(\s*(.+?)\s*,\s*'?(.*?)'?\s*,\s*'?(.*?)'?\s*\)$",
+                        calc_formula.strip(),
+                        re.IGNORECASE
+                    )
+                )
+
+                # match = re.match(r"if\s*\((.+?)\)\s*then\s*'?(.*?)'?\s*else\s*'?(.*?)'?$", calc_formula.strip(), re.IGNORECASE)
                 if not match:
                     raise ValueError("Invalid if-then-else format in calculation.")
 

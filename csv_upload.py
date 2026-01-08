@@ -421,6 +421,24 @@ def optimized_batch_insert(cur, conn, table_name, df, primary_key_col, batch_siz
                 else:
                     processed_row.append(value)
             rows_to_insert.append(tuple(processed_row))
+            cur.execute("""
+                SELECT column_name
+                FROM information_schema.columns
+                WHERE table_name = %s
+            """, (table_name,))
+            existing_columns = {row[0] for row in cur.fetchall()}
+
+            for col in df.columns:
+                if col not in existing_columns:
+                    col_type = determine_column_type(df, col)
+                    alter_sql = sql.SQL("ALTER TABLE {} ADD COLUMN {} {}").format(
+                        sql.Identifier(table_name),
+                        sql.Identifier(col),
+                        sql.SQL(col_type)
+                    )
+                    cur.execute(alter_sql)
+                    print(f"✔ Added missing column '{col}' to '{table_name}'")
+
 
         columns = df.columns.tolist()
         placeholders = ', '.join(['%s'] * len(columns))
@@ -563,6 +581,44 @@ def process_csv_in_chunks(csv_file_path, chunk_size=50000):
 #         df[column] = df[column].apply(mask_value)
 
 #     return df
+def sync_masked_columns(cur, table_name, df):
+    """
+    Drop masked columns from DB that are not present in the current upload
+    """
+    # Masked columns in DataFrame
+    df_masked_cols = {col for col in df.columns if col.endswith("_masked") or col.endswith("__masked")}
+
+    # Fetch masked columns from DB
+    cur.execute(
+        """
+        SELECT column_name
+        FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = %s
+          AND column_name LIKE %s
+        """,
+        (table_name, '%masked')
+    )
+
+    rows = cur.fetchall()
+
+    # ✅ Defensive: handle empty or malformed rows
+    db_masked_cols = set()
+    for row in rows:
+        if row and len(row) > 0:
+            db_masked_cols.add(row[0])
+
+    # Columns to drop
+    cols_to_drop = db_masked_cols - df_masked_cols
+
+    for col in cols_to_drop:
+        cur.execute(
+            sql.SQL("ALTER TABLE {} DROP COLUMN {}").format(
+                sql.Identifier(table_name),
+                sql.Identifier(col)
+            )
+        )
+        print(f"🗑 Dropped obsolete masked column '{col}' from '{table_name}'")
 def apply_masking(df, mask_settings):
     if not isinstance(mask_settings, dict):
         return df
@@ -766,6 +822,7 @@ def upload_csv_to_postgresql(database_name,primary_key_column, username, passwor
         table_exists = validate_table_structure(cur, table_name)
         is_table_in_use = False
         if table_exists:
+            sync_masked_columns(cur, table_name, initial_df)
 
                     # Fetch existing PK
             cur.execute("""
