@@ -43,7 +43,8 @@ from flask import Flask, jsonify, request,url_for, session, send_file, current_a
 from flask_cors import CORS
 from flask_mail import Mail, Message
 from flask_session import Session  # Flask-Session for server-side session handling
-from flask_socketio import SocketIO, emit
+from flask_socketio import SocketIO, emit,join_room
+from dashboard_save.extensions import socketio
 from flask_apscheduler import APScheduler
 from psycopg2 import sql
 from sendgrid import SendGridAPIClient
@@ -195,7 +196,8 @@ app.config['SESSION_TYPE'] = 'filesystem'  # Store sessions on the server
 CORS(app, resources={r"/*": {"origins": "*"}})
 
 # Enable WebSockets
-socketio = SocketIO(app, cors_allowed_origins="*")
+# Enable WebSockets
+socketio.init_app(app, cors_allowed_origins="*")
 
 # ==============================
 # Database & Upload Settings
@@ -281,6 +283,76 @@ def jwt_required(f):
         return f(*args, **kwargs)
     
     return decorated_function
+
+
+# def token_required(f):
+#     @wraps(f)
+#     def decorated(*args, **kwargs):
+#         token = request.headers.get('Authorization')
+#         if not token:
+#             return jsonify({'message': 'Token missing'}), 401
+
+#         token = token.replace('Bearer ', '')
+#         payload = JWTManager.decode_token(token)
+
+#         if 'error' in payload:
+#             return jsonify({'message': payload['error']}), 401
+
+#         login_id = payload.get('login_id')
+#         if not login_id:
+#             return jsonify({'message': 'Invalid token: missing login_id'}), 401
+
+#         try:
+#             conn = get_db_connection()
+#             cur = conn.cursor()
+#             cur.execute("""
+#                 SELECT login_status 
+#                 FROM login_history 
+#                 WHERE login_id = %s
+#             """, (login_id,))
+#             result = cur.fetchone()
+#             cur.close()
+#             conn.close()
+
+#             print(f"🪶 [TokenCheck] login_id={login_id}, DB result={result}")
+
+#             # ✅ Normalize and check case-insensitively
+#             if not result or (result[0] and result[0].lower() == 'logout'):
+#                 print(f"⚠️ [Session Expired] login_status={result[0] if result else None}")
+#                 return jsonify({'message': 'Session expired. Please log in again.'}), 401
+
+#         except Exception as e:
+#             print("❌ Database error in token_required:", e)
+#             return jsonify({'message': 'Internal server error'}), 500
+
+#         # Attach user info
+#         request.current_user = payload
+#         return f(*args, **kwargs)
+#     return decorated
+
+
+
+# def employee_required(f):
+#     """Decorator to require employee privileges (admin or employee)"""
+#     @wraps(f)
+#     @jwt_required
+#     def decorated_function(*args, **kwargs):
+#         try:
+#             user_type = request.current_user.get('user_type')
+#             if user_type not in ['admin', 'employee']:
+#                 return jsonify({'message': 'Employee privileges required'}), 403
+#             print(f"[AUTH SUCCESS] User '{request.current_user.get('username')}' "
+#                   f"({user_type}) passed employee access check.")
+#             return f(*args, **kwargs)
+#         except Exception as e:
+#             return jsonify({'message': 'Authorization check failed'}), 500
+    
+#     return decorated_function
+
+
+
+
+# 1. YOUR CUSTOM TOKEN CHECK (Strict "Last Login Wins" Logic)
 def token_required(f):
     @wraps(f)
     def decorated(*args, **kwargs):
@@ -312,32 +384,43 @@ def token_required(f):
 
             print(f"🪶 [TokenCheck] login_id={login_id}, DB result={result}")
 
-            # ✅ Normalize and check case-insensitively
-            if not result or (result[0] and result[0].lower() == 'logout'):
-                print(f"⚠️ [Session Expired] login_status={result[0] if result else None}")
-                return jsonify({'message': 'Session expired. Please log in again.'}), 401
+            # ✅ STRICTER FIX: Check if status is explicitly 'login'. 
+            # If it is 'logout', 'expired', or None, we block it.
+            if not result or result[0].lower() != 'login':
+                print(f"⚠️ [Session Terminated] Status is '{result[0] if result else 'None'}' - Access Denied")
+                return jsonify({
+                    'message': 'Session expired or active on another device. Please log in again.'
+                }), 401
 
         except Exception as e:
             print("❌ Database error in token_required:", e)
             return jsonify({'message': 'Internal server error'}), 500
 
-        # Attach user info
+        # Attach user info so next functions can use it
         request.current_user = payload
         return f(*args, **kwargs)
     return decorated
+
+
+# 2. UPDATED PERMISSION CHECK (Must use @token_required)
 def employee_required(f):
     """Decorator to require employee privileges (admin or employee)"""
     @wraps(f)
-    @jwt_required
+    @token_required  # <--- CRITICAL CHANGE: Use your custom decorator here!
     def decorated_function(*args, **kwargs):
         try:
+            # request.current_user is now guaranteed to exist because token_required ran first
             user_type = request.current_user.get('user_type')
+            
             if user_type not in ['admin', 'employee']:
                 return jsonify({'message': 'Employee privileges required'}), 403
-            print(f"[AUTH SUCCESS] User '{request.current_user.get('username')}' "
-                  f"({user_type}) passed employee access check.")
+            
+            # Optional: Log success for debugging
+            # print(f"[AUTH SUCCESS] User ({user_type}) passed check.")
+            
             return f(*args, **kwargs)
         except Exception as e:
+            print(f"Auth Error: {e}")
             return jsonify({'message': 'Authorization check failed'}), 500
     
     return decorated_function
@@ -2643,7 +2726,7 @@ def get_bar_chart_route():
         }.get(aggregation, 'sum') 
 
         try:
-            fetched_data = fetchText_data(db_nameeee, table_name, x_axis_columns[0], aggregate_py, selectedUser)
+            fetched_data = fetchText_data(db_nameeee, table_name, x_axis_columns[0], aggregate_py, selectedUser,filter_options)
             return jsonify({
                 "data": fetched_data,
                 "message": "Data received successfully!"
@@ -5234,15 +5317,142 @@ def login():
                 'user_data': usersdata,
                 'login_id':login_id
             }), 200
+    # else:
+        # employeedata = fetch_company_login_data(email, password, company)
+        # print("employeedata====================", employeedata)
+        
+        # if employeedata:
+        #     user_info = employeedata['user']
+        #     company_id=employeedata['company_id']
+        #     conn=get_db_connection()
+        #     cur = conn.cursor()
+        #     cur.execute("""
+        #         SELECT  p.id,p.plan_name,p.storage_limit, cl.start_date, cl.end_date, cl.is_active
+        #         FROM organization_license cl
+        #         JOIN license_plan p ON cl.plan_id = p.id
+        #         WHERE cl.company_id = %s AND cl.is_active = TRUE
+        #     """, (company_id,))
+        #     active_plan = cur.fetchone()
+        #     print("active_plan",active_plan)
+            
+
+        #     if not active_plan:
+        #         cur.close()
+        #         conn.close()
+        #         return jsonify({
+        #             'message': f"Login failed. No active plan found for company '{company}'. Please contact your admin."
+        #         }), 403
+
+        #     plan_id = active_plan[0]
+        #     plan_name = active_plan[1]
+        #     storage_limit=active_plan[2]
+        #     start_date = active_plan[3]
+        #     end_date = active_plan[4]
+
+        #     # ✅ Fetch all enabled features for this plan
+        #     cur.execute("""
+        #         SELECT feature_name, is_enabled
+        #         FROM license_features
+        #         WHERE plan_id = %s
+        #     """, (plan_id,))
+        #     features = cur.fetchall()
+
+        #     cur.close()
+        #     conn.close()
+
+        #     # Convert features to list of dicts
+        #     features_list = [
+        #         {"feature_name": f[0], "is_enabled": f[1]} for f in features
+        #     ]
+
+        #     user_data = {
+        #         'employee_id': user_info[0],  # employee_id
+        #         'user_id': user_info[0],
+        #         'email': user_info[3],  # email
+        #         'user_type': 'employee',
+        #         'permissions': employeedata.get('permissions', []),
+        #         'company': company,
+        #         'role_id': user_info[2]  # role_id
+        #     }
+        #     login_id =insert_login_history(user_info[0], company_id, login_device, login_ip, 'login')
+           
+        #     tokens = JWTManager.generate_tokens(user_data,login_id, 'employee')
+        #     print("Employee Token------------------",tokens)
+        #     log_activity(email, 'login', f'Employee {email} logged into {company}', company_name=company)
+            
+        #     return jsonify({
+        #         'message': 'Login successful',
+        #         'user_type': 'employee',
+        #         'access_token': tokens['access_token'],
+        #         'refresh_token': tokens['refresh_token'],
+        #         'expires_in': tokens['expires_in'],
+        #         'user_data': employeedata,
+        #         'active_plan': {
+        #             'plan_name': plan_name,
+        #             'start_date': start_date,
+        #             'end_date': end_date,
+        #             'storage_limit':storage_limit
+        #         },
+        #         'features': features_list,
+        #         'login_id':login_id
+        #     }), 200
+    
+    # ... inside the else: block (Regular User/Employee Login) ...
     else:
         employeedata = fetch_company_login_data(email, password, company)
         print("employeedata====================", employeedata)
         
         if employeedata:
             user_info = employeedata['user']
-            company_id=employeedata['company_id']
-            conn=get_db_connection()
+            employee_id = user_info[0] # Get ID for checking
+            company_id = employeedata['company_id']
+            
+            conn = get_db_connection()
             cur = conn.cursor()
+
+            # ============================================================
+            # 1. NEW LOGIC: BLOCK MULTIPLE SESSIONS (First Login Wins)
+            # ============================================================
+            # Check for any active session for this employee
+            cur.execute("""
+                SELECT login_time 
+                FROM login_history 
+                WHERE employee_id = %s 
+                AND company_id = %s
+                AND login_status = 'login'
+                ORDER BY login_time DESC 
+                LIMIT 1
+            """, (employee_id, company_id))
+            
+            active_session = cur.fetchone()
+            
+            # DEFINE YOUR TIMEOUT (Must match your JWT expiry)
+            # Example: 8 Hours (28800 seconds). 
+            # 10 Minutes (600 seconds)
+
+            SESSION_TIMEOUT_SECONDS = 600 
+            
+            if active_session:
+                last_login_time = active_session[0]
+                current_time = datetime.now()
+                
+                # Calculate how much time has passed
+                time_difference = (current_time - last_login_time).total_seconds()
+                
+                # If the session is still within the valid time window, BLOCK the new login
+                if time_difference < SESSION_TIMEOUT_SECONDS:
+                    remaining_time = int((SESSION_TIMEOUT_SECONDS - time_difference) / 60) # Minutes
+                    
+                    cur.close()
+                    conn.close()
+                    return jsonify({
+                        'message': f'You are already logged in on another device. Please logout from the other device or wait {remaining_time} minutes for the session to expire.',
+                        'error_code': 'ALREADY_LOGGED_IN'
+                    }), 409 # 409 Conflict is the correct HTTP code
+            
+            # If no active session OR the active session is old/stale, proceed to login...
+            # ============================================================
+
             cur.execute("""
                 SELECT  p.id,p.plan_name,p.storage_limit, cl.start_date, cl.end_date, cl.is_active
                 FROM organization_license cl
@@ -5291,8 +5501,12 @@ def login():
                 'company': company,
                 'role_id': user_info[2]  # role_id
             }
-            login_id =insert_login_history(user_info[0], company_id, login_device, login_ip, 'login')
-           
+            
+            # NOTE: Your insert_login_history function probably sets old sessions to 'logout'.
+            # Since we already checked for active sessions above, this is fine.
+            # It will now clean up the "stale" sessions (older than 8 hours) if any.
+            login_id = insert_login_history(user_info[0], company_id, login_device, login_ip, 'login')
+            
             tokens = JWTManager.generate_tokens(user_data,login_id, 'employee')
             print("Employee Token------------------",tokens)
             log_activity(email, 'login', f'Employee {email} logged into {company}', company_name=company)
@@ -5313,7 +5527,6 @@ def login():
                 'features': features_list,
                 'login_id':login_id
             }), 200
-    
     return jsonify({'message': 'Invalid credentials'}), 401
 
 # Token Refresh Route
@@ -5447,6 +5660,7 @@ def receive_single_value_chart_data():
     databaseName = data.get('text_y_database')
     table_Name = data.get('text_y_table')
     selectedUser=data.get("selectedUser")
+    filter_options=data.get("filter_options")
     print("table_Name====================",table_Name)
     aggregate=data.get('text_y_aggregate')
     print("x_axis====================",x_axis)  
@@ -5466,7 +5680,7 @@ def receive_single_value_chart_data():
                 }.get(aggregate, 'sum') 
     print("aggregate_py====================",aggregate_py)
                 
-    fetched_data = fetchText_data(databaseName, table_Name, x_axis,aggregate_py,selectedUser)
+    fetched_data = fetchText_data(databaseName, table_Name, x_axis,aggregate_py,selectedUser,filter_options)
     print("Fetched Data:", fetched_data)
     print(f"Received x_axis: {x_axis}")
     print(f"Received databaseName: {databaseName}")
@@ -5488,6 +5702,7 @@ def receive_chart_data():
     print("table_Name====================", table_Name)
     aggregate=data.get('text_y_aggregate')
     selectedUser=data.get("selectedUser")
+    filter_options=data.get("filter_options")
     print("x_axis====================",x_axis)  
     print("databaseName====================",databaseName)  
     print("table_Name====================",table_Name)
@@ -5502,7 +5717,7 @@ def receive_chart_data():
                 }.get(aggregate, 'sum') 
     print("aggregate_py====================",aggregate_py)
     
-    fetched_data = fetchText_data(databaseName, table_Name, x_axis,aggregate_py,selectedUser)
+    fetched_data = fetchText_data(databaseName, table_Name, x_axis,aggregate_py,selectedUser,filter_options)
     print("Fetched Data:", fetched_data)
     print(f"Received x_axis: {x_axis}")
     print(f"Received databaseName: {databaseName}")
@@ -7091,6 +7306,137 @@ def get_dashboard_data(dashboard_name, company_name,user_id):
     else:
         return None
 
+# @app.route('/Dashboard_data/<dashboard_name>/<company_name>', methods=['GET'])
+# @token_required
+# def dashboard_data(dashboard_name,company_name):
+#     user_id, dashboard_name = dashboard_name.split(",", 1)  # Split only once
+#     view_mode = request.args.get('view_mode') 
+#     # user_id = request.args.get('user_id')
+#     data = get_dashboard_data(dashboard_name,company_name,user_id)
+#     # print("chart datas------------------------------------------------------------------------------------------------------------------",data) 
+#     if data is not None:
+#         chart_ids = data[4]
+#         positions=data[5]
+#         filter_options=data[11]
+#         areacolour=data[15]
+#         droppableBgColor=data[16]
+#         opacity=data[17]
+#         image_ids=data[18]
+#         chart_type=data[7]
+#         fontStyleLocal =data[20]
+#         fontColor =data[22]
+#         fontSize =data[21]
+#         wallpaper_id=data[23]
+#         dashboard_Filter=data[26]
+        
+#         print("chart_ids====================",chart_ids)    
+#         print("chart_areacolour====================",areacolour)   
+#         print("image_ids",image_ids)
+#         print("dashboard_Filter",dashboard_Filter)
+#         chart_datas=get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,droppableBgColor,opacity,image_ids,chart_type,dashboard_Filter,view_mode)
+#         # print("dashboarddata",data)
+#         # print("chart_datas====================",chart_datas)
+#         image_data_list = []
+#         conn = create_connection() 
+#         if image_ids:
+#             if isinstance(image_ids, str):
+#                 try:
+#                     image_ids = json.loads(image_ids)
+#                     print("Loaded JSON image_ids:", image_ids)
+#                 except json.JSONDecodeError:
+#                     # fallback: manually parse
+#                     image_ids = list(filter(None, map(str.strip, image_ids.strip('{}').split(','))))
+
+#             cursor = conn.cursor()
+#             print("Parsed image_ids:", image_ids)
+            
+
+#             for img_id in image_ids:
+#                 print("Looking for img_id:", img_id)
+
+#                 cursor.execute("""
+#                         SELECT image_id, src, x, y, width, height, zIndex, disableDragging 
+#                         FROM image_positions 
+#                         WHERE image_id = %s
+
+#                     """, (img_id,))
+#                 img_data = cursor.fetchone()
+
+                
+                
+#                 if img_data:
+#                     print(" img_data[0]", img_data[0])
+#                     image_data_list.append({
+#                             'image_id': img_data[0],
+#                             'src': img_data[1],
+#                             'x': img_data[2],
+#                             'y': img_data[3],
+#                             'width': img_data[4],
+#                             'height': img_data[5],
+#                             'zIndex': img_data[6],
+#                             'disableDragging': img_data[7]
+#                         })
+#             cursor.close()
+#             wallpaper_src = None
+#             if wallpaper_id:
+#                 cursor = conn.cursor()
+#                 cursor.execute("""
+#                     SELECT src FROM dashboard_wallpapers WHERE wallpaper_id = %s
+#                 """, (wallpaper_id,))
+#                 result = cursor.fetchone()
+#                 if result:
+#                     wallpaper_src = result[0]
+#                 cursor.close()
+#             conn.close()
+#             # print("fontStyleLocal",fontStyleLocal)
+#             # print("fontColor",fontColor)
+#             # print("fontSize",fontSize)
+#             # print("Chart Data=======>",data)
+#         user_email = None
+#         user_name=None
+#         emp_conn = psycopg2.connect(
+#             dbname=company_name,
+#             user=username,
+#             password=password,
+#             host=host,
+#             port=port
+#         )
+#         emp_cur = emp_conn.cursor()
+#         emp_cur.execute("SELECT email,username FROM employee_list WHERE employee_id = %s;", (user_id,))
+#         result = emp_cur.fetchone()
+#         if result:
+#             user_email = result[0]
+#             user_name=result[1]
+#         emp_cur.close()
+#         emp_conn.close()
+
+#         # 2️⃣ Fallback if email not found
+#         if not user_email:
+#             user_email = str(user_id)
+#         description = f"User {user_name} viewed dashboard '{dashboard_name}'"
+#         log_activity(
+#             user_email=user_email,
+#             action_type="View_Dashboard",
+#             description=description,
+#             table_name=None,
+#             company_name=company_name,
+#             dashboard_name=dashboard_name
+#         )
+#         # return jsonify(data,chart_datas)
+#         return jsonify({
+#             "data": data,
+#             "chart_datas": chart_datas,
+#             "positions": positions,
+#             "image_data_list":image_data_list,
+#             "fontStyleLocal":fontStyleLocal,
+#             "fontColor":fontColor,
+#             "fontSize":fontSize,
+#             "wallpaper_src": wallpaper_src 
+#         })
+#     else:
+#         return jsonify({'error': 'Failed to fetch data for Chart {}'.format(dashboard_name)})
+    
+
 @app.route('/Dashboard_data/<dashboard_name>/<company_name>', methods=['GET'])
 @token_required
 def dashboard_data(dashboard_name,company_name):
@@ -7100,7 +7446,6 @@ def dashboard_data(dashboard_name,company_name):
     employee_id = request.args.get('user_id')
     employee_id = int(employee_id) if employee_id else None  # 🔴 FIX
     data = get_dashboard_data(dashboard_name,company_name,user_id)
-    # print("chart datas------------------------------------------------------------------------------------------------------------------",data) 
     if data is not None:
         chart_ids = data[4]
         positions=data[5]
@@ -7132,26 +7477,16 @@ def dashboard_data(dashboard_name,company_name):
                     image_ids = json.loads(image_ids)
                     print("Loaded JSON image_ids:", image_ids)
                 except json.JSONDecodeError:
-                    # fallback: manually parse
                     image_ids = list(filter(None, map(str.strip, image_ids.strip('{}').split(','))))
 
             cursor = conn.cursor()
-            print("Parsed image_ids:", image_ids)
-            
-
             for img_id in image_ids:
-                print("Looking for img_id:", img_id)
-
                 cursor.execute("""
                         SELECT image_id, src, x, y, width, height, zIndex, disableDragging 
                         FROM image_positions 
                         WHERE image_id = %s
-
                     """, (img_id,))
                 img_data = cursor.fetchone()
-
-                
-                
                 if img_data:
                     print(" img_data[0]", img_data[0])
                     image_data_list.append({
@@ -7176,10 +7511,6 @@ def dashboard_data(dashboard_name,company_name):
                     wallpaper_src = result[0]
                 cursor.close()
             conn.close()
-            # print("fontStyleLocal",fontStyleLocal)
-            # print("fontColor",fontColor)
-            # print("fontSize",fontSize)
-            # print("Chart Data=======>",data)
         user_email = None
         user_name=None
         emp_conn = psycopg2.connect(
@@ -7197,7 +7528,6 @@ def dashboard_data(dashboard_name,company_name):
             user_name=result[1]
         emp_cur.close()
         emp_conn.close()
-
         # 2️⃣ Fallback if email not found
         if not user_email:
             user_email = str(user_id)
@@ -7223,15 +7553,43 @@ def dashboard_data(dashboard_name,company_name):
         })
     else:
         return jsonify({'error': 'Failed to fetch data for Chart {}'.format(dashboard_name)})
+     
+
+
+# # --- Socket Event: Subscribe ---
+# @socketio.on('subscribe_to_table')
+# def handle_subscription(data):
+#     db_name = data.get('db_name')
+#     table_name = data.get('table_name')
     
-    
+#     if db_name and table_name:
+#         # Match the room ID format used in the listener
+#         room_id = f"{db_name}_{table_name}"
+#         join_room(room_id)
+#         print(f"🔌 Client joined room: {room_id}")
+
+
+@socketio.on('join')
+def on_join(data):
+    """
+    Handles the 'join' event sent from the Frontend.
+    The frontend sends: { 'room': 'dashboard_123_MyDashboard' }
+    """
+    room = data.get('room')
+    if room:
+        join_room(room)
+        print(f"✅ Client successfully joined room: {room}")
+    else:
+        print("⚠️ Client attempted to join without a room name.")
+
+        
 
 @app.route('/saved_dashboard_total_rows', methods=['GET'])
 @token_required
 def saved_dashboard_names():
     database_name = request.args.get('company')  # Getting the database_name
     project=request.args.get("project_name")
-    print(f"Received user_id:",database_name)
+    print(f"Received database name:",database_name)
     user_id = request.args.get('user_id')  # Retrieve user_id from query parameters
 
     print(f"Received user_id: {user_id}")  # Debugging output
@@ -7240,7 +7598,7 @@ def saved_dashboard_names():
 
     names = get_dashboard_names(user_id,database_name,project)
     
-    print("names====================", names)   
+    print("names===================+=", names)   
     if names is not None:
         return jsonify({'chart_names': names})
     else:
@@ -7487,7 +7845,7 @@ def get_all_users():
 
         # Fetch users for the specified company with pagination
         cursor.execute("""
-            SELECT employee_name, username, role_id, category,reporting_id 
+            SELECT  employee_name, username, role_id, category,reporting_id ,employee_id
             FROM employee_list
             LIMIT %s OFFSET %s;
         """, (limit, offset))
@@ -7505,7 +7863,8 @@ def get_all_users():
                 'username': user[1],
                 'role_id': user[2],
                 'category': user[3],
-                'reporting_id':user[4]
+                'reporting_id':user[4],
+                'employee_id':user[5],
             }
             for user in users
         ]
@@ -9000,6 +9359,7 @@ def connect_and_fetch_tables():
                 f"UID={username};"
                 f"PWD={password};"
                 "TrustServerCertificate=yes;"
+                "Encrypt=no;"
             )
             # conn_str = (
             #     "DRIVER={ODBC Driver 18 for SQL Server};"
@@ -9012,7 +9372,7 @@ def connect_and_fetch_tables():
 
             print("Connection String:", conn_str)
 
-            conn = pyodbc.connect(conn_str, timeout=30)
+            conn = pyodbc.connect(conn_str, timeout=120)
             cursor = conn.cursor()
             cursor.execute("""
                 SELECT TABLE_NAME

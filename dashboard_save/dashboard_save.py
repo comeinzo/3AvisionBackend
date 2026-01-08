@@ -16,6 +16,9 @@ import socket
 import threading
 import pyodbc
 from statsmodels.tsa.seasonal import seasonal_decompose
+from dashboard_save.extensions import socketio
+import select
+from datetime import datetime
 
 def create_connection():
     try:
@@ -163,13 +166,13 @@ def get_dashboard_names(user_id, database_name):
                     # """, (user_id,))
                     cursor.execute("""
                         WITH RECURSIVE subordinates AS (
-                            SELECT employee_id, reporting_id
+                            SELECT employee_id, reporting_id,employee_name
                             FROM employee_list
                             WHERE reporting_id = %s
 
                             UNION
 
-                            SELECT e.employee_id, e.reporting_id
+                            SELECT e.employee_id, e.reporting_id,e.employee_name
                             FROM employee_list e
                             INNER JOIN subordinates s ON e.reporting_id = s.employee_id
                         )
@@ -215,57 +218,83 @@ def get_dashboard_names(user_id, database_name):
             conn_datasource.close()
 
     return dashboard_names
+
+    
+# def fetch_project_names(user_id, database_name):
+#     conn_company = get_company_db_connection(database_name)
+#     all_employee_ids = []
+
+#     if conn_company:
+#         try:
+#             with conn_company.cursor() as cursor:
+#                 cursor.execute("""
+#                     SELECT column_name FROM information_schema.columns
+#                     WHERE table_name='employee_list' AND column_name='reporting_id'
+#                 """)
+#                 column_exists = cursor.fetchone()
+
+#                 if column_exists:
+#                     cursor.execute("""
+#                         WITH RECURSIVE subordinates AS (
+#                             SELECT employee_id, reporting_id
+#                             FROM employee_list
+#                             WHERE reporting_id = %s
+
+#                             UNION
+
+#                             SELECT e.employee_id, e.reporting_id
+#                             FROM employee_list e
+#                             INNER JOIN subordinates s ON e.reporting_id = s.employee_id
+#                         )
+#                         SELECT employee_id FROM subordinates
+#                         UNION
+#                         SELECT %s;
+#                     """, (user_id, user_id))
+#                     reporting_employees = [row[0] for row in cursor.fetchall()]
+#                     all_employee_ids = list(map(int, reporting_employees)) + [int(user_id)]
+#                 else:
+#                     all_employee_ids = [int(user_id)] # If no reporting_id, just include user_id
+#         except psycopg2.Error as e:
+#             print(f"Error fetching reporting employees for project names: {e}")
+#         finally:
+#             conn_company.close()
+
+#     conn_datasource = get_db_connection(DB_NAME)
+#     project_names = []
+
+#     if conn_datasource and all_employee_ids:
+#         try:
+#             with conn_datasource.cursor() as cursor:
+#                 placeholders = ', '.join(['%s'] * len(all_employee_ids))
+#                 query = f"""
+#                     SELECT DISTINCT project_name FROM table_dashboard
+#                     WHERE user_id IN ({placeholders}) AND company_name = %s;
+#                 """
+#                 cursor.execute(query, tuple(map(str, all_employee_ids)) + (database_name,))
+#                 project_names = [row[0] for row in cursor.fetchall()]
+#         except psycopg2.Error as e:
+#             print(f"Error fetching project names: {e}")
+#         finally:
+#             conn_datasource.close()
+
+#     return project_names
+
+
 def fetch_project_names(user_id, database_name):
-    conn_company = get_company_db_connection(database_name)
-    all_employee_ids = []
-
-    if conn_company:
-        try:
-            with conn_company.cursor() as cursor:
-                cursor.execute("""
-                    SELECT column_name FROM information_schema.columns
-                    WHERE table_name='employee_list' AND column_name='reporting_id'
-                """)
-                column_exists = cursor.fetchone()
-
-                if column_exists:
-                    cursor.execute("""
-                        WITH RECURSIVE subordinates AS (
-                            SELECT employee_id, reporting_id
-                            FROM employee_list
-                            WHERE reporting_id = %s
-
-                            UNION
-
-                            SELECT e.employee_id, e.reporting_id
-                            FROM employee_list e
-                            INNER JOIN subordinates s ON e.reporting_id = s.employee_id
-                        )
-                        SELECT employee_id FROM subordinates
-                        UNION
-                        SELECT %s;
-                    """, (user_id, user_id))
-                    reporting_employees = [row[0] for row in cursor.fetchall()]
-                    all_employee_ids = list(map(int, reporting_employees)) + [int(user_id)]
-                else:
-                    all_employee_ids = [int(user_id)] # If no reporting_id, just include user_id
-        except psycopg2.Error as e:
-            print(f"Error fetching reporting employees for project names: {e}")
-        finally:
-            conn_company.close()
-
     conn_datasource = get_db_connection(DB_NAME)
     project_names = []
 
-    if conn_datasource and all_employee_ids:
+    if conn_datasource:
         try:
             with conn_datasource.cursor() as cursor:
-                placeholders = ', '.join(['%s'] * len(all_employee_ids))
-                query = f"""
-                    SELECT DISTINCT project_name FROM table_dashboard
-                    WHERE user_id IN ({placeholders}) AND company_name = %s;
+                # Simply query for the specific user_id and company_name
+                query = """
+                    SELECT DISTINCT project_name 
+                    FROM table_dashboard
+                    WHERE user_id = %s AND company_name = %s;
                 """
-                cursor.execute(query, tuple(map(str, all_employee_ids)) + (database_name,))
+                # passed user_id and database_name (which maps to company_name)
+                cursor.execute(query, (str(user_id), database_name))
                 project_names = [row[0] for row in cursor.fetchall()]
         except psycopg2.Error as e:
             print(f"Error fetching project names: {e}")
@@ -273,6 +302,7 @@ def fetch_project_names(user_id, database_name):
             conn_datasource.close()
 
     return project_names
+
 
 
 def get_dashboard_names(user_id, database_name, project_name=None):
@@ -370,6 +400,7 @@ def get_dashboard_names(user_id, database_name, project_name=None):
             conn_datasource.close()
 
     return dashboards
+
 def get_Edit_dashboard_names(user_id, database_name):
     """
     Fetch dashboards created only by the given user_id in the 'datasource' database,
@@ -916,6 +947,9 @@ def apply_employee_category_filter(chart_filters, employee_category_filter, data
 
 def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,droppableBgColor,opacity,image_ids,chart_type,dashboard_Filter,view_mode,company_name,employee_id):
     conn = create_connection()  # Initial connection to your main database
+    
+    # Backup original dashboard_Filter to prevent loop contamination
+    original_dashboard_filter_arg = dashboard_Filter
     print("Chart areacolour:", areacolour)
     print("Chart opacity received:", opacity)
     print("positions",positions)
@@ -1067,21 +1101,28 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                 if not isinstance(position, dict) or 'x' not in position or 'y' not in position:
                     print(f"Invalid position for chart_id {chart_id}: {position}")
                     return []
+            # --- DATAFRAME CACHE (Optimization for Real-Time) ---
+            dataframe_cache = {} 
+            # ----------------------------------------------------
+
             sorted_chart_ids = sorted(chart_ids, key=lambda x: (chart_positions.get(x, {'x': 0, 'y': 0})['x'], chart_positions.get(x, {'x': 0, 'y': 0})['y']))
             chart_data_list = []
             print("chart_data_list",chart_data_list)
             for chart_id in sorted_chart_ids:
+                # Reset dashboard_Filter for this iteration to avoid contamination
+                dashboard_Filter = original_dashboard_filter_arg
+                
                 cursor = conn.cursor()
                 cursor.execute("SELECT id, database_name, selected_table, x_axis, y_axis, aggregate, chart_type, filter_options, chart_heading, chart_color, selectedUser,xfontsize,fontstyle,categorycolor,valuecolor,yfontsize,headingColor,ClickedTool,Bgcolour,OptimizationData,calculationdata,selectedFrequency,chart_name,user_id,xAxisTitle, yAxisTitle  FROM table_chart_save WHERE id = %s", (chart_id,))
-#                 cursor.execute("""
-#     SELECT id, database_name, selected_table, x_axis, y_axis, aggregate, chart_type,
-#            filter_options, chart_heading, chart_color, selectedUser, xfontsize,
-#            fontstyle, categorycolor, valuecolor, yfontsize, headingColor,
-#            ClickedTool, Bgcolour, OptimizationData
-#     FROM table_chart_save
-#     ORDER BY id DESC
-#     LIMIT 10
-# """)
+            #                 cursor.execute("""
+            #     SELECT id, database_name, selected_table, x_axis, y_axis, aggregate, chart_type,
+            #            filter_options, chart_heading, chart_color, selectedUser, xfontsize,
+            #            fontstyle, categorycolor, valuecolor, yfontsize, headingColor,
+            #            ClickedTool, Bgcolour, OptimizationData
+            #     FROM table_chart_save
+            #     ORDER BY id DESC
+            #     LIMIT 10
+            # """)
                 
                 chart_data = cursor.fetchone()
                 cursor.close()
@@ -1089,14 +1130,38 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                 
                 if chart_data:
                     # Extract chart data
-                    database_name = chart_data[1]  # Assuming `database_name` is the second field
+                    database_name = chart_data[1]
                     table_name = chart_data[2]
+
+                    # --- TEMP FILTER OVERRIDE ---
+                    if temp_filters:
+                        # Construct a dynamic filter object for this table
+                        dashboard_Filter = {
+                            'table_name': table_name,
+                            'filters': temp_filters
+                        }
+                        print(f"🔄 [TempFilter] Applying override for {table_name}: {dashboard_Filter}")
+                    # ----------------------------
+
+                    # --- ✅ REAL-TIME SETUP (DO NOT REMOVE) ---
+                    # This starts the background thread that listens for DB changes.
+                    try:
+                        # Only ensure trigger/listener ONCE per DB/Table to avoid overhead in loop? 
+                        # Actually 'ensure_trigger_exists' handles if checks efficiently, but we can optimize if needed.
+                        pass # Kept logic below as is for now
+                        # print(f"🚀 Initializing Real-Time Listener for DB: {database_name}...")
+                        # ensure_trigger_exists(database_name, table_name)
+                        # start_dynamic_listener(database_name)
+                    except Exception as e:
+                        print(f"⚠️ Real-time setup warning: {e}")
+                    # ------------------------------------------
                     x_axis = chart_data[3]
                     y_axis = chart_data[4]  # Assuming y_axis is a list
                     aggregate = chart_data[5]
                     aggregation = chart_data[5]
                     chart_type = chart_data[6]
                     # chart_type = chart_type_value .get(chart_id)
+
                     chart_heading = chart_data[8]
                     chart_color = chart_data[9]  # Assuming chart_color is a list
                     selected_user = chart_data[10]  # Extract the selectedUser field
@@ -1119,6 +1184,22 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                     yAxisTitle =chart_data[25]
                     agg_value = chart_data[5]  # aggregate from DB
                     print("agg_value0", agg_value)
+
+
+
+                    # --- ✅ REAL-TIME SETUP BLOCK ---
+                    try:
+                        # 1. Create trigger (Fixes "update not detected" issue)
+                        ensure_trigger_exists(database_name, table_name)
+                        
+                        # 2. Start listener thread
+                        start_dynamic_listener(database_name)
+                        
+                    except Exception as e:
+                        print(f"⚠️ Real-time setup warning: {e}")
+                    # --------------------------------
+
+
                     # Clean agg_value from quotes
                     # if isinstance(agg_value, str):
                     #     agg_value = agg_value.replace('"', '').replace("'", '').strip().lower()
@@ -1492,6 +1573,7 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                                         "ClickedTool":ClickedTool,
                                         "Bgcolour":areacolour,
                                         "table_name":table_name,
+                                        "database_name": database_name,
                                         "opacity":final_opacity,
                                         "chart_name":chart_name,
                                         "user_id": user_id,
@@ -1605,6 +1687,7 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                                 "chart_heading": chart_heading,
                                 "headingColor": headingColor,
                                 "table_name": table_name,
+                                "database_name": database_name,
                                 "filter_options": filter_options,
                                 "ClickedTool": ClickedTool,
                                 "Bgcolour": areacolour,
@@ -1631,7 +1714,7 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                             'maximum': 'max'
                         }.get(aggregate, 'sum') 
                         
-                        single_value_result = fetchText_data(database_name, table_name, x_axis[0], aggregate_py,selected_user)
+                        single_value_result = fetchText_data(database_name, table_name, x_axis[0], aggregate_py,selected_user,filter_options)
                         print("Single Value Result for Chart ID", chart_id, ":", single_value_result)
                         # Append single value chart data
                         chart_data_list.append({
@@ -1652,6 +1735,7 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                             "ClickedTool":ClickedTool, 
                             "Bgcolour":areacolour,
                             "table_name":table_name,
+                            "database_name": database_name,
                             "opacity":final_opacity,
                             "chart_name": (user_id, chart_name),
                             "user_id": user_id  
@@ -1667,7 +1751,7 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                             'minimum': 'min',
                             'maximum': 'max'
                         }.get(aggregate, 'sum') 
-                        single_value_result = fetchText_data(database_name, table_name, x_axis[0], aggregate_py,selected_user)
+                        single_value_result = fetchText_data(database_name, table_name, x_axis[0], aggregate_py,selected_user,filter_options)
                         print("Single Value Result for Chart ID", chart_id, ":", single_value_result)
                         # Append single value chart data
                         chart_data_list.append({
@@ -1689,13 +1773,28 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                             "Bgcolour":areacolour,
                             "chart_color": chart_color,
                             "table_name":table_name,
+                            "database_name": database_name,
                             "opacity":final_opacity,
                             "chart_name": (user_id, chart_name),
                             "user_id": user_id  
                         })
                         continue  # Skip further processing for this chart ID
                     # Proceed with category and value generation for non-singleValueChart types
-                    dataframe = fetch_chart_data(connection, table_name)
+                    
+                    # ----------------------------------------------------
+                    # OPTIMIZED DATA FETCHING (CACHE LOOKUP)
+                    # ----------------------------------------------------
+                    # Check if we already fetched this table in this batch
+                    if table_name in dataframe_cache:
+                        print(f"⚡ CACHE HIT: Reusing dataframe for {table_name}")
+                        dataframe = dataframe_cache[table_name].copy(deep=True) # Deep copy to prevent cross-contamination
+                    else:
+                        print(f"🐢 CACHE MISS: Fetching DB for {table_name}")
+                        dataframe = fetch_chart_data(connection, table_name)
+                        # Store a clean copy in cache
+                        dataframe_cache[table_name] = dataframe.copy(deep=True)
+                    # ----------------------------------------------------
+                    
                     print("Chart ID", chart_id)
                     skip_calculated_column = False
                     y_base_column = None
@@ -2253,7 +2352,8 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                             "filter_options": filter_options, 
                             "ClickedTool": ClickedTool,
                             "Bgcolour": areacolour,
-                            "table_name": table_name,  
+                            "table_name": table_name,
+                            "database_name": database_name, 
                             "opacity": final_opacity,
                             "calculationData": calculationData,
                             "chart_name": (user_id, chart_name),
@@ -2308,6 +2408,7 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                                 "ClickedTool":ClickedTool ,
                                 "Bgcolour":areacolour , 
                                 "table_name":table_name,
+                                "database_name": database_name,
                                 "opacity":final_opacity ,
                                 "calculationData":calculationData,
                                  "chart_name": (user_id, chart_name),
@@ -2376,6 +2477,7 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                                 "ClickedTool":ClickedTool ,
                                 "Bgcolour":areacolour , 
                                 "table_name":table_name,
+                                "database_name": database_name,
                                 "opacity":final_opacity,
                                 "calculationData":calculationData ,
                                 "chart_name": (user_id, chart_name),
@@ -2442,6 +2544,7 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                                     "ClickedTool":ClickedTool,
                                     "Bgcolour":areacolour,
                                     "table_name":table_name,
+                                    "database_name": database_name,
                                     "opacity":final_opacity,
                                     "calculationData":calculationData,
                                     "chart_name": (user_id, chart_name),
@@ -2494,6 +2597,7 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                                     "ClickedTool":ClickedTool,
                                     "Bgcolour":areacolour,
                                     "table_name":table_name,
+                                    "database_name": database_name,
                                     "opacity":final_opacity,
                                     "calculationData":calculationData,
                                     "chart_name": (user_id, chart_name),
@@ -2551,6 +2655,7 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                                 "ClickedTool":ClickedTool,
                                 "Bgcolour":areacolour,
                                 "table_name":table_name,
+                                "database_name": database_name,
                                 "opacity":final_opacity,
                                 "calculationData":calculationData ,
                                 "chart_name": (user_id, chart_name),
@@ -2837,10 +2942,12 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                             "chart_heading": chart_heading,
                             "headingColor": headingColor,
                             "table_name": table_name,
+                            "database_name": database_name,
                             "filter_options": filter_options,
                             "ClickedTool": ClickedTool,
                             "Bgcolour": areacolour,
                             "table_name": table_name,
+                            "database_name": database_name,
                             "OptimizationData": OptimizationData if 'OptimizationData' in locals() or 'OptimizationData' in globals() else None,
                             "opacity":final_opacity,
                             "calculationData":calculationData,
@@ -2852,7 +2959,7 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                         })
 
 
-                      
+            print("chart_ids",chart_ids)        
             conn.close()  # Close the main connection
             return chart_data_list
 

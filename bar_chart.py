@@ -4132,61 +4132,223 @@ def perform_calculation(dataframe, columnName, calculation):
         raise ValueError(f"Failed to evaluate general expression: {str(e)}")
 
 
-def fetchText_data(databaseName, table_Name, x_axis, aggregate_py,selectedUser):
-    print("aggregate===========================>>>>", aggregate_py)   
-    print(table_Name)
-#     aggregate_py = {
-#     'count': 'count',
-#     'sum': 'sum',
-#     'average': 'mean',
-#     'minimum': 'min',
-#     'maximum': 'max'
-# }.get(aggregate, 'sum')  # Default to 'sum' if no match
+# def fetchText_data(databaseName, table_Name, x_axis, aggregate_py,selectedUser,filter_options):
+#     print("aggregate===========================>>>>", aggregate_py)   
+#     print(table_Name)
+# #     aggregate_py = {
+# #     'count': 'count',
+# #     'sum': 'sum',
+# #     'average': 'mean',
+# #     'minimum': 'min',
+# #     'maximum': 'max'
+# # }.get(aggregate, 'sum')  # Default to 'sum' if no match
 
     
-    conn = get_db_connection_or_path(selectedUser, databaseName)
+#     conn = get_db_connection_or_path(selectedUser, databaseName)
 
         
+#     cur = conn.cursor()
+
+#     # Check the data type of the x_axis column
+#     cur.execute(f"""
+#         SELECT data_type 
+#         FROM information_schema.columns 
+#         WHERE table_name = %s AND column_name = %s
+#     """, (table_Name, x_axis))
+    
+#     column_type = cur.fetchone()[0]
+#     # print("column_type",column_type)
+#     # Use DISTINCT only if the column type is character varying
+#     if column_type == 'character varying':
+#         query = f"""
+#         SELECT COUNT(DISTINCT {x_axis}) AS total_{x_axis}
+#         FROM {table_Name}
+#         """
+#         print("character varying")  
+#     else:
+#         query = f"""
+#         SELECT {aggregate_py}({x_axis}) AS total_{x_axis}
+#         FROM {table_Name}
+#         """
+
+#     print("Query:", query)
+    
+#     cur.execute(query)
+#     result = cur.fetchone()  # Fetch only one row since the query returns a single value
+#     print("result",result)
+    
+#     # Close the cursor and connection
+#     cur.close()
+#     conn.close()
+
+#     # Process the result into a dictionary
+#     data = {"total_x_axis": result[0]}  # result[0] contains the aggregated value
+
+#     return data
+
+# def fetchText_data(databaseName, table_Name, x_axis, aggregate_py, selectedUser, filter_options):
+#     print("aggregate===========================>>>>", aggregate_py)   
+#     print("Table:", table_Name)
+#     print("Filter Options:", filter_options)
+
+#     conn = get_db_connection_or_path(selectedUser, databaseName)
+#     cur = conn.cursor()
+
+#     # 1. Build the WHERE clause dynamically based on filter_options
+#     where_clauses = []
+#     query_params = []
+
+#     if filter_options:
+#         for column, values in filter_options.items():
+#             # Only proceed if values list is not empty
+#             if values:
+#                 # Create placeholders like %s, %s, %s depending on list length
+#                 placeholders = ', '.join(['%s'] * len(values))
+                
+#                 # Construct the clause: "region IN (%s, %s)"
+#                 where_clauses.append(f"{column} IN ({placeholders})")
+                
+#                 # Add the actual values to the parameters list
+#                 query_params.extend(values)
+
+#     # Join multiple filters with AND (if you have more than one filter key)
+#     where_sql = ""
+#     if where_clauses:
+#         where_sql = "WHERE " + " AND ".join(where_clauses)
+
+
+#     # 2. Check Data Type
+#     cur.execute(f"""
+#         SELECT data_type 
+#         FROM information_schema.columns 
+#         WHERE table_name = %s AND column_name = %s
+#     """, (table_Name, x_axis))
+    
+#     row = cur.fetchone()
+#     if not row:
+#         print(f"Error: Column {x_axis} not found in table {table_Name}")
+#         cur.close()
+#         conn.close()
+#         return {} # Handle error gracefully
+
+#     column_type = row[0]
+
+#     # 3. Construct the Main Query
+#     # Note: We inject the {where_sql} string into the query
+#     if column_type == 'character varying':
+#         query = f"""
+#         SELECT COUNT(DISTINCT {x_axis}) AS total_{x_axis}
+#         FROM {table_Name}
+#         {where_sql}
+#         """
+#         print("Type: character varying")  
+#     else:
+#         query = f"""
+#         SELECT {aggregate_py}({x_axis}) AS total_{x_axis}
+#         FROM {table_Name}
+#         {where_sql}
+#         """
+
+#     print("Final Query:", query)
+#     print("Query Params:", query_params)
+    
+#     # 4. Execute with parameters (Safe against SQL injection for values)
+#     cur.execute(query, tuple(query_params))
+#     result = cur.fetchone()
+    
+#     cur.close()
+#     conn.close()
+
+#     if result:
+#         data = {"total_x_axis": result[0]}
+#     else:
+#         data = {"total_x_axis": 0} # Handle empty result
+
+#     return data
+
+
+def fetchText_data(databaseName, table_Name, x_axis, aggregate_py, selectedUser, filter_options):
+    print(f"Fetch Data Triggered: Agg={aggregate_py}, Table={table_Name}, Filters={filter_options}")
+
+    conn = get_db_connection_or_path(selectedUser, databaseName)
     cur = conn.cursor()
 
-    # Check the data type of the x_axis column
-    cur.execute(f"""
+    # --- 1. Dynamic WHERE Clause Construction ---
+    where_sql = ""
+    query_params = []
+
+    # Check if filter_options exists AND is a dictionary (handles None case)
+    if filter_options and isinstance(filter_options, dict):
+        where_clauses = []
+        
+        for column, values in filter_options.items():
+            # Only process if 'values' is a valid list with items
+            if values and isinstance(values, list) and len(values) > 0:
+                # Create placeholders: %s, %s, %s
+                placeholders = ', '.join(['%s'] * len(values))
+                
+                # Add clause: "region IN (%s, %s)"
+                where_clauses.append(f'"{column}" IN ({placeholders})')
+                
+                # Add actual values to params list
+                query_params.extend(values)
+
+        # If we successfully created clauses, join them
+        if where_clauses:
+            where_sql = "WHERE " + " AND ".join(where_clauses)
+
+    # --- 2. Check Data Type ---
+    # (Checking column type to decide between COUNT or SUM/AVG)
+    cur.execute("""
         SELECT data_type 
         FROM information_schema.columns 
         WHERE table_name = %s AND column_name = %s
     """, (table_Name, x_axis))
     
-    column_type = cur.fetchone()[0]
-    # print("column_type",column_type)
-    # Use DISTINCT only if the column type is character varying
-    if column_type == 'character varying':
+    row = cur.fetchone()
+    
+    if not row:
+        print(f"Error: Column {x_axis} not found in table {table_Name}")
+        cur.close()
+        conn.close()
+        return {"total_x_axis": 0}
+
+    column_type = row[0]
+
+    # --- 3. Construct Final Query ---
+    # If where_sql is "", it simply acts as whitespace
+    
+    if column_type == 'character varying' or column_type == 'text':
+        # For text, we usually Count Distinct
         query = f"""
-        SELECT COUNT(DISTINCT {x_axis}) AS total_{x_axis}
-        FROM {table_Name}
+            SELECT COUNT(DISTINCT "{x_axis}") AS total_x_axis
+            FROM "{table_Name}"
+            {where_sql}
         """
-        print("character varying")  
     else:
+        # For numbers, we use the requested aggregate (SUM, AVG, etc)
         query = f"""
-        SELECT {aggregate_py}({x_axis}) AS total_{x_axis}
-        FROM {table_Name}
+            SELECT {aggregate_py}("{x_axis}") AS total_x_axis
+            FROM "{table_Name}"
+            {where_sql}
         """
 
-    print("Query:", query)
-    
-    cur.execute(query)
-    result = cur.fetchone()  # Fetch only one row since the query returns a single value
-    print("result",result)
-    
-    # Close the cursor and connection
-    cur.close()
-    conn.close()
+    print("Final Query SQL:", query)
+    print("Query Parameters:", query_params)
 
-    # Process the result into a dictionary
-    data = {"total_x_axis": result[0]}  # result[0] contains the aggregated value
+    # --- 4. Execute ---
+    try:
+        cur.execute(query, tuple(query_params))
+        result = cur.fetchone()
+        data = {"total_x_axis": result[0] if result and result[0] is not None else 0}
+    except Exception as e:
+        print("SQL Execution Error:", e)
+        data = {"total_x_axis": 0}
+    finally:
+        cur.close()
+        conn.close()
 
     return data
-
-
 
 
 def Hierarchial_drill_down(clicked_category, x_axis_columns, y_axis_column, depth, aggregation):
