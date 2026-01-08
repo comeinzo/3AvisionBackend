@@ -943,9 +943,327 @@ def apply_employee_category_filter(chart_filters, employee_category_filter, data
             print("chartfiltere",chart_filters)
 
     return chart_filters
+DB_CONFIG_TEMPLATE = {
+    'user': 'postgres',
+    'password': 'jaTHU@12',
+    'host': 'localhost',
+    'port': 5432
+}
+
+# --- GLOBAL VARIABLES ---
+active_listeners = {}
+listener_lock = threading.Lock()
+
+# --- REAL-TIME HELPER FUNCTIONS ---
+
+def ensure_trigger_exists(db_name, table_name):
+    """Creates the PostgreSQL trigger if missing."""
+    print(f"🔍 Ensuring trigger exists for {table_name} in DB: {db_name}")
+    try:
+        conn = psycopg2.connect(dbname=db_name, **DB_CONFIG_TEMPLATE)
+        conn.set_isolation_level(psycopg2.extensions.ISOLATION_LEVEL_AUTOCOMMIT)
+        cursor = conn.cursor()
+        
+        # 1. Generic Notification Function
+        cursor.execute("""
+            CREATE OR REPLACE FUNCTION notify_chart_update() RETURNS TRIGGER AS $$
+            BEGIN
+                PERFORM pg_notify('chart_update', TG_TABLE_NAME);
+                RETURN NEW;
+            END;
+            $$ LANGUAGE plpgsql;
+        """)
+        
+        # 2. Check for Trigger
+        trigger_name = f"trg_notify_{table_name}"
+        cursor.execute("SELECT 1 FROM pg_trigger WHERE tgname = %s", (trigger_name,))
+        
+        if not cursor.fetchone():
+            print(f"🛠️ Creating trigger for {table_name}")
+            # NOTE: Removed quotes around table_name to handle case sensitivity automatically
+            cursor.execute(f"""
+                CREATE TRIGGER "{trigger_name}"
+                AFTER INSERT OR UPDATE OR DELETE ON {table_name}
+                FOR EACH ROW EXECUTE FUNCTION notify_chart_update();
+            """)
+            print(f"✅ Trigger created for {table_name}")
+        
+        cursor.close(); conn.close()
+    except Exception as e:
+        print(f"⚠️ Trigger Error: {e}")
 
 
-def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,droppableBgColor,opacity,image_ids,chart_type,dashboard_Filter,view_mode,company_name,employee_id):
+
+
+def get_dashboards_for_table(table_name, database_name_param):
+    """
+    Finds all dashboards (charts) that rely on a specific table in a specific database.
+    Returns a list of dashboard config objects so we can re-run data fetching.
+    """
+    conn = create_connection() # Connects to MASTER DB
+    if not conn:
+        return []
+    
+    dashboards_to_update = []
+    try:
+        cursor = conn.cursor()
+        # Find charts using this table AND this database
+        cursor.execute("SELECT id FROM table_chart_save WHERE selected_table = %s AND database_name = %s", (table_name, database_name_param))
+        chart_ids = [row[0] for row in cursor.fetchall()]
+        
+        if not chart_ids:
+            return []
+
+        # database columns from insert: 
+        # id, chart_ids, position, chart_type, filterdata, chartcolor, droppableBgColor, opacity, image_ids, file_name, company_name
+        
+        cursor.execute("""
+            SELECT id, chart_ids, position, filterdata, chartcolor, droppableBgColor, opacity, image_ids, 
+                   chart_type, user_id, file_name, company_name, filterdata 
+            FROM table_dashboard
+        """)
+        all_dashboards = cursor.fetchall()
+        
+        for row in all_dashboards:
+            (dash_id, dash_chart_ids_str, positions, filterdata, chartcolor, droppableBgColor, 
+             opacity, image_ids, dashboard_chart_type, user_id, file_name, company_name, dashboard_filter_raw) = row
+
+            if not dash_chart_ids_str: continue
+            
+            try:
+                curr_ids = list(map(int, re.findall(r'\d+', dash_chart_ids_str)))
+            except:
+                continue
+            
+            affected_chart_ids = set(curr_ids).intersection(chart_ids)
+            
+            if affected_chart_ids:
+                dashboards_to_update.append({
+                    "dashboard_id": dash_id,
+                    "chart_ids": curr_ids, # Keep full list for index mapping
+                    "positions": positions,
+                    "filter_options": filterdata,
+                    "areacolour": chartcolor,
+                    "droppableBgColor": droppableBgColor,
+                    "opacity": opacity,
+                    "image_ids": image_ids,
+                    "chart_type": dashboard_chart_type,
+                    "user_id": user_id,
+                    "file_name": file_name,
+                    "company_name": company_name,
+                    "dashboard_Filter": dashboard_filter_raw,
+                    "view_mode": "view",
+                    
+                    # Store which IDs are actually affected for filtering
+                    "affected_ids_set": affected_chart_ids
+                })
+                
+        cursor.close()
+        conn.close()
+        return dashboards_to_update
+        
+    except Exception as e:
+        print(f"Error finding dashboards for table {table_name}: {e}")
+        return []
+
+def filter_list_by_indices(data_list, indices):
+    """Helper to filter a list (or string rep of list) by keeping only specific indices."""
+    if not data_list: return []
+    
+    # Handle string format if necessary (though simple lists are expected here usually)
+    is_str = isinstance(data_list, str)
+    if is_str:
+        try:
+            parsed = ast.literal_eval(data_list)
+            if not isinstance(parsed, list): parsed = []
+        except:
+             # Try regex or simple split if AST fails
+             parsed = []
+             
+        data_list = parsed
+
+    if not isinstance(data_list, list): return []
+    
+    return [data_list[i] for i in indices if i < len(data_list)]
+
+def background_db_listener(db_name):
+    """Background thread that listens for DB updates."""
+    try:
+        conn = psycopg2.connect(dbname=db_name, **DB_CONFIG_TEMPLATE)
+        conn.set_isolation_level(psycopg2.extensions.ISOLATION_LEVEL_AUTOCOMMIT)
+        cursor = conn.cursor()
+        cursor.execute("LISTEN chart_update;")
+        print(f"✅ [Listener] Started listening to DB: {db_name}")
+
+        while True:
+            # Wait 5s for notification
+            if select.select([conn], [], [], 5) != ([], [], []):
+                conn.poll()
+                while conn.notifies:
+                    notify = conn.notifies.pop(0)
+                    changed_table = notify.payload
+                    
+                    # ⚠️ Silent unless we find a matching active dashboard
+                    # print(f"🔔 TRIGGER FIRED! DB: {db_name} | Table: {changed_table}")
+                    
+                    # 1. Find affected dashboards (Pass DB Name!)
+                    affected_dashboards = get_dashboards_for_table(changed_table, db_name)
+                    
+                    if not affected_dashboards:
+                        # Log only if verbose or debugging specific table issues
+                        # print(f"ℹ️ Table {changed_table} updated, but no dashboards use it.")
+                        continue
+
+                    # Pre-check: Are ANY of these dashboards active?
+                    active_update_count = 0
+                    
+                    for dash in affected_dashboards:
+                         try:
+                             # Room 2: Name based (user_id_dashboard_name) match URL structure roughly
+                             # URL: /Dashboard_data/<user_id>,<name>/...
+                             # We'll use a standardized room name: "dashboard_updates_<user_id>_<file_name>"
+                             room_name_str = f"dashboard_{dash['user_id']}_{dash['file_name']}"
+                             
+                             # ----------------------------------------------------
+                             # ACTIVE USER CHECK (Optimization)
+                             # ----------------------------------------------------
+                             try:
+                                 import socketio as sio_lib
+                                 namespace = '/'
+                                 rooms = socketio.server.manager.rooms
+                                 
+                                 current_room_participants = set()
+                                 if isinstance(rooms, dict):
+                                     ns_rooms = rooms.get(namespace, {})
+                                     current_room_participants = ns_rooms.get(room_name_str, set())
+                                 
+                                 if not current_room_participants:
+                                     # SILENT SKIP
+                                     continue
+                                 
+                                 # ONLY NOW do we announce the trigger
+                                 print(f"🔔 TRIGGER FIRED! DB: {db_name} | Table: {changed_table}")
+                                 print(f"👀 ACTIVE USERS DETECTED in {room_name_str}: {len(current_room_participants)}")
+                                 active_update_count += 1
+                             except Exception as check_err:
+                                 print(f"⚠️ Could not check room participants ({check_err}). Proceeding anyway.")
+                             # ----------------------------------------------------
+
+                             print(f"🔄 Calculating Data for Dashboard: {dash.get('file_name')} (ID: {dash['dashboard_id']})")
+                             
+                             # 2. Filter input lists to ONLY include affected charts
+                             full_chart_ids = dash['chart_ids']
+                             affected_set = dash['affected_ids_set']
+                             
+                             # Find indices of affected charts
+                             indices_to_keep = [i for i, cid in enumerate(full_chart_ids) if cid in affected_set]
+                             
+                             if not indices_to_keep: continue
+                             
+                             # Prepare filtered inputs
+                             def safe_filter(val, idxs):
+                                 try:
+                                     lst = val
+                                     if isinstance(lst, str):
+                                         lst = lst.strip()
+                                         if lst.startswith("[") or lst.startswith("{"):
+                                             try: import json; lst = json.loads(lst)
+                                             except: lst = ast.literal_eval(lst)
+                                     
+                                     if isinstance(lst, list):
+                                          return [lst[i] for i in idxs if i < len(lst)]
+                                     return []
+                                 except:
+                                     return []
+
+                             # Filter everything
+                             filtered_chart_ids = [full_chart_ids[i] for i in indices_to_keep]
+                             filtered_positions = safe_filter(dash['positions'], indices_to_keep)
+                             filtered_filters = safe_filter(dash['filter_options'], indices_to_keep)
+                             filtered_areacolour = safe_filter(dash['areacolour'], indices_to_keep)
+                             filtered_opacity = safe_filter(dash['opacity'], indices_to_keep)
+                             filtered_types = safe_filter(dash['chart_type'], indices_to_keep)
+                             
+                             # 3. Calculate new data (filtered)
+                             # Only calling this IF users are active
+                             # 3. Calculate new data (filtered)
+                             # Only calling this IF users are active
+                             new_data = get_dashboard_view_chart_data(
+                                 chart_ids=filtered_chart_ids,
+                                 positions=filtered_positions,
+                                 filter_options=filtered_filters,
+                                 areacolour=filtered_areacolour,
+                                 droppableBgColor=dash['droppableBgColor'], 
+                                 opacity=filtered_opacity,
+                                 image_ids=dash['image_ids'], 
+                                 chart_type=filtered_types,
+                                 dashboard_Filter=dash['dashboard_Filter'],
+                                 view_mode=dash['view_mode'],
+                                 company_name=dash['company_name'],
+                                 employee_id=dash['user_id']
+                             )
+                             
+                             print(f"🔥 DATA FETCHED for {dash['file_name']}! Count: {len(new_data) if new_data else 0}")
+                             print(f"📡 EMITTING 'dashboard_update' to Room: '{room_name_str}'")
+                             
+                             raw_payload = {
+                                 'dashboard_id': dash['dashboard_id'],
+                                 'dashboard_name': dash['file_name'],
+                                 'user_id': dash['user_id'],
+                                 'table': changed_table,
+                                 'data': new_data,
+                                 'message': 'Data refreshed',
+                                 'timestamp': str(datetime.now())
+                             }
+
+                             # --- SERIALIZATION HELPER ---
+                             def clean_for_json(obj):
+                                 if isinstance(obj, (datetime, pd.Timestamp)):
+                                     return obj.isoformat()
+                                 if isinstance(obj, (np.integer, np.int64)):
+                                     return int(obj)
+                                 if isinstance(obj, (np.floating, np.float64)):
+                                     return float(obj)
+                                 if isinstance(obj, np.ndarray):
+                                     return obj.tolist()
+                                 if isinstance(obj, dict):
+                                     return {k: clean_for_json(v) for k, v in obj.items()}
+                                 if isinstance(obj, list):
+                                     return [clean_for_json(i) for i in obj]
+                                 if isinstance(obj, tuple):
+                                     return [clean_for_json(i) for i in obj]
+                                 return obj
+
+                             try:
+                                 payload = clean_for_json(raw_payload)
+                                 socketio.emit('dashboard_update', payload, room=room_name_str)
+                                 print(f"📢 Emitted to room: {room_name_str}")
+                             except Exception as serialization_err:
+                                 print(f"❌ JSON SERIALIZATION FAILED: {serialization_err}")
+                             
+                         except Exception as inner_e:
+                             print(f"❌ Error updating dashboard {dash.get('dashboard_id')}: {inner_e}")
+                             import traceback
+                             traceback.print_exc()
+                    
+    except Exception as e:
+        print(f"❌ Listener died for {db_name}: {e}")
+        with listener_lock:
+            if db_name in active_listeners: del active_listeners[db_name]
+
+def start_dynamic_listener(db_name):
+    """Starts the listener thread if not already running."""
+    with listener_lock:
+        if db_name not in active_listeners or not active_listeners[db_name].is_alive():
+            print(f"🚀 Spawning new listener thread for DB: {db_name}")
+            t = threading.Thread(target=background_db_listener, args=(db_name,))
+            t.daemon = True
+            t.start()
+            active_listeners[db_name] = t
+
+
+
+def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,droppableBgColor,opacity,image_ids,chart_type,dashboard_Filter,view_mode,company_name,employee_id,temp_filters=None):
     conn = create_connection()  # Initial connection to your main database
     
     # Backup original dashboard_Filter to prevent loop contamination
@@ -1132,6 +1450,7 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                     # Extract chart data
                     database_name = chart_data[1]
                     table_name = chart_data[2]
+                    
 
                     # --- TEMP FILTER OVERRIDE ---
                     if temp_filters:
@@ -1254,6 +1573,124 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                     
                     print("Chart OptimizationData:", OptimizationData)
                     print("final_opacity",final_opacity)
+                    
+                                        # -----------------------------------------------
+                    # 🟦 APPLY DASHBOARD FILTER IF TABLE NAME MATCHES
+                    # -----------------------------------------------
+                    if view_mode == "edit":
+                        print("View mode is 'edit' → Skipping dashboard filters.")
+                    else:
+                        print("dashboard_Filter",dashboard_Filter)
+                        # Normalize dashboard_Filter into dict
+                        if dashboard_Filter is None:
+                            dashboard_Filter = {} # Initialize to an empty dictionary
+                        
+                        if isinstance(dashboard_Filter, list):
+                            # The user reported it coming as a list ['{"region": ...}', ...]
+                            # If it's a list, it might be a list of filter strings?
+                            # For now, if it's a list, we'll try to use the first item or default to empty dict
+                            # to avoid the crash.
+                            print("⚠️ dashboard_Filter is a LIST. Attempting to parse first item...")
+                            try:
+                                if len(dashboard_Filter) > 0:
+                                    item = dashboard_Filter[0]
+                                    if isinstance(item, str):
+                                        dashboard_Filter = json.loads(item.replace("'", '"'))
+                                    elif isinstance(item, dict):
+                                        dashboard_Filter = item
+                                    else:
+                                        dashboard_Filter = {}
+                                else:
+                                    dashboard_Filter = {}
+                            except Exception as e:
+                                print(f"⚠️ Failed to parse dashboard_Filter list: {e}")
+                                dashboard_Filter = {}
+
+                        if isinstance(dashboard_Filter, str):
+                            try:
+                                dashboard_Filter = json.loads(dashboard_Filter.replace("'", '"'))
+                            except Exception:
+                                try:
+                                    dashboard_Filter = ast.literal_eval(dashboard_Filter)
+                                except:
+                                    dashboard_Filter = {}
+
+                        print("Normalized Dashboard Filter:", dashboard_Filter)
+                        
+                        # Ensure it's a dict before calling .get()
+                        if not isinstance(dashboard_Filter, dict):
+                            print(f"⚠️ dashboard_Filter is still not a dict ({type(dashboard_Filter)}). Resetting to empty.")
+                            dashboard_Filter = {}
+
+                        dashboard_table = dashboard_Filter.get("table_name")
+                        dashboard_filters_list = dashboard_Filter.get("filters", [])
+
+                        # Normalize dashboard filters into dict {column: values}
+                        dashboard_filters = {}
+                        for item in dashboard_filters_list:
+                            if isinstance(item, dict):
+                                dashboard_filters.update(item)
+
+                        print("Dashboard Filters:", dashboard_filters)
+
+                        # Only apply dashboard filters when table name matches
+                        if dashboard_table and dashboard_table == table_name:
+
+                            print(f"Applying dashboard filters to chart {chart_id} (table matched: {table_name})")
+
+                            # Parse chart filter_options (string → dict)
+                            chart_filters_clean = {}
+                            if isinstance(filter_options, str):
+                                try:
+                                    chart_filters_clean = json.loads(filter_options)
+                                except:
+                                    chart_filters_clean = ast.literal_eval(filter_options)
+                            elif isinstance(filter_options, dict):
+                                chart_filters_clean = filter_options
+
+                            # Merge dashboard filters into chart filters
+                            # for col, val_list in dashboard_filters.items():
+                            #     if col not in chart_filters_clean:
+                            #         chart_filters_clean[col] = val_list   # Add new filter
+                            #     else:
+                            #         # Merge without duplicates
+                            #         existing = set(chart_filters_clean[col])
+                            #         new_vals = set(val_list)
+                            #         chart_filters_clean[col] = list(existing | new_vals)
+                            # Suggested Override Logic (Replacing the 'else' block)
+                            for col, val_list in dashboard_filters.items():
+                                # If the column is not in the chart filters, add it (same as before)
+                                if col not in chart_filters_clean:
+                                    chart_filters_clean[col] = val_list
+                                else:
+                                    # === CHANGE THIS SECTION ===
+                                    # If the column IS in the chart filters, OVERRIDE it with the dashboard's filter values.
+                                    chart_filters_clean[col] = val_list
+                                    # The previous 'existing = set(chart_filters_clean[col]) | new_vals' logic is removed.
+                                    # ===========================
+
+                            # Replace old filter options
+                            filter_options = chart_filters_clean
+
+                            print("Merged filter_options (with override):", filter_options)
+
+                        #]
+
+
+                    # END Dashboard Filter Merge
+                    # ------------------------------------------------
+                                        
+                    # Determine the aggregation function
+                    aggregate_py = {
+                        'count': 'count',
+                        'sum': 'sum',
+                        'average': 'mean',
+                        'minimum': 'min',
+                        'maximum': 'max'
+                    }.get(aggregate, 'sum')  # Default to 'sum' if no match
+
+                    
+                    
                     if not selected_user or selected_user.lower() == 'null':
                         print("🟢 Using default local database connection...")
                         connection = get_db_connection_view(database_name)
@@ -1399,114 +1836,117 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                         print('External Connection established:', connection)
                     
 
-                    # -----------------------------------------------
-                    # 🟦 APPLY DASHBOARD FILTER IF TABLE NAME MATCHES
-                    # -----------------------------------------------
-                    if view_mode == "edit":
-                        print("View mode is 'edit' → Skipping dashboard filters.")
-                    else:
-                        print("dashboard_Filter",dashboard_Filter)
-                        # Normalize dashboard_Filter into dict
-                        if dashboard_Filter is None:
-                            dashboard_Filter = {} # Initialize to an empty dictionary
-                        if isinstance(dashboard_Filter, str):
-                            try:
-                                dashboard_Filter = json.loads(dashboard_Filter.replace("'", '"'))
-                            except Exception:
-                                dashboard_Filter = ast.literal_eval(dashboard_Filter)
+                    # # -----------------------------------------------
+                    # # 🟦 APPLY DASHBOARD FILTER IF TABLE NAME MATCHES
+                    # # -----------------------------------------------
+                    # if view_mode == "edit":
+                    #     print("View mode is 'edit' → Skipping dashboard filters.")
+                    # else:
+                    #     print("dashboard_Filter",dashboard_Filter)
+                    #     # Normalize dashboard_Filter into dict
+                    #     if dashboard_Filter is None:
+                    #         dashboard_Filter = {} # Initialize to an empty dictionary
+                    #     if isinstance(dashboard_Filter, str):
+                    #         try:
+                    #             dashboard_Filter = json.loads(dashboard_Filter.replace("'", '"'))
+                    #         except Exception:
+                    #             dashboard_Filter = ast.literal_eval(dashboard_Filter)
 
-                        print("Normalized Dashboard Filter:", dashboard_Filter)
+                    #     print("Normalized Dashboard Filter:", dashboard_Filter)
 
-                        dashboard_table = dashboard_Filter.get("table_name")
-                        dashboard_filters_list = dashboard_Filter.get("filters", [])
+                    #     dashboard_table = dashboard_Filter.get("table_name")
+                    #     dashboard_filters_list = dashboard_Filter.get("filters", [])
 
-                        # Normalize dashboard filters into dict {column: values}
-                        dashboard_filters = {}
-                        for item in dashboard_filters_list:
-                            if isinstance(item, dict):
-                                dashboard_filters.update(item)
+                    #     # Normalize dashboard filters into dict {column: values}
+                    #     dashboard_filters = {}
+                    #     for item in dashboard_filters_list:
+                    #         if isinstance(item, dict):
+                    #             dashboard_filters.update(item)
 
-                        print("Dashboard Filters:", dashboard_filters)
-                        chart_filters_clean = {}
-                        if isinstance(filter_options, str):
-                            try:
-                                chart_filters_clean = json.loads(filter_options)
-                            except:
-                                chart_filters_clean = ast.literal_eval(filter_options)
-                        elif isinstance(filter_options, dict):
-                            chart_filters_clean = filter_options
+                    #     print("Dashboard Filters:", dashboard_filters)
+                    #     chart_filters_clean = {}
+                    #     if isinstance(filter_options, str):
+                    #         try:
+                    #             chart_filters_clean = json.loads(filter_options)
+                    #         except:
+                    #             chart_filters_clean = ast.literal_eval(filter_options)
+                    #     elif isinstance(filter_options, dict):
+                    #         chart_filters_clean = filter_options
 
-                        # Only apply dashboard filters when table name matches
-                        if dashboard_table and dashboard_table == table_name:
+                    #     # Only apply dashboard filters when table name matches
+                    #     if dashboard_table and dashboard_table == table_name:
 
-                            print(f"Applying dashboard filters to chart {chart_id} (table matched: {table_name})")
+                    #         print(f"Applying dashboard filters to chart {chart_id} (table matched: {table_name})")
 
-                            # Parse chart filter_options (string → dict)
-                            # chart_filters_clean = {}
-                            # if isinstance(filter_options, str):
-                            #     try:
-                            #         chart_filters_clean = json.loads(filter_options)
-                            #     except:
-                            #         chart_filters_clean = ast.literal_eval(filter_options)
-                            # elif isinstance(filter_options, dict):
-                            #     chart_filters_clean = filter_options
+                    #         # Parse chart filter_options (string → dict)
+                    #         # chart_filters_clean = {}
+                    #         # if isinstance(filter_options, str):
+                    #         #     try:
+                    #         #         chart_filters_clean = json.loads(filter_options)
+                    #         #     except:
+                    #         #         chart_filters_clean = ast.literal_eval(filter_options)
+                    #         # elif isinstance(filter_options, dict):
+                    #         #     chart_filters_clean = filter_options
 
-                            # Merge dashboard filters into chart filters
-                            # for col, val_list in dashboard_filters.items():
-                            #     if col not in chart_filters_clean:
-                            #         chart_filters_clean[col] = val_list   # Add new filter
-                            #     else:
-                            #         # Merge without duplicates
-                            #         existing = set(chart_filters_clean[col])
-                            #         new_vals = set(val_list)
-                            #         chart_filters_clean[col] = list(existing | new_vals)
-                            # Suggested Override Logic (Replacing the 'else' block)
-                            for col, val_list in dashboard_filters.items():
-                                # If the column is not in the chart filters, add it (same as before)
-                                if col not in chart_filters_clean:
-                                    chart_filters_clean[col] = val_list
-                                else:
-                                    # === CHANGE THIS SECTION ===
-                                    # If the column IS in the chart filters, OVERRIDE it with the dashboard's filter values.
-                                    chart_filters_clean[col] = val_list
-                                    # The previous 'existing = set(chart_filters_clean[col]) | new_vals' logic is removed.
-                                    # ===========================
-                                    # ------------------------------------
-                            # 🔐 APPLY EMPLOYEE CATEGORY FILTER
-                            # ONLY FOR viewer / report viewer
-                            # ------------------------------------
-                        if is_restricted_role(user_role):
-                            print("Restricted role detected → applying employee category restriction")
-                            df = fetch_chart_data(connection, table_name)
+                    #         # Merge dashboard filters into chart filters
+                    #         # for col, val_list in dashboard_filters.items():
+                    #         #     if col not in chart_filters_clean:
+                    #         #         chart_filters_clean[col] = val_list   # Add new filter
+                    #         #     else:
+                    #         #         # Merge without duplicates
+                    #         #         existing = set(chart_filters_clean[col])
+                    #         #         new_vals = set(val_list)
+                    #         #         chart_filters_clean[col] = list(existing | new_vals)
+                    #         # Suggested Override Logic (Replacing the 'else' block)
+                    #         for col, val_list in dashboard_filters.items():
+                    #             # If the column is not in the chart filters, add it (same as before)
+                    #             if col not in chart_filters_clean:
+                    #                 chart_filters_clean[col] = val_list
+                    #             else:
+                    #                 # === CHANGE THIS SECTION ===
+                    #                 # If the column IS in the chart filters, OVERRIDE it with the dashboard's filter values.
+                    #                 chart_filters_clean[col] = val_list
+                    #                 # The previous 'existing = set(chart_filters_clean[col]) | new_vals' logic is removed.
+                    #                 # ===========================
+                    #                 # ------------------------------------
+                    #         # 🔐 APPLY EMPLOYEE CATEGORY FILTER
+                    #         # ONLY FOR viewer / report viewer
+                    #         # ------------------------------------
+                    #     if is_restricted_role(user_role):
+                    #         print("Restricted role detected → applying employee category restriction")
+                    #         df = fetch_chart_data(connection, table_name)
 
-                            chart_filters_clean = expand_filters_with_actual_values(df,
-                                        chart_filters_clean,
-                                        employee_category_filter
+                    #         chart_filters_clean = expand_filters_with_actual_values(df,
+                    #                     chart_filters_clean,
+                    #                     employee_category_filter
                                         
-                            )
-                            print("chart_filters_clean",chart_filters_clean)
-                        else:
-                            print("Non-restricted role → skipping employee category filter")
+                    #         )
+                    #         print("chart_filters_clean",chart_filters_clean)
+                    #     else:
+                    #         print("Non-restricted role → skipping employee category filter")
 
-                            # Replace old filter options
-                        filter_options = chart_filters_clean
+                    #         # Replace old filter options
+                    #     filter_options = chart_filters_clean
 
-                        print("Merged filter_options (with override):", filter_options)
+                    #     print("Merged filter_options (with override):", filter_options)
 
-                        #]
+                    #     #]
 
 
-                    # END Dashboard Filter Merge
-                    # ------------------------------------------------
+                    # # END Dashboard Filter Merge
+                    # # ------------------------------------------------
                                         
-                    # Determine the aggregation function
-                    aggregate_py = {
-                        'count': 'count',
-                        'sum': 'sum',
-                        'average': 'mean',
-                        'minimum': 'min',
-                        'maximum': 'max'
-                    }.get(aggregate, 'sum')  # Default to 'sum' if no match
+                    # # Determine the aggregation function
+                    # aggregate_py = {
+                    #     'count': 'count',
+                    #     'sum': 'sum',
+                    #     'average': 'mean',
+                    #     'minimum': 'min',
+                    #     'maximum': 'max'
+                    # }.get(aggregate, 'sum')  # Default to 'sum' if no match
+
+
+
 
                     # Check if selectedUser is NULL
                     # if selected_user is None:
