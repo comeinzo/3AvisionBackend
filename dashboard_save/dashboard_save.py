@@ -891,30 +891,31 @@ def is_restricted_role(role):
 
 #     return chart_filters
 def expand_filters_with_actual_values(df, chart_filters, employee_category_filter):
-    """
-    Replace employee_category_filter values with actual values from the dataframe
-    Case-insensitive matching.
-    
-    df: pandas DataFrame containing actual column values
-    chart_filters: dict, existing chart filters
-    employee_category_filter: dict, e.g., {'region': ['asia']}
-    """
     chart_filters_clean = chart_filters.copy()
-    
+
+    # 🔹 Normalize employee_category_filter
+    if isinstance(employee_category_filter, list):
+        normalized_filter = {}
+        for item in employee_category_filter:
+            for k, v in item.items():
+                normalized_filter.setdefault(k, []).append(v)
+        employee_category_filter = normalized_filter
+
     for col, filter_vals in employee_category_filter.items():
         if col not in df.columns:
-            continue  # skip if column not in dataframe
-        
-        # Get all unique values in the column (actual values)
+            continue
+
         actual_vals = df[col].dropna().unique()
-        actual_vals_lower = {str(v).lower(): v for v in actual_vals}  # map lowercase → actual
-        
-        # Match filter values case-insensitively
-        matched_vals = [actual_vals_lower[v.lower()] for v in filter_vals if v.lower() in actual_vals_lower]
-        
-        # Override/add to chart filters
+        actual_vals_lower = {str(v).lower(): v for v in actual_vals}
+
+        matched_vals = [
+            actual_vals_lower[v.lower()]
+            for v in filter_vals
+            if v.lower() in actual_vals_lower
+        ]
+
         chart_filters_clean[col] = matched_vals
-    
+
     return chart_filters_clean
 
 def apply_employee_category_filter(chart_filters, employee_category_filter, data_columns=None):
@@ -1074,25 +1075,49 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                 company_conn = get_company_db_connection(company_name)
                 emp_cur = company_conn.cursor()
 
+                # 🔹 Fetch user role
                 emp_cur.execute("""
-                            SELECT r.role_name, e.category
-                            FROM employee_list e
-                            JOIN role r ON e.role_id = r.role_id::text
-                            WHERE e.employee_id = %s
-                            LIMIT 1
-                        """, (employee_id,))
+                    SELECT r.role_name
+                    FROM employee_list e
+                    JOIN role r ON e.role_id = r.role_id::text
+                    WHERE e.employee_id = %s
+                    LIMIT 1
+                """, (employee_id,))
 
-                row = emp_cur.fetchone()
-                print("user_role,catagory",row)
+                role_row = emp_cur.fetchone()
+                if role_row:
+                    user_role = role_row[0].lower().strip()
+
+                # 🔹 Fetch category filters (KEY → VALUE)
+                emp_cur.execute("""
+                    SELECT c.category_name, ucm.category_value
+                    FROM user_category_mapping ucm
+                    JOIN category c ON c.category_id = ucm.category_id
+                    WHERE ucm.user_id = %s
+                """, (employee_id,))
+
+                category_rows = emp_cur.fetchall()
+
+                # 🔹 Convert to filter dict
+                # employee_category_filter = {
+                #     key: value for key, value in category_rows if key and value
+                # }
+                employee_category_filter = [
+                    {key: value}
+                    for key, value in category_rows
+                    if key and value
+                ]
+
+
                 emp_cur.close()
                 company_conn.close()
 
-                if row:
-                    user_role = row[0].lower().strip() if row[0] else None
-                    employee_category_filter = extract_filter_from_category(row[1])
+                print("user_role:", user_role)
+                print("employee_category_filter:", employee_category_filter)
 
             except Exception as e:
                 print("Failed to fetch role/category:", e)
+
 
             print("User role:", user_role)
             print("Employee category filter:", employee_category_filter)
