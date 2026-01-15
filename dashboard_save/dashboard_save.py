@@ -287,11 +287,13 @@ def fetch_project_names(user_id, database_name):
     if conn_datasource:
         try:
             with conn_datasource.cursor() as cursor:
-                # Simply query for the specific user_id and company_name
+                # Query for user_id and company_name, sorted by the latest entry first (LIFO)
                 query = """
-                    SELECT DISTINCT project_name 
+                    SELECT project_name 
                     FROM table_dashboard
-                    WHERE user_id = %s AND company_name = %s;
+                    WHERE user_id = %s AND company_name = %s
+                    GROUP BY project_name
+                    ORDER BY MAX(id) DESC;
                 """
                 # passed user_id and database_name (which maps to company_name)
                 cursor.execute(query, (str(user_id), database_name))
@@ -2728,7 +2730,7 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                             # =========================================================
                             print(f"\nGrouping by: {x_axis[0]}")
                             # grouped_df = df.groupby(x_axis[0]).size().reset_index(name="count")
-                            grouped_df = df.groupby(x_axis[0])[y_axis[0]].nunique().reset_index(name="count")
+                            grouped_df = df.groupby(x_axis[0])[y_axis[0]].count().reset_index(name="count")
 
                             
                             
@@ -3205,6 +3207,15 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                                             quarters = [int(v.replace('Q', '')) for v in allowed_values]
                                             dataframe = dataframe[temp_dates.dt.quarter.isin(quarters)]
                                             
+                                        elif "GMT" in sample_val or "," in sample_val or "-" in sample_val:
+                                             # Filter by EXACT DATE (Full Date Strings)
+                                             # Normalize both to YYYY-MM-DD
+                                             try:
+                                                 allowed_dates = [pd.to_datetime(v, errors='coerce').strftime('%Y-%m-%d') for v in allowed_values]
+                                                 dataframe = dataframe[temp_dates.dt.strftime('%Y-%m-%d').isin(allowed_dates)]
+                                             except Exception as e:
+                                                 print(f"Date parsing failed for filter: {e}")
+
                                         else:
                                             # Filter by MONTH NAME (e.g., ["January", "February"])
                                             # We compare month names (case-insensitive)
@@ -3286,10 +3297,13 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                                 grouped_df = pd.concat([top_df, bottom_df])
 
                         categories = grouped_df[x_axis[0]].tolist()
-                        if isinstance(categories[0], pd.Timestamp):  # Assumes at least one value is present
-                            categories = [category.strftime('%Y-%m-%d') for category in categories]
+                        if categories:
+                            if isinstance(categories[0], pd.Timestamp):  # Assumes at least one value is present
+                                categories = [category.strftime('%Y-%m-%d') for category in categories]
+                            else:
+                                categories = [str(category) for category in categories]  
                         else:
-                            categories = [str(category) for category in categories]  
+                            categories = []
                         values = [float(value) for value in grouped_df[y_axis[0]]]
 
                         print("categories--222", categories)

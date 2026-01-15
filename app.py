@@ -2863,17 +2863,51 @@ def get_bar_chart_route():
                     else:
                         new_df = temp_df
                     
+            # # Check if we need aggregation
+            # if aggregation and y_axis_columns:
+            #     if aggregation == "sum":
+            #         new_df = new_df.groupby(x_axis_columns, as_index=False)[y_axis_columns[0]].sum()
+            #     elif aggregation == "count":
+            #         new_df = new_df.groupby(x_axis_columns, as_index=False)[y_axis_columns[0]].count()
+            #     elif aggregation == "mean":
+            #         new_df = new_df.groupby(x_axis_columns, as_index=False)[y_axis_columns[0]].mean()
+            #     elif aggregation == "maximum":
+            #         new_df = new_df.groupby(x_axis_columns, as_index=False)[y_axis_columns[0]].max()
+            #     elif aggregation == "minimum":
+            #         new_df = new_df.groupby(x_axis_columns, as_index=False)[y_axis_columns[0]].min()
+            #     elif aggregation == "median":
+            #         new_df = new_df.groupby(x_axis_columns, as_index=False)[y_axis_columns[0]].median()
+            #     else:
+            #         return jsonify({"error": f"Unsupported aggregation type: {aggregation}"})
+            
+
             # Check if we need aggregation
             if aggregation and y_axis_columns:
                 if aggregation == "sum":
                     new_df = new_df.groupby(x_axis_columns, as_index=False)[y_axis_columns[0]].sum()
                 elif aggregation == "count":
                     new_df = new_df.groupby(x_axis_columns, as_index=False)[y_axis_columns[0]].count()
-                elif aggregation == "mean":
+                
+                # Update: specific check for both 'mean' and 'average'
+                elif aggregation == "mean" or aggregation == "average":
                     new_df = new_df.groupby(x_axis_columns, as_index=False)[y_axis_columns[0]].mean()
+                
+                elif aggregation == "maximum":
+                    new_df = new_df.groupby(x_axis_columns, as_index=False)[y_axis_columns[0]].max()
+                elif aggregation == "minimum":
+                    new_df = new_df.groupby(x_axis_columns, as_index=False)[y_axis_columns[0]].min()
+                elif aggregation == "median":
+                    new_df = new_df.groupby(x_axis_columns, as_index=False)[y_axis_columns[0]].median()
+                
+                # Added Variance
+                elif aggregation == "variance":
+                    new_df = new_df.groupby(x_axis_columns, as_index=False)[y_axis_columns[0]].var()
+                
                 else:
                     return jsonify({"error": f"Unsupported aggregation type: {aggregation}"})
-            
+
+
+
             # Apply data limiting if specified
             if data_limit_type:
                 new_df = apply_data_limiting(new_df, data_limit_type, data_limit_column or y_axis_columns[0], x_axis_columns, y_axis_columns, aggregation)
