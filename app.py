@@ -100,7 +100,7 @@ from upload import is_table_used_in_charts
 from user_upload import (
     get_db_connection,
     handle_file_upload_registration,
-    handle_manual_registration,create_user_management_log_table,log_user_management_action
+    handle_manual_registration,create_user_management_log_table,log_user_management_action,handle_categories
 )
 from viewChart.viewChart import (
     fetch_ai_saved_chart_data,
@@ -122,7 +122,7 @@ from bar_chart import (
     fetchText_data,
     get_column_names,
     Hierarchial_drill_down,
-    perform_calculation
+    perform_calculation,apply_and_or_filters
 )
 from bar_chart import global_df,global_column_names
 # from license_routes import license_bp
@@ -1939,7 +1939,7 @@ def handle_connect():
     database_name = request.args.get("databaseName")
     chart_type = request.args.get("chartType")
     # calculationData =request.args.get("calculationData")
-    
+    print("Missing required.",selected_table, x_axis, aggregate, database_name, chart_type)
 
     calculationData_str = request.args.get("calculationData")
     try:
@@ -1949,7 +1949,7 @@ def handle_connect():
         calculationData = None
 
     if not all([selected_table, x_axis, aggregate, database_name, chart_type]):
-        print("Missing required parameters.")
+        print("Missing required parameters.",selected_table, x_axis, aggregate, database_name, chart_type)
         return
 
     if sid in active_listeners:
@@ -5911,6 +5911,8 @@ def handle_clicked_category():
 def apply_calculation_to_df(df, calculation_data_list, x_axis=None, y_axis=None):
     if not calculation_data_list:
         return df, x_axis, y_axis
+    skip_calculated_column = False
+    y_base_column = None
 
     for calculation_data in calculation_data_list:
         try:
@@ -6264,24 +6266,74 @@ def receive_chart_details():
 
     try:
         company_conn = get_company_db_connection(databaseName)
-        with company_conn.cursor() as emp_cur:
-            emp_cur.execute("""
-                SELECT r.role_name, e.category
-                FROM employee_list e
-                JOIN role r ON e.role_id = r.role_id::text
-                WHERE e.employee_id = %s
-                LIMIT 1
-            """, (user_id,))
-            row = emp_cur.fetchone()
+        emp_cur = company_conn.cursor()
 
-        if row:
-            user_role = row[0].lower().strip()
-            employee_category_filter = extract_filter_from_category(row[1])
+        # 🔹 Fetch user role
+        emp_cur.execute("""
+            SELECT r.role_name
+            FROM employee_list e
+            JOIN role r ON e.role_id = r.role_id::text
+            WHERE e.employee_id = %s
+            LIMIT 1
+        """, (user_id,))
+
+        role_row = emp_cur.fetchone()
+        if role_row:
+            user_role = role_row[0].lower().strip()
+
+        # 🔹 Fetch category filters (KEY → VALUE)
+        # emp_cur.execute("""
+        #     SELECT c.category_name, ucm.category_value
+        #     FROM user_category_mapping ucm
+        #     JOIN category c ON c.category_id = ucm.category_id
+        #     WHERE ucm.user_id = %s
+        # """, (user_id,))
+
+        # category_rows = emp_cur.fetchall()
+
+        # # 🔹 Convert to filter structure
+        # # Output format:
+        # # [
+        # #   {"region": "Asia"},
+        # #   {"product": "Credit Card"}
+        # # ]
+        # employee_category_filter = [
+        #     {key: value}
+        #     for key, value in category_rows
+        #     if key and value
+        # ]
+        emp_cur.execute("""
+            SELECT c.category_name, ucm.category_value, COALESCE(ucm.operator, 'AND')
+            FROM user_category_mapping ucm
+            JOIN category c ON c.category_id = ucm.category_id
+            WHERE ucm.user_id = %s
+            ORDER BY ucm.id ASC
+        """, (user_id,))
+
+        category_rows = emp_cur.fetchall()
+        print("category_rows:", category_rows)
+
+        # 🔹 Convert to filter structure
+        # Output format:
+        # [
+        #   {"key": "region", "value": "Asia", "operator": "OR"},
+        #   {"key": "product", "value": "Credit Card", "operator": "AND"}
+        # ]
+        employee_category_filter = [
+            {"key": key, "value": value, "operator": op}
+            for key, value, op in category_rows
+            if key and value
+        ]
+
+        print("User role:", user_role)
+        print("Employee category filter:", employee_category_filter)
 
     except Exception as e:
         print("Failed to fetch role/category:", e)
+
     finally:
         if company_conn:
+            emp_cur.close()
             company_conn.close()
 
 
@@ -6996,6 +7048,62 @@ def receive_chart_details():
 
                     # Apply calculations (existing behavior)
                     df, x_axis, y_axis = apply_calculation_to_df(df, calculation_data, x_axis, y_axis)
+                    print("filter_options",filter_options)
+                    if filter_options:
+                        and_mask = pd.Series(True, index=df.index)
+                        or_mask = pd.Series(False, index=df.index)
+
+                        # 🔥 detect if ANY OR exists
+                        has_or = any(
+                            isinstance(v, dict) and v.get("operator", "").upper() == "OR"
+                            for v in filter_options.values()
+                        )
+
+                        for col, filter_data in filter_options.items():
+                            if col not in df.columns:
+                                continue
+
+                            if isinstance(filter_data, dict):
+                                values = filter_data.get("values", [])
+                                operator = filter_data.get("operator", "AND").upper()
+                            else:
+                                values = filter_data
+                                operator = "AND"
+
+                            if not values:
+                                continue
+
+                            # Build column mask
+                            if pd.api.types.is_datetime64_any_dtype(df[col]) or "date" in col.lower():
+                                temp_dates = pd.to_datetime(df[col], errors="coerce")
+                                sample_val = str(values[0])
+
+                                if sample_val.isdigit():
+                                    col_mask = temp_dates.dt.year.isin([int(v) for v in values])
+                                elif sample_val.startswith("Q"):
+                                    col_mask = temp_dates.dt.quarter.isin(
+                                        [int(v.replace("Q", "")) for v in values]
+                                    )
+                                else:
+                                    col_mask = temp_dates.dt.strftime("%Y-%m-%d").isin(values)
+                            else:
+                                col_mask = df[col].astype(str).isin(map(str, values))
+
+                            # ✅ AUTO GROUPING
+                            if has_or and operator in ("AND", "OR") and col != "country":
+                                # region + product → OR group
+                                or_mask |= col_mask
+                            else:
+                                # country → AND group
+                                and_mask &= col_mask
+
+                        # ✅ FINAL SQL EQUIVALENT
+                        if has_or:
+                            df = df[or_mask & and_mask]
+                        else:
+                            df = df[and_mask]
+
+                    print("df",df)
 
                     # ---------- DATE GRANULARITY PROCESSING ----------
                     if dateGranularity and isinstance(dateGranularity, dict):
@@ -7033,36 +7141,86 @@ def receive_chart_details():
                                 print(f"Created granularity column: {granularity_col}")
                                 print(df[[date_col, granularity_col]].head())
                     # ========== APPLY FILTERS AFTER GRANULARITY ==========
-                    for col, values in filter_options.items():
-                        values = list(map(str, values))
+                    
+                    # print("filter_options1",chart_filters_clean)
+                    # for col, values in filter_options.items():
+                    #     # values = list(map(str, values))
+                    #     if isinstance(values, dict):
+                    #         values = values.get("values", [])
+                    #     values = list(map(str, values))
 
-                        # If granularity column exists, filter on it
-                        gran_col = None
-                        if dateGranularity and col in dateGranularity:
-                            gran_col = f"{col}_{dateGranularity[col]}"
+                    #     # If granularity column exists, filter on it
+                    #     gran_col = None
+                    #     if dateGranularity and col in dateGranularity:
+                    #         gran_col = f"{col}_{dateGranularity[col]}"
 
-                        if gran_col and gran_col in df.columns:
-                            df = df[df[gran_col].isin(values)]
-                        elif col in df.columns:
-                            df[col] = df[col].astype(str)
-                            df = df[df[col].isin(values)]
+                    #     if gran_col and gran_col in df.columns:
+                    #         df = df[df[gran_col].isin(values)]
+                    #     elif col in df.columns:
+                    #         df[col] = df[col].astype(str)
+                    #         df = df[df[col].isin(values)]
+                    # ---------------- APPLY AND / OR FILTERS ----------------
+                    and_mask = pd.Series(True, index=df.index)
+                    or_mask = pd.Series(False, index=df.index)
 
+                    for col, filter_data in filter_options.items():
+                        if isinstance(filter_data, dict):
+                            values = filter_data.get("values", [])
+                            operator = filter_data.get("operator", "AND").upper()
+                        else:
+                            values = filter_data
+                            operator = "AND"
 
-                    # ---------- BUILD FILTER OPTIONS ----------
-                    options = []
-                    for col in x_axis:
-                        if col in filter_options:
-                            options.extend(filter_options[col])
-                    options = list(map(str, options))
+                        if not values or col not in df.columns:
+                            continue
 
-                    # Apply filter if options exist
-                    if options:
-                        filtered_df = df[df[x_axis[0]].astype(str).isin(options)]
+                        # If granularity exists, apply filter on granularity column
+                        gran_col = f"{col}_{dateGranularity[col].lower()}" if dateGranularity and col in dateGranularity else col
+                        col_mask = df[gran_col].astype(str).isin(map(str, values))
+
+                        if operator == "AND":
+                            and_mask &= col_mask
+                        else:  # OR
+                            or_mask |= col_mask
+
+                    # Combine AND and OR masks
+                    if or_mask.any() and and_mask.any():
+                        final_mask = and_mask | or_mask
+                    elif and_mask.any():
+                        final_mask = and_mask
                     else:
-                        filtered_df = df
+                        final_mask = or_mask
+
+                    df_filtered = df[final_mask]
+
+                    # ✅ Apply AND / OR logic without touching existing code
+                    
+
+
+
+                    # # ---------- BUILD FILTER OPTIONS ----------
+                    # options = []
+                    # for col in x_axis:
+                    #     if col in filter_options:
+                    #         options.extend(filter_options[col])
+                    # options = list(map(str, options))
+
+                    # # Apply filter if options exist
+                    # if options:
+                    #     filtered_df = df[df[x_axis[0]].astype(str).isin(options)]
+                    # else:
+                   
+                    filtered_df = df
+                    print("filtered_df",filtered_df)
 
                     # ---------- GROUP ----------
-                    grouped_df = filtered_df.groupby(x_axis[0])[y_axis].agg(aggregate_py).reset_index()
+                    # grouped_df = filtered_df.groupby(x_axis[0])[y_axis].agg(aggregate_py).reset_index()
+                    # ---------- GROUP ----------
+                    grouped_df = df_filtered.groupby(x_axis[0])[y_axis].agg(aggregate_py).reset_index()
+
+
+                    print("Grouped DataFrame:", grouped_df.head())
+
                     print("Grouped DataFrame:", grouped_df.head())
 
                     # ---------- NORMALIZE CATEGORY ----------
@@ -7078,24 +7236,25 @@ def receive_chart_details():
                     print("values====================22222", values)
 
                     # ---------- CORRECT allowed_categories BASED ON GRANULARITY ----------
+                  # ---------- DETERMINE ORIGINAL DATE COLUMN ----------
                     original_date_col = None
                     if isinstance(dateGranularity, dict) and len(dateGranularity) > 0:
                         original_date_col = list(dateGranularity.keys())[0]
-                        print("original_date_col",original_date_col)
+                        print("original_date_col", original_date_col)
 
                     allowed_categories = []
 
-                    if original_date_col:
+                    # ---------- BUILD ALLOWED CATEGORIES ----------
+                    if original_date_col and original_date_col in filter_options:
+                        # Date granularity column exists and has a filter
                         raw_dates = filter_options.get(original_date_col, [])
-                        print("raw_dates",raw_dates)
+                        print("raw_dates", raw_dates)
                         gran = dateGranularity.get(original_date_col, "").lower()
-                        print("gran",gran)
-                        for d in raw_dates:
+                        print("gran", gran)
 
-                            # ✅ HANDLE YEAR INT / STRING DIRECTLY
+                        for d in raw_dates:
                             if gran == "year":
                                 key = str(d)
-                            
                             else:
                                 dt = pd.to_datetime(d, errors='coerce')
                                 if pd.isna(dt):
@@ -7103,68 +7262,41 @@ def receive_chart_details():
 
                                 if gran == "quarter":
                                     key = f"{dt.year}-Q{dt.quarter}"
-
                                 elif gran == "month":
                                     key = dt.strftime("%Y-%m")
-
                                 elif gran == "week":
                                     key = f"{dt.year}-W{dt.isocalendar().week}"
-
-                                else:
+                                else:  # day
                                     key = dt.strftime("%Y-%m-%d")
 
                             if key not in allowed_categories:
                                 allowed_categories.append(key)
                                 print("allowed_categories1", allowed_categories, key)
 
+                    # elif x_axis[0] in filter_options:
+                    #     # Non-date column filter exists for x_axis
+                    #     filter_val = filter_options.get(x_axis[0])
+                    #     print("filter_val",filter_val)
+                    #     if isinstance(filter_val, dict):
+                    #         allowed_categories = list(map(str, filter_val.get("values", [])))
+                    #     else:
+                    #         allowed_categories = list(map(str, filter_val))
 
-                        # for d in raw_dates:
-                            
+                    # print("allowed_categories2", allowed_categories)
 
-                        #     # if gran == "year":
-                        #     #     key = dt.to_period("Y").to_timestamp().strftime("%Y-%m-%d")
-                        #     # elif gran == "quarter":
-                        #     #     key = dt.to_period("Q").to_timestamp().strftime("%Y-%m-%d")
-                        #     # elif gran == "month":
-                        #     #     key = dt.to_period("M").to_timestamp().strftime("%Y-%m-%d")
-                        #     # elif gran == "week":
-                        #     #     key = dt.to_period("W").to_timestamp().strftime("%Y-%m-%d")
-                        #     # else:
-                        #     #     key = dt.date().strftime("%Y-%m-%d")
-                        #     if gran == "year":
-                        #         key = str(dt.year)
-
-                        #     elif gran == "quarter":
-                        #         key = f"{dt.year}-Q{dt.quarter}"
-
-                        #     elif gran == "month":
-                        #         key = dt.strftime("%Y-%m")
-
-                        #     elif gran == "week":
-                        #         key = f"{dt.year}-W{dt.isocalendar().week}"
-
-                        #     else:
-                        #         key = dt.strftime("%Y-%m-%d")
-
-
-                        #     if key not in allowed_categories:
-                        #         allowed_categories.append(key)
-                        #         print("allowed_categories1",allowed_categories,key)
-
-                    else:
-                        allowed_categories = list(map(str, filter_options.get(x_axis[0], [])))
-                        print("allowed_categories2",allowed_categories)
-                    # ---------- FINAL FILTER ----------
-                    if not allowed_categories:
-                        filtered_categories = categories
-                        filtered_values = values
-                    else:
+                    # ---------- FINAL CATEGORY FILTER ----------
+                    if allowed_categories:
                         filtered_categories = []
                         filtered_values = []
                         for c, v in zip(categories, values):
                             if str(c).strip() in allowed_categories:
                                 filtered_categories.append(c)
                                 filtered_values.append(v)
+                    else:
+                        # No filter applied → keep all grouped categories
+                        filtered_categories = categories
+                        filtered_values = values
+
 
                     print("allowed_categories:", allowed_categories)
                     print("filtered_categories====================1111", filtered_categories)
@@ -7215,6 +7347,8 @@ def receive_chart_details():
 
         else:   
             print("Treee")
+            print("filter_options",filter_options)
+
             data = fetch_data_tree(tableName, x_axis, filter_options, y_axis, aggregate, databaseName,selectedUser,calculation_data)
             categories = data.get("categories", [])
             values = data.get("values", [])
@@ -7442,6 +7576,7 @@ def get_dashboard_data(dashboard_name, company_name,user_id):
 def dashboard_data(dashboard_name,company_name):
     user_id, dashboard_name = dashboard_name.split(",", 1)  # Split only once
     view_mode = request.args.get('view_mode') 
+    logged_user_role=request.args.get("user_role")
     # employee_id = request.args.get('user_id')
     employee_id = request.args.get('user_id')
     employee_id = int(employee_id) if employee_id else None  # 🔴 FIX
@@ -7493,7 +7628,7 @@ def dashboard_data(dashboard_name,company_name):
         print("image_ids",image_ids)
         print("dashboard_Filter",dashboard_Filter)
         print("employee_id",employee_id)
-        chart_datas=get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,droppableBgColor,opacity,image_ids,chart_type,dashboard_Filter,view_mode,company_name,employee_id=employee_id,temp_filters=active_temp_filters)
+        chart_datas=get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,droppableBgColor,opacity,image_ids,chart_type,dashboard_Filter,view_mode,company_name,employee_id=employee_id,temp_filters=active_temp_filters,logged_user_role=logged_user_role)
         # print("dashboarddata",data)
         # print("chart_datas====================",chart_datas)
         image_data_list = []
@@ -7835,73 +7970,327 @@ def ai_boxPlotChart():
         "histogram_details": details
     })
 
+# @app.route('/api/fetch_categories', methods=['GET'])
+# @token_required
+# def fetch_categories():
+#     company_name = request.args.get('companyName')
+#     try:
+#         conn = get_company_db_connection(company_name)
+#         cursor = conn.cursor()
+#         cursor.execute("SELECT category_id, category_name FROM category")
+#         categories = cursor.fetchall()
+#         cursor.close()
+#         conn.close()
+
+#         return jsonify([{'id': row[0], 'name': row[1]} for row in categories])
+#     except Exception as e:
+#         print(f"Error fetching categories: {e}")
+#         return jsonify({'message': 'Error fetching categories'}),500
 @app.route('/api/fetch_categories', methods=['GET'])
 @token_required
 def fetch_categories():
     company_name = request.args.get('companyName')
+
+    if not company_name:
+        return jsonify({'message': 'companyName is required'}), 400
+
     try:
-        conn = get_company_db_connection(company_name)
-        cursor = conn.cursor()
-        cursor.execute("SELECT category_id, category_name FROM category")
-        categories = cursor.fetchall()
-        cursor.close()
-        conn.close()
+        # 🔹 1. Get company_id from MASTER DB
+        master_conn = get_db_connection()  # datasource DB
+        master_cur = master_conn.cursor()
 
-        return jsonify([{'id': row[0], 'name': row[1]} for row in categories])
+        master_cur.execute("""
+            SELECT id
+            FROM organizationdatatest
+            WHERE organizationname = %s
+        """, (company_name,))
+
+        org = master_cur.fetchone()
+        master_cur.close()
+        master_conn.close()
+
+        if not org:
+            return jsonify({'message': 'Company not found'}), 404
+
+        company_id = org[0]
+
+        # 🔹 2. Get categories from COMPANY DB
+        company_conn = get_company_db_connection(company_name)
+        cur = company_conn.cursor()
+
+        cur.execute("""
+            SELECT category_id, category_name
+            FROM category
+            WHERE company_id = %s
+            ORDER BY category_name
+        """, (company_id,))
+
+        categories = cur.fetchall()
+        cur.close()
+        company_conn.close()
+
+        return jsonify([
+            {'id': row[0], 'name': row[1]}
+            for row in categories
+        ])
+
     except Exception as e:
-        print(f"Error fetching categories: {e}")
-        return jsonify({'message': 'Error fetching categories'}),500
+        print(f"❌ Error fetching categories: {e}")
+        return jsonify({'message': 'Error fetching categories'}), 500
+# @app.route('/api/users', methods=['GET'])
+# @token_required
+# def get_all_users():
+#     company_name = request.args.get('companyName')
+#     print("company_name====================",company_name)
+#     page = int(request.args.get('page', 1))  # Default to page 1 if not provided
+#     limit = int(request.args.get('limit', 10))  # Default to 10 users per page
 
+#     if not company_name:
+#         return jsonify({'error': 'Company name is required'}), 400
+
+#     try:
+#         conn = get_company_db_connection(company_name)
+#         cursor = conn.cursor()
+
+#         # Calculate the offset based on the current page and limit
+#         offset = (page - 1) * limit
+
+#         # Fetch users for the specified company with pagination
+#         cursor.execute("""
+#             SELECT  employee_name, username, role_id, category,reporting_id ,employee_id
+#             FROM employee_list
+#             LIMIT %s OFFSET %s;
+#         """, (limit, offset))
+
+#         users = cursor.fetchall()
+
+#         # Fetch the total number of users for the specified company (for pagination)
+#         cursor.execute("SELECT COUNT(*) FROM employee_list;")
+#         total_users = cursor.fetchone()[0]
+
+#         # Create a list of user dictionaries
+#         user_list = [
+#             {
+#                 'employee_name': user[0],
+#                 'username': user[1],
+#                 'role_id': user[2],
+#                 'category': user[3],
+#                 'reporting_id':user[4],
+#                 'employee_id':user[5],
+#             }
+#             for user in users
+#         ]
+
+#         return jsonify({
+#             'users': user_list,
+#             'total': total_users  # Total users count for pagination
+#         }), 200
+
+#     except Exception as e:
+#         return jsonify({'error': str(e)}), 500
+
+#     finally:
+#         if cursor:
+#             cursor.close()
+#         if conn:
+#             conn.close()
+# @app.route('/api/users', methods=['GET'])
+# @token_required
+# def get_all_users():
+#     company_name = request.args.get('companyName')
+#     print("company_name====================", company_name)
+#     page = int(request.args.get('page', 1))  # Default to page 1
+#     limit = int(request.args.get('limit', 10))  # Default limit
+
+#     if not company_name:
+#         return jsonify({'error': 'Company name is required'}), 400
+
+#     try:
+#         # 1️⃣ Get company_id from MASTER DB
+#         master_conn = get_db_connection()
+#         master_cur = master_conn.cursor()
+#         master_cur.execute("""
+#             SELECT id
+#             FROM organizationdatatest
+#             WHERE organizationname = %s
+#         """, (company_name,))
+#         org = master_cur.fetchone()
+#         master_cur.close()
+#         master_conn.close()
+
+#         if not org:
+#             return jsonify({'message': 'Company not found'}), 404
+
+#         company_id = org[0]
+
+#         # 2️⃣ Fetch users from employee_list with pagination
+#         conn = get_company_db_connection(company_name)
+#         cursor = conn.cursor()
+#         offset = (page - 1) * limit
+        
+
+#         cursor.execute("""
+#             SELECT employee_id, employee_name, username, role_id, reporting_id,
+#             FROM employee_list
+#             ORDER BY employee_id
+#             LIMIT %s OFFSET %s
+#         """, (limit, offset))
+
+#         users = cursor.fetchall()
+
+#         # 3️⃣ Fetch total count for pagination
+#         cursor.execute("SELECT COUNT(*) FROM employee_list;")
+#         total_users = cursor.fetchone()[0]
+
+#         # 4️⃣ Fetch category values for all users on this page
+#         user_ids = [u[0] for u in users]  # employee_id list
+#         category_mapping = {}
+#         if user_ids:
+#             cursor.execute(f"""
+#                 SELECT ucm.user_id, c.category_name, ucm.category_value
+#                 FROM user_category_mapping ucm
+#                 JOIN category c ON ucm.category_id = c.category_id
+#                 WHERE ucm.user_id = ANY(%s)
+#             """, (user_ids,))
+#             for user_id, cat_name, cat_value in cursor.fetchall():
+#                 if user_id not in category_mapping:
+#                     category_mapping[user_id] = {}
+#                 category_mapping[user_id][cat_name] = cat_value
+
+#         # 5️⃣ Build user list
+#         user_list = []
+#         for user in users:
+#             employee_id, employee_name, username, role_id, reporting_id = user
+#             user_list.append({
+#                 'employee_name': employee_name,
+#                 'username': username,
+#                 'role_id': role_id,
+#                 'reporting_id': reporting_id,
+#                 'categories': category_mapping.get(employee_id, {})  # category_name -> value
+#             })
+
+#         return jsonify({
+#             'users': user_list,
+#             'total': total_users
+#         }), 200
+
+#     except Exception as e:
+#         print(f"❌ Error fetching users: {e}")
+#         return jsonify({'error': str(e)}), 500
+
+#     finally:
+#         if cursor:
+#             cursor.close()
+#         if conn:
+#             conn.close()
 @app.route('/api/users', methods=['GET'])
 @token_required
 def get_all_users():
     company_name = request.args.get('companyName')
-    print("company_name====================",company_name)
-    page = int(request.args.get('page', 1))  # Default to page 1 if not provided
-    limit = int(request.args.get('limit', 10))  # Default to 10 users per page
+    page = int(request.args.get('page', 1))
+    limit = int(request.args.get('limit', 10))
 
     if not company_name:
         return jsonify({'error': 'Company name is required'}), 400
 
+    master_conn = None
+    conn = None
+    cursor = None
+
     try:
+        # 1️⃣ Get company_id from MASTER DB
+        master_conn = get_db_connection()
+        master_cur = master_conn.cursor()
+        master_cur.execute("""
+            SELECT id
+            FROM organizationdatatest
+            WHERE organizationname = %s
+        """, (company_name,))
+        org = master_cur.fetchone()
+        master_cur.close()
+        master_conn.close()
+
+        if not org:
+            return jsonify({'message': 'Company not found'}), 404
+
+        company_id = org[0]
+
+        # 2️⃣ Fetch users from company DB
         conn = get_company_db_connection(company_name)
         cursor = conn.cursor()
 
-        # Calculate the offset based on the current page and limit
         offset = (page - 1) * limit
 
-        # Fetch users for the specified company with pagination
         cursor.execute("""
-            SELECT  employee_name, username, role_id, category,reporting_id ,employee_id
+            SELECT 
+                employee_id,
+                employee_name,
+                username,
+                role_id,
+                reporting_id
             FROM employee_list
-            LIMIT %s OFFSET %s;
+            ORDER BY employee_id
+            LIMIT %s OFFSET %s
         """, (limit, offset))
 
         users = cursor.fetchall()
 
-        # Fetch the total number of users for the specified company (for pagination)
-        cursor.execute("SELECT COUNT(*) FROM employee_list;")
+        # 3️⃣ Total users count
+        cursor.execute("SELECT COUNT(*) FROM employee_list")
         total_users = cursor.fetchone()[0]
 
-        # Create a list of user dictionaries
-        user_list = [
-            {
-                'employee_name': user[0],
-                'username': user[1],
-                'role_id': user[2],
-                'category': user[3],
-                'reporting_id':user[4],
-                'employee_id':user[5],
-            }
-            for user in users
-        ]
+        # 4️⃣ Fetch categories for users
+        user_ids = [u[0] for u in users]  # employee_id list
+        category_mapping = {}
+
+        if user_ids:
+            cursor.execute("""
+                SELECT 
+                    ucm.user_id,
+                    c.category_name,
+                    ucm.category_value,ucm.operator
+                FROM user_category_mapping ucm
+                JOIN category c 
+                  ON ucm.category_id = c.category_id
+                WHERE ucm.user_id = ANY(%s) ORDER BY ucm.category_id ASC;
+            """, (user_ids,))
+            for user_id, cat_name, cat_value, operator in cursor.fetchall():
+                if user_id not in category_mapping:
+                    category_mapping[user_id] = {}
+
+                if cat_name not in category_mapping[user_id]:
+                    category_mapping[user_id][cat_name] = {
+                        "values": [],
+                        "operator": operator
+                    }
+
+                category_mapping[user_id][cat_name]["values"].append(cat_value)
+
+            # for user_id, cat_name, cat_value,operator  in cursor.fetchall():
+            #     category_mapping.setdefault(user_id, {})[cat_name] = cat_value,operator
+
+        # 5️⃣ Build response
+        user_list = []
+        for user in users:
+            employee_id, employee_name, username, role_id, reporting_id = user
+            user_list.append({
+                'employee_id': employee_id,          # 🔥 REQUIRED
+                'employee_name': employee_name,
+                'username': username,
+                'role_id': role_id,
+                'reporting_id': reporting_id,
+                'categories': category_mapping.get(employee_id, {})
+            })
 
         return jsonify({
             'users': user_list,
-            'total': total_users  # Total users count for pagination
+            'total': total_users,
+            'page': page,
+            'limit': limit
         }), 200
 
     except Exception as e:
+        print(f"❌ Error fetching users: {e}")
         return jsonify({'error': str(e)}), 500
 
     finally:
@@ -7910,85 +8299,192 @@ def get_all_users():
         if conn:
             conn.close()
 
+# @app.route('/api/fetch_user_data', methods=['POST'])
+# @token_required
+# def fetch_user_data():
+#     data = request.json
+#     print("data",data)
+#     username = data.get('username')
+#     organization_name = data.get('organization_name')  # Changed from company_id to organization_name
+#     print("username",username)
+#     print("organization_name",organization_name)
+
+
+#     # Check if username and organization_name are provided
+#     if not username or not organization_name:
+#         return jsonify({'message': 'Username and organization_name are required'}), 400
+
+#     # Connect to the company's database using organization_name
+#     conn = get_company_db_connection(organization_name)
+#     if not conn:
+#         print(f"Failed to connect to company database for {organization_name}.")
+#         return jsonify({'message': 'Failed to connect to company database'}), 500
+
+#     try:
+#         # Fetch employee details based on username
+#         cursor = conn.cursor()
+#         cursor.execute("""
+#             SELECT employee_id, employee_name, role_id,category, username,email FROM employee_list WHERE username = %s
+#         """, (username,))
+#         employee_data = cursor.fetchone()
+#         cursor.close()
+
+#         if not employee_data:
+#             return jsonify({'message': 'Employee not found'}), 404
+
+#         # Extract employee data
+#         employee_id, employee_name, role_id, category_name,username,email = employee_data
+#         print("employee data",employee_data)
+#         # Fetch the category name from the signup database
+#         conn_datasource = get_db_connection(DB_NAME)
+#         user_details = {
+#             'employee_id': employee_id,
+#             'employee_name': employee_name,
+#             'role_id': role_id,
+#             'username': username,
+#             'category_name': category_name,
+#             'email':email
+#         }
+#         print("userdetails",user_details)
+#         # Check if new role or category needs to be updated
+#         new_role_id = data.get('new_role_id')
+#         new_category_name = data.get('new_category_name')
+
+#         if new_role_id or new_category_name:
+#             # Update role if provided
+#             if new_role_id:
+#                 cursor = conn.cursor()
+#                 cursor.execute("""
+#                     UPDATE employee_list SET role_id = %s WHERE employee_id = %s
+#                 """, (new_role_id, employee_id))
+#                 conn.commit()
+#                 cursor.close()
+#                 user_details['role_id'] = new_role_id  # Update in response
+
+#             # Update category if provided
+#             if new_category_name:
+#                 cursor = conn.cursor()
+#                 cursor.execute("""
+#                     UPDATE category SET category_name = %s WHERE company_id = (SELECT id FROM organizationdatatest WHERE organizationname = %s)
+#                 """, (new_category_name, organization_name))
+#                 conn.commit()
+#                 cursor.close()
+#                 user_details['category_name'] = new_category_name  # Update in response
+
+#         # Return the employee details along with updated role/category if applicable
+#         return jsonify(user_details), 200
+
+#     except Exception as e:
+#         print(f"Error fetching or updating user data: {e}")
+#         return jsonify({'message': 'Error fetching or updating user data'}), 500
+
+#     finally:
+#         conn.close()
+
+# @app.route('/api/update_user_details', methods=['POST'])
+# @token_required
+# def update_user_details():
+#     data = request.json
+#     print("data......",data)
+#     username = data.get('username')
+#     organization_name = data.get('companyName')
+#     new_role_id = data.get('roleId')
+#     reporting_id=data.get('reporting_id')
+#     print("new role id",new_role_id)
+#     category_name = data.get('categoryName')
+#     formatted_category_name = category_name  # Format category with curly braces
+#     print("category---------", formatted_category_name)
+#     admin_email=data.get("email")
+
+#     # Connect to company database
+#     conn = connect_db(organization_name)
+#     if not conn:
+#         return jsonify({'message': f'Failed to connect to database for company: {organization_name}'}), 500
+
+#     try:
+#         cursor = conn.cursor()
+
+#         # Update role
+#         if new_role_id:
+#             cursor.execute("""
+#                 UPDATE employee_list SET role_id = %s ,category=%s,reporting_id=%s WHERE username = %s
+                
+#             """, (new_role_id,formatted_category_name,reporting_id,username))
+#             conn.commit()
+#         create_user_management_log_table(organization_name)
+
+#         # ✅ Log this admin action
+#         description = (
+#             f"Admin ({admin_email}) updated user '{username}' "
+#             f"with new role_id='{new_role_id}', category='{formatted_category_name}', "
+#             f"and reporting_id='{reporting_id}' in company '{organization_name}'."
+#         )
+
+#         log_user_management_action(
+#             admin_email=admin_email,
+#             user_email=username,
+#             action_type="USER_UPDATED",
+#             description=description,
+#             company_name=organization_name
+#         )
+#         return jsonify({'message': 'User details updated successfully'}), 200
+#     except Exception as e:
+#         print(f"Error updating user details: {e}")
+#         return jsonify({'message': 'Error updating user details'}), 500
+#     finally:
+#         conn.close()
 @app.route('/api/fetch_user_data', methods=['POST'])
 @token_required
 def fetch_user_data():
     data = request.json
-    print("data",data)
     username = data.get('username')
-    organization_name = data.get('organization_name')  # Changed from company_id to organization_name
-    print("username",username)
-    print("organization_name",organization_name)
+    organization_name = data.get('organization_name')
 
-
-    # Check if username and organization_name are provided
     if not username or not organization_name:
-        return jsonify({'message': 'Username and organization_name are required'}), 400
+        return jsonify({'message': 'Username and organization_name required'}), 400
 
-    # Connect to the company's database using organization_name
     conn = get_company_db_connection(organization_name)
-    if not conn:
-        print(f"Failed to connect to company database for {organization_name}.")
-        return jsonify({'message': 'Failed to connect to company database'}), 500
 
     try:
-        # Fetch employee details based on username
         cursor = conn.cursor()
-        cursor.execute("""
-            SELECT employee_id, employee_name, role_id,category, username,email FROM employee_list WHERE username = %s
-        """, (username,))
-        employee_data = cursor.fetchone()
-        cursor.close()
 
-        if not employee_data:
+        cursor.execute("""
+            SELECT employee_id, employee_name, role_id, email
+            FROM employee_list
+            WHERE username = %s
+        """, (username,))
+        emp = cursor.fetchone()
+
+        if not emp:
             return jsonify({'message': 'Employee not found'}), 404
 
-        # Extract employee data
-        employee_id, employee_name, role_id, category_name,username,email = employee_data
-        print("employee data",employee_data)
-        # Fetch the category name from the signup database
-        conn_datasource = get_db_connection(DB_NAME)
-        user_details = {
-            'employee_id': employee_id,
-            'employee_name': employee_name,
-            'role_id': role_id,
-            'username': username,
-            'category_name': category_name,
-            'email':email
-        }
-        print("userdetails",user_details)
-        # Check if new role or category needs to be updated
-        new_role_id = data.get('new_role_id')
-        new_category_name = data.get('new_category_name')
+        employee_id, employee_name, role_id, email = emp
 
-        if new_role_id or new_category_name:
-            # Update role if provided
-            if new_role_id:
-                cursor = conn.cursor()
-                cursor.execute("""
-                    UPDATE employee_list SET role_id = %s WHERE employee_id = %s
-                """, (new_role_id, employee_id))
-                conn.commit()
-                cursor.close()
-                user_details['role_id'] = new_role_id  # Update in response
+        # 🔹 Fetch categories + values
+        cursor.execute("""
+            SELECT c.category_name, ucm.category_value
+            FROM user_category_mapping ucm
+            JOIN category c ON c.category_id = ucm.category_id
+            WHERE ucm.user_id = %s
+        """, (employee_id,))
 
-            # Update category if provided
-            if new_category_name:
-                cursor = conn.cursor()
-                cursor.execute("""
-                    UPDATE category SET category_name = %s WHERE company_id = (SELECT id FROM organizationdatatest WHERE organizationname = %s)
-                """, (new_category_name, organization_name))
-                conn.commit()
-                cursor.close()
-                user_details['category_name'] = new_category_name  # Update in response
+        categories = [
+            {"key": row[0], "value": row[1]}
+            for row in cursor.fetchall()
+        ]
 
-        # Return the employee details along with updated role/category if applicable
-        return jsonify(user_details), 200
+        return jsonify({
+            "employee_id": employee_id,
+            "employee_name": employee_name,
+            "role_id": role_id,
+            "username": username,
+            "email": email,
+            "categories": categories
+        }), 200
 
     except Exception as e:
-        print(f"Error fetching or updating user data: {e}")
-        return jsonify({'message': 'Error fetching or updating user data'}), 500
-
+        print(f"Error fetching user data: {e}")
+        return jsonify({'message': 'Error fetching user data'}), 500
     finally:
         conn.close()
 
@@ -7996,54 +8492,65 @@ def fetch_user_data():
 @token_required
 def update_user_details():
     data = request.json
-    print("data......",data)
-    username = data.get('username')
-    organization_name = data.get('companyName')
-    new_role_id = data.get('roleId')
-    reporting_id=data.get('reporting_id')
-    print("new role id",new_role_id)
-    category_name = data.get('categoryName')
-    formatted_category_name = category_name  # Format category with curly braces
-    print("category---------", formatted_category_name)
-    admin_email=data.get("email")
 
-    # Connect to company database
-    conn = connect_db(organization_name)
-    if not conn:
-        return jsonify({'message': f'Failed to connect to database for company: {organization_name}'}), 500
+    username = data.get('username')
+    company = data.get('companyName')
+    role_id = data.get('roleId')
+    reporting_id = data.get('reporting_id')
+    categories = data.get('categoryName', [])
+    print("data",data)
+    print("categories",categories)
+    admin_email = data.get('email')
+
+    conn = get_company_db_connection(company)
+    conn_ds = get_db_connection()
 
     try:
         cursor = conn.cursor()
 
-        # Update role
-        if new_role_id:
-            cursor.execute("""
-                UPDATE employee_list SET role_id = %s ,category=%s,reporting_id=%s WHERE username = %s
-                
-            """, (new_role_id,formatted_category_name,reporting_id,username))
-            conn.commit()
-        create_user_management_log_table(organization_name)
+        # 🔹 Get user_id
+        cursor.execute("""
+            SELECT employee_id FROM employee_list WHERE username = %s
+        """, (username,))
+        row = cursor.fetchone()
+        if not row:
+            return jsonify({'message': 'User not found'}), 404
 
-        # ✅ Log this admin action
-        description = (
-            f"Admin ({admin_email}) updated user '{username}' "
-            f"with new role_id='{new_role_id}', category='{formatted_category_name}', "
-            f"and reporting_id='{reporting_id}' in company '{organization_name}'."
-        )
+        user_id = row[0]
+
+        # 🔹 Update role/reporting
+        cursor.execute("""
+            UPDATE employee_list
+            SET role_id = %s, reporting_id = %s
+            WHERE employee_id = %s
+        """, (role_id, reporting_id, user_id))
+
+        # # 🔹 Clear old categories
+        # cursor.execute("""
+        #     DELETE FROM user_category_mapping WHERE user_id = %s
+        # """, (user_id,))
+
+        # 🔹 Reinsert categories
+        handle_categories(conn, conn_ds, user_id, role_id, company, categories)
+
+        conn.commit()
 
         log_user_management_action(
             admin_email=admin_email,
             user_email=username,
             action_type="USER_UPDATED",
-            description=description,
-            company_name=organization_name
+            description=f"Updated user {username}",
+            company_name=company
         )
-        return jsonify({'message': 'User details updated successfully'}), 200
+
+        return jsonify({'message': 'User updated successfully'}), 200
+
     except Exception as e:
-        print(f"Error updating user details: {e}")
-        return jsonify({'message': 'Error updating user details'}), 500
+        print(f"Error updating user: {e}")
+        return jsonify({'message': 'Error updating user'}), 500
     finally:
         conn.close()
+        conn_ds.close()
 
 @app.route('/api/user/<username>', methods=['PUT'])
 @token_required
@@ -14204,7 +14711,7 @@ def get_dashboard_filters():
                     FROM table_dashboard
                     WHERE file_name = %s
                       AND company_name = %s
-                      AND user_id = ANY(%s)
+                      AND user_id = ANY(%s::int[])
                     ORDER BY user_id = %s DESC  -- prioritize original user_id
                     LIMIT 1
                 """, (dashboard_name, company_name, user_ids_to_check, user_id))
@@ -18513,7 +19020,68 @@ def fetch_source_data_from_table(db_details, table_name, filter_options=None, li
         if conn:
             conn.close()
 
+@app.route("/api/get_all_table_columns", methods=["GET"])
+@token_required
+def get_all_table_columns():
+    company = request.args.get("company")
 
+    conn = get_company_db_connection(company)
+    cur = conn.cursor()
+
+    # cur.execute("""
+    #     SELECT table_name, column_name
+    #     FROM information_schema.columns
+    #     WHERE table_schema = 'public'
+    #     ORDER BY table_name, column_name
+    # """)
+    excluded_tables = [
+        'employee_list',
+        'datasource',
+        'category',
+        'role',
+        'role_permission',
+        'user',
+        'user_management_logs',
+        'activity_log',
+        'external_db_connections'
+    ]
+
+    placeholders = ", ".join(f"'{t}'" for t in excluded_tables)
+
+    query = f"""
+        SELECT table_name, column_name
+        FROM information_schema.columns
+        WHERE table_schema = 'public'
+        AND table_name NOT IN ({placeholders})
+        ORDER BY table_name, column_name
+    """
+
+    cur.execute(query)
+    rows = cur.fetchall()
+    
+
+    data = {}
+    for table, column in rows:
+        data.setdefault(table, []).append(column)
+
+    return jsonify({"success": True, "data": data})
+
+@app.route("/api/get_column_values", methods=["GET"])
+@token_required
+def get_all_column_values():
+    company = request.args.get("company")
+    table = request.args.get("table")
+    column = request.args.get("column")
+
+    conn = get_company_db_connection(company)
+    cur = conn.cursor()
+
+    query = f'SELECT DISTINCT "{column}" FROM "{table}" LIMIT 100'
+    cur.execute(query)
+
+    values = [r[0] for r in cur.fetchall()]
+
+    return jsonify({"success": True, "data": values})
 
 # if __name__ == '__main__':
 #     app.run(debug=True, port=5000)
