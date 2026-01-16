@@ -1801,48 +1801,125 @@ def fetch_data(table_name, x_axis_columns, filter_options, y_axis_column, aggreg
 #     final_mask = and_mask & combined_or_mask
 #     return df[final_mask]
 
-def apply_and_or_filters(df, filter_options):
+# def apply_and_or_filters(df, filter_options):
+#     if not filter_options or not isinstance(filter_options, dict):
+#         return df
+
+#     or_masks = []
+#     post_and_mask = pd.Series(True, index=df.index)
+
+#     for col, val in filter_options.items():
+#         if col not in df.columns:
+#             continue
+
+#         if isinstance(val, dict):
+#             values = val.get("values", [])
+#             operator = val.get("operator", "AND").upper()
+#         else:
+#             values = val
+#             operator = "AND"
+
+#         if not values:
+#             continue
+
+#         df[col] = df[col].astype(str).str.strip()
+#         values = [str(v).strip() for v in values]
+
+#         mask = df[col].isin(values)
+
+#         if operator == "OR":
+#             or_masks.append(mask)
+#         else:
+#             post_and_mask &= mask   # ← apply AFTER OR
+
+#     # Combine OR group
+#     if or_masks:
+#         or_mask = or_masks[0]
+#         for m in or_masks[1:]:
+#             or_mask |= m
+#     else:
+#         or_mask = pd.Series(True, index=df.index)
+
+#     final_mask = or_mask & post_and_mask
+#     return df[final_mask]
+
+def apply_and_or_filters(df: pd.DataFrame, filter_options: dict) -> pd.DataFrame:
+    """
+    Apply AND/OR filters on a DataFrame.
+
+    Args:
+        df (pd.DataFrame): The input DataFrame to filter.
+        filter_options (dict): Dictionary of filters.
+            Example:
+            {
+                'country': ['Albania', 'India'],                  # AND group
+                'region': {'values': ['Asia'], 'operator': 'OR'}, # OR group
+                'product': {'values': ['Debit card'], 'operator': 'AND'}
+            }
+
+    Returns:
+        pd.DataFrame: Filtered DataFrame.
+    """
     if not filter_options or not isinstance(filter_options, dict):
         return df
 
-    or_masks = []
-    post_and_mask = pd.Series(True, index=df.index)
+    print("filter_options:", filter_options)
 
-    for col, val in filter_options.items():
+    # Initialize masks
+    and_mask = pd.Series(True, index=df.index)
+    or_mask = pd.Series(False, index=df.index)
+
+    # Detect if ANY OR exists
+    has_or = any(
+        isinstance(v, dict) and v.get("operator", "").upper() == "OR"
+        for v in filter_options.values()
+    )
+
+    for col, filter_data in filter_options.items():
         if col not in df.columns:
             continue
 
-        if isinstance(val, dict):
-            values = val.get("values", [])
-            operator = val.get("operator", "AND").upper()
+        # Normalize filter_data
+        if isinstance(filter_data, dict):
+            values = filter_data.get("values", [])
+            operator = filter_data.get("operator", "AND").upper()
         else:
-            values = val
+            values = filter_data
             operator = "AND"
 
         if not values:
             continue
 
-        df[col] = df[col].astype(str).str.strip()
-        values = [str(v).strip() for v in values]
+        # Build column mask
+        if pd.api.types.is_datetime64_any_dtype(df[col]) or "date" in col.lower():
+            temp_dates = pd.to_datetime(df[col], errors="coerce")
+            sample_val = str(values[0])
 
-        mask = df[col].isin(values)
-
-        if operator == "OR":
-            or_masks.append(mask)
+            if sample_val.isdigit():
+                col_mask = temp_dates.dt.year.isin([int(v) for v in values])
+            elif sample_val.startswith("Q"):
+                col_mask = temp_dates.dt.quarter.isin(
+                    [int(v.replace("Q", "")) for v in values]
+                )
+            else:
+                col_mask = temp_dates.dt.strftime("%Y-%m-%d").isin(values)
         else:
-            post_and_mask &= mask   # ← apply AFTER OR
+            col_mask = df[col].astype(str).isin(map(str, values))
 
-    # Combine OR group
-    if or_masks:
-        or_mask = or_masks[0]
-        for m in or_masks[1:]:
-            or_mask |= m
+        # ✅ AUTO GROUPING: OR group if any OR exists and column is not 'country'
+        if has_or and operator in ("AND", "OR") and col != "country":
+            or_mask |= col_mask
+        else:
+            and_mask &= col_mask
+
+    # ✅ FINAL MASK APPLICATION
+    if has_or:
+        df_filtered = df[or_mask & and_mask]
     else:
-        or_mask = pd.Series(True, index=df.index)
+        df_filtered = df[and_mask]
 
-    final_mask = or_mask & post_and_mask
-    return df[final_mask]
-
+    print("df after filter:", df_filtered)
+    return df_filtered
 
 def fetch_data_tree(table_name, x_axis_columns, filter_options, y_axis_column, aggregation, db_name, selectedUser,calculationData):
     import pandas as pd
@@ -4806,28 +4883,71 @@ def fetchText_data(databaseName, table_Name, x_axis, aggregate_py, selectedUser,
     cur = conn.cursor()
 
     # --- 1. Dynamic WHERE Clause Construction ---
+    # where_sql = ""
+    # query_params = []
+
+    # # Check if filter_options exists AND is a dictionary (handles None case)
+    # if filter_options and isinstance(filter_options, dict):
+    #     where_clauses = []
+        
+    #     for column, values in filter_options.items():
+    #         # Only process if 'values' is a valid list with items
+    #         if values and isinstance(values, list) and len(values) > 0:
+    #             # Create placeholders: %s, %s, %s
+    #             placeholders = ', '.join(['%s'] * len(values))
+                
+    #             # Add clause: "region IN (%s, %s)"
+    #             where_clauses.append(f'"{column}" IN ({placeholders})')
+                
+    #             # Add actual values to params list
+    #             query_params.extend(values)
+
+    #     # If we successfully created clauses, join them
+    #     if where_clauses:
+    #         where_sql = "WHERE " + " AND ".join(where_clauses)
     where_sql = ""
     query_params = []
 
-    # Check if filter_options exists AND is a dictionary (handles None case)
     if filter_options and isinstance(filter_options, dict):
-        where_clauses = []
-        
-        for column, values in filter_options.items():
-            # Only process if 'values' is a valid list with items
-            if values and isinstance(values, list) and len(values) > 0:
-                # Create placeholders: %s, %s, %s
-                placeholders = ', '.join(['%s'] * len(values))
-                
-                # Add clause: "region IN (%s, %s)"
-                where_clauses.append(f'"{column}" IN ({placeholders})')
-                
-                # Add actual values to params list
-                query_params.extend(values)
+        or_groups = []          # list of AND groups joined by OR
+        current_and_group = []
 
-        # If we successfully created clauses, join them
-        if where_clauses:
-            where_sql = "WHERE " + " AND ".join(where_clauses)
+        for column, data in filter_options.items():
+
+            # Normalize input
+            if isinstance(data, dict):
+                values = data.get("values", [])
+                operator = data.get("operator", "AND").upper()
+            else:
+                values = data
+                operator = "AND"
+
+            if not values:
+                continue
+
+            # Create placeholders for parametrized SQL
+            placeholders = ", ".join(["%s"] * len(values))
+            condition = f"\"{column}\" IN ({placeholders})"
+
+            # Add params
+            query_params.extend(values)
+
+            # Add to current AND group
+            current_and_group.append(condition)
+
+            # Close AND group on OR
+            if operator == "OR":
+                or_groups.append("(" + " AND ".join(current_and_group) + ")")
+                current_and_group = []
+
+        # Add remaining AND group
+        if current_and_group:
+            or_groups.append("(" + " AND ".join(current_and_group) + ")")
+
+        # Build final WHERE clause
+        if or_groups:
+            where_sql = "WHERE " + " OR ".join(or_groups)
+
 
     # --- 2. Check Data Type ---
     # (Checking column type to decide between COUNT or SUM/AVG)

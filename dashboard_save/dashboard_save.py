@@ -108,21 +108,109 @@ def create_connection():
 #         return df[and_mask & or_mask]
 
 #     return df[and_mask]
-def apply_and_or_filters(df, filter_options):
+# def apply_and_or_filters(df, filter_options):
+#     if not filter_options or not isinstance(filter_options, dict):
+#         return df
+
+#     and_mask = pd.Series(True, index=df.index)
+#     or_mask = pd.Series(False, index=df.index)
+
+#     has_and = False
+#     has_or = False
+
+#     for col, filter_data in filter_options.items():
+#         if col not in df.columns:
+#             continue
+
+#         # Normalize
+#         if isinstance(filter_data, dict):
+#             values = filter_data.get("values", [])
+#             operator = filter_data.get("operator", "AND").upper()
+#         else:
+#             values = filter_data
+#             operator = "AND"
+
+#         if not values:
+#             continue
+
+#         # Date handling
+#         is_date_col = (
+#             pd.api.types.is_datetime64_any_dtype(df[col])
+#             or "date" in col.lower()
+#         )
+
+#         if is_date_col:
+#             temp_dates = pd.to_datetime(df[col], errors="coerce")
+#             sample_val = str(values[0])
+
+#             if sample_val.isdigit():  # YEAR
+#                 col_mask = temp_dates.dt.year.isin([int(v) for v in values])
+
+#             elif sample_val.startswith("Q"):  # QUARTER
+#                 col_mask = temp_dates.dt.quarter.isin(
+#                     [int(v.replace("Q", "")) for v in values]
+#                 )
+
+#             else:  # DATE STRING
+#                 col_mask = temp_dates.dt.strftime("%Y-%m-%d").isin(values)
+#         else:
+#             df[col] = df[col].astype(str).str.strip()
+#             values = [str(v).strip() for v in values]
+#             col_mask = df[col].isin(values)
+
+#         # 🔥 Apply operator
+#         if operator == "OR":
+#             or_mask |= col_mask
+#             has_or = True
+#         else:
+#             and_mask &= col_mask
+#             has_and = True
+
+#     # 🔥 FINAL DECISION LOGIC
+#     if has_and and has_or:
+#         return df[and_mask & or_mask]
+#     elif has_or:
+#         return df[or_mask]          # ✅ FIX: pure OR
+#     else:
+#         return df[and_mask]
+
+def apply_and_or_filters(df: pd.DataFrame, filter_options: dict) -> pd.DataFrame:
+    """
+    Apply AND/OR filters on a DataFrame.
+
+    Args:
+        df (pd.DataFrame): The input DataFrame to filter.
+        filter_options (dict): Dictionary of filters.
+            Example:
+            {
+                'country': ['Albania', 'India'],                  # AND group
+                'region': {'values': ['Asia'], 'operator': 'OR'}, # OR group
+                'product': {'values': ['Debit card'], 'operator': 'AND'}
+            }
+
+    Returns:
+        pd.DataFrame: Filtered DataFrame.
+    """
     if not filter_options or not isinstance(filter_options, dict):
         return df
 
+    print("filter_options:", filter_options)
+
+    # Initialize masks
     and_mask = pd.Series(True, index=df.index)
     or_mask = pd.Series(False, index=df.index)
 
-    has_and = False
-    has_or = False
+    # Detect if ANY OR exists
+    has_or = any(
+        isinstance(v, dict) and v.get("operator", "").upper() == "OR"
+        for v in filter_options.values()
+    )
 
     for col, filter_data in filter_options.items():
         if col not in df.columns:
             continue
 
-        # Normalize
+        # Normalize filter_data
         if isinstance(filter_data, dict):
             values = filter_data.get("values", [])
             operator = filter_data.get("operator", "AND").upper()
@@ -133,46 +221,36 @@ def apply_and_or_filters(df, filter_options):
         if not values:
             continue
 
-        # Date handling
-        is_date_col = (
-            pd.api.types.is_datetime64_any_dtype(df[col])
-            or "date" in col.lower()
-        )
-
-        if is_date_col:
+        # Build column mask
+        if pd.api.types.is_datetime64_any_dtype(df[col]) or "date" in col.lower():
             temp_dates = pd.to_datetime(df[col], errors="coerce")
             sample_val = str(values[0])
 
-            if sample_val.isdigit():  # YEAR
+            if sample_val.isdigit():
                 col_mask = temp_dates.dt.year.isin([int(v) for v in values])
-
-            elif sample_val.startswith("Q"):  # QUARTER
+            elif sample_val.startswith("Q"):
                 col_mask = temp_dates.dt.quarter.isin(
                     [int(v.replace("Q", "")) for v in values]
                 )
-
-            else:  # DATE STRING
+            else:
                 col_mask = temp_dates.dt.strftime("%Y-%m-%d").isin(values)
         else:
-            df[col] = df[col].astype(str).str.strip()
-            values = [str(v).strip() for v in values]
-            col_mask = df[col].isin(values)
+            col_mask = df[col].astype(str).isin(map(str, values))
 
-        # 🔥 Apply operator
-        if operator == "OR":
+        # ✅ AUTO GROUPING: OR group if any OR exists and column is not 'country'
+        if has_or and operator in ("AND", "OR") and col != "country":
             or_mask |= col_mask
-            has_or = True
         else:
             and_mask &= col_mask
-            has_and = True
 
-    # 🔥 FINAL DECISION LOGIC
-    if has_and and has_or:
-        return df[and_mask & or_mask]
-    elif has_or:
-        return df[or_mask]          # ✅ FIX: pure OR
+    # ✅ FINAL MASK APPLICATION
+    if has_or:
+        df_filtered = df[or_mask & and_mask]
     else:
-        return df[and_mask]
+        df_filtered = df[and_mask]
+
+    print("df after filter:", df_filtered)
+    return df_filtered
 
 
 def insert_combined_chart_details(conn, combined_chart_details):

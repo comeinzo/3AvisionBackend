@@ -122,7 +122,7 @@ from bar_chart import (
     fetchText_data,
     get_column_names,
     Hierarchial_drill_down,
-    perform_calculation,apply_and_or_filters
+    perform_calculation
 )
 from bar_chart import global_df,global_column_names
 # from license_routes import license_bp
@@ -6186,7 +6186,83 @@ def apply_calculation_to_df(df, calculation_data_list, x_axis=None, y_axis=None)
             print(f"❌ Error applying calculation for column '{calculation_data.get('columnName')}': {e}")
 
     return df, x_axis, y_axis
+def apply_and_or_filters(df: pd.DataFrame, filter_options: dict) -> pd.DataFrame:
+    """
+    Apply AND/OR filters on a DataFrame.
 
+    Args:
+        df (pd.DataFrame): The input DataFrame to filter.
+        filter_options (dict): Dictionary of filters.
+            Example:
+            {
+                'country': ['Albania', 'India'],                  # AND group
+                'region': {'values': ['Asia'], 'operator': 'OR'}, # OR group
+                'product': {'values': ['Debit card'], 'operator': 'AND'}
+            }
+
+    Returns:
+        pd.DataFrame: Filtered DataFrame.
+    """
+    if not filter_options or not isinstance(filter_options, dict):
+        return df
+
+    print("filter_options:", filter_options)
+
+    # Initialize masks
+    and_mask = pd.Series(True, index=df.index)
+    or_mask = pd.Series(False, index=df.index)
+
+    # Detect if ANY OR exists
+    has_or = any(
+        isinstance(v, dict) and v.get("operator", "").upper() == "OR"
+        for v in filter_options.values()
+    )
+
+    for col, filter_data in filter_options.items():
+        if col not in df.columns:
+            continue
+
+        # Normalize filter_data
+        if isinstance(filter_data, dict):
+            values = filter_data.get("values", [])
+            operator = filter_data.get("operator", "AND").upper()
+        else:
+            values = filter_data
+            operator = "AND"
+
+        if not values:
+            continue
+
+        # Build column mask
+        if pd.api.types.is_datetime64_any_dtype(df[col]) or "date" in col.lower():
+            temp_dates = pd.to_datetime(df[col], errors="coerce")
+            sample_val = str(values[0])
+
+            if sample_val.isdigit():
+                col_mask = temp_dates.dt.year.isin([int(v) for v in values])
+            elif sample_val.startswith("Q"):
+                col_mask = temp_dates.dt.quarter.isin(
+                    [int(v.replace("Q", "")) for v in values]
+                )
+            else:
+                col_mask = temp_dates.dt.strftime("%Y-%m-%d").isin(values)
+        else:
+            col_mask = df[col].astype(str).isin(map(str, values))
+
+        # ✅ AUTO GROUPING: OR group if any OR exists and column is not 'country'
+        if has_or and operator in ("AND", "OR") and col != "country":
+            or_mask |= col_mask
+        else:
+            and_mask &= col_mask
+
+    # ✅ FINAL MASK APPLICATION
+    if has_or:
+        df_filtered = df[or_mask & and_mask]
+    else:
+        df_filtered = df[and_mask]
+
+    print("df after filter:", df_filtered)
+    return df_filtered
 @app.route('/api/send-chart-details', methods=['POST'])
 @token_required
 def receive_chart_details():  
@@ -6671,6 +6747,7 @@ def receive_chart_details():
             if aggregate == 'count':
                 print("Count aggregation detected")
                 df, x_axis, y_axis = apply_calculation_to_df(df, calculation_data, x_axis, y_axis)
+                filtered_df = apply_and_or_filters(df, filter_options)
 
                 # ---------- DATE GRANULARITY (COUNT SECTION) ----------
                 if isinstance(dateGranularity, str):
@@ -6708,7 +6785,10 @@ def receive_chart_details():
                 
 
                 # Parse the filter options
-                allowed_categories = json.loads(data.get('filter_options')) if data.get('filter_options') else {}
+                
+                # filter_options = filter_options if filter_options_json else {}
+                # print("Original filter_options:", filter_options)
+                allowed_categories = filter_options if data.get('filter_options') else {}
                 print("allowed_categories====================", allowed_categories)
                 # --- FIX FILTERS FOR DATE GRANULARITY ---
                 fixed_allowed_categories = {}
@@ -6729,15 +6809,48 @@ def receive_chart_details():
                 print("Updated allowed_categories:", allowed_categories)
 
                 # Apply filters to the dataframe BEFORE grouping
+                # filtered_df = df.copy()
+
+                # # Apply each filter condition
+                # for column, valid_values in allowed_categories.items():
+                #     if column in filtered_df.columns:
+                #         # filtered_df = filtered_df[filtered_df[column].isin(valid_values)]
+                #         filtered_df = filtered_df[filtered_df[col].astype(str).isin(map(str, valid_values))]
+            
+                #         print(f"After filtering {column}: {len(filtered_df)} rows remaining")
+                #     else:
+                #         print(f"Warning: Column '{column}' not found in dataframe")
                 filtered_df = df.copy()
 
-                # Apply each filter condition
-                for column, valid_values in allowed_categories.items():
-                    if column in filtered_df.columns:
-                        filtered_df = filtered_df[filtered_df[column].isin(valid_values)]
-                        print(f"After filtering {column}: {len(filtered_df)} rows remaining")
+                for col, filter_data in allowed_categories.items():
+
+                    if col not in filtered_df.columns:
+                        continue
+
+                    # 🔑 Normalize
+                    if isinstance(filter_data, dict):
+                        values = filter_data.get("values", [])
+                        operator = filter_data.get("operator", "AND")
                     else:
-                        print(f"Warning: Column '{column}' not found in dataframe")
+                        values = filter_data
+                        operator = "AND"
+
+                    if not values:
+                        continue
+
+                    # 🧠 Apply filter
+                    if operator == "AND":
+                        filtered_df = filtered_df[filtered_df[col].astype(str).isin(map(str, values))]
+                    elif operator == "OR":
+                        filtered_df = pd.concat(
+                            [
+                                filtered_df,
+                                df[df[col].astype(str).isin(map(str, values))]
+                            ]
+                        ).drop_duplicates()
+
+                    print(f"After filtering {col}: {len(filtered_df)} rows remaining")
+
 
                 print(f"Original dataframe rows: {len(df)}")
                 print(f"Filtered dataframe rows: {len(filtered_df)}")
@@ -7049,61 +7162,62 @@ def receive_chart_details():
                     # Apply calculations (existing behavior)
                     df, x_axis, y_axis = apply_calculation_to_df(df, calculation_data, x_axis, y_axis)
                     print("filter_options",filter_options)
-                    if filter_options:
-                        and_mask = pd.Series(True, index=df.index)
-                        or_mask = pd.Series(False, index=df.index)
+                    df = apply_and_or_filters(df, filter_options)
+                    # if filter_options:
+                    #     and_mask = pd.Series(True, index=df.index)
+                    #     or_mask = pd.Series(False, index=df.index)
 
-                        # 🔥 detect if ANY OR exists
-                        has_or = any(
-                            isinstance(v, dict) and v.get("operator", "").upper() == "OR"
-                            for v in filter_options.values()
-                        )
+                    #     # 🔥 detect if ANY OR exists
+                    #     has_or = any(
+                    #         isinstance(v, dict) and v.get("operator", "").upper() == "OR"
+                    #         for v in filter_options.values()
+                    #     )
 
-                        for col, filter_data in filter_options.items():
-                            if col not in df.columns:
-                                continue
+                    #     for col, filter_data in filter_options.items():
+                    #         if col not in df.columns:
+                    #             continue
 
-                            if isinstance(filter_data, dict):
-                                values = filter_data.get("values", [])
-                                operator = filter_data.get("operator", "AND").upper()
-                            else:
-                                values = filter_data
-                                operator = "AND"
+                    #         if isinstance(filter_data, dict):
+                    #             values = filter_data.get("values", [])
+                    #             operator = filter_data.get("operator", "AND").upper()
+                    #         else:
+                    #             values = filter_data
+                    #             operator = "AND"
 
-                            if not values:
-                                continue
+                    #         if not values:
+                    #             continue
 
-                            # Build column mask
-                            if pd.api.types.is_datetime64_any_dtype(df[col]) or "date" in col.lower():
-                                temp_dates = pd.to_datetime(df[col], errors="coerce")
-                                sample_val = str(values[0])
+                    #         # Build column mask
+                    #         if pd.api.types.is_datetime64_any_dtype(df[col]) or "date" in col.lower():
+                    #             temp_dates = pd.to_datetime(df[col], errors="coerce")
+                    #             sample_val = str(values[0])
 
-                                if sample_val.isdigit():
-                                    col_mask = temp_dates.dt.year.isin([int(v) for v in values])
-                                elif sample_val.startswith("Q"):
-                                    col_mask = temp_dates.dt.quarter.isin(
-                                        [int(v.replace("Q", "")) for v in values]
-                                    )
-                                else:
-                                    col_mask = temp_dates.dt.strftime("%Y-%m-%d").isin(values)
-                            else:
-                                col_mask = df[col].astype(str).isin(map(str, values))
+                    #             if sample_val.isdigit():
+                    #                 col_mask = temp_dates.dt.year.isin([int(v) for v in values])
+                    #             elif sample_val.startswith("Q"):
+                    #                 col_mask = temp_dates.dt.quarter.isin(
+                    #                     [int(v.replace("Q", "")) for v in values]
+                    #                 )
+                    #             else:
+                    #                 col_mask = temp_dates.dt.strftime("%Y-%m-%d").isin(values)
+                    #         else:
+                    #             col_mask = df[col].astype(str).isin(map(str, values))
 
-                            # ✅ AUTO GROUPING
-                            if has_or and operator in ("AND", "OR") and col != "country":
-                                # region + product → OR group
-                                or_mask |= col_mask
-                            else:
-                                # country → AND group
-                                and_mask &= col_mask
+                    #         # ✅ AUTO GROUPING
+                    #         if has_or and operator in ("AND", "OR") and col != "country":
+                    #             # region + product → OR group
+                    #             or_mask |= col_mask
+                    #         else:
+                    #             # country → AND group
+                    #             and_mask &= col_mask
 
-                        # ✅ FINAL SQL EQUIVALENT
-                        if has_or:
-                            df = df[or_mask & and_mask]
-                        else:
-                            df = df[and_mask]
+                    #     # ✅ FINAL SQL EQUIVALENT
+                    #     if has_or:
+                    #         df = df[or_mask & and_mask]
+                    #     else:
+                    #         df = df[and_mask]
 
-                    print("df",df)
+                    # print("df",df)
 
                     # ---------- DATE GRANULARITY PROCESSING ----------
                     if dateGranularity and isinstance(dateGranularity, dict):
@@ -8252,19 +8366,42 @@ def get_all_users():
                 FROM user_category_mapping ucm
                 JOIN category c 
                   ON ucm.category_id = c.category_id
-                WHERE ucm.user_id = ANY(%s) ORDER BY ucm.category_id ASC;
+                WHERE ucm.user_id = ANY(%s) ORDER BY c.category_id ASC;
             """, (user_ids,))
+            # for user_id, cat_name, cat_value, operator in cursor.fetchall():
+            #     if user_id not in category_mapping:
+            #         category_mapping[user_id] = {}
+
+            #     if cat_name not in category_mapping[user_id]:
+            #         category_mapping[user_id][cat_name] = {
+            #             "values": [],
+            #             "operator": operator
+            #         }
+
+            #     category_mapping[user_id][cat_name]["values"].append(cat_value)
+            category_mapping = {}
+
             for user_id, cat_name, cat_value, operator in cursor.fetchall():
                 if user_id not in category_mapping:
-                    category_mapping[user_id] = {}
+                    category_mapping[user_id] = []
 
-                if cat_name not in category_mapping[user_id]:
-                    category_mapping[user_id][cat_name] = {
+                # Find existing category entry
+                existing = next(
+                    (c for c in category_mapping[user_id] if c["key"] == cat_name),
+                    None
+                )
+
+                if not existing:
+                    existing = {
+                        "key": cat_name,
                         "values": [],
                         "operator": operator
                     }
+                    category_mapping[user_id].append(existing)
 
-                category_mapping[user_id][cat_name]["values"].append(cat_value)
+                existing["values"].append(cat_value)
+
+                print("category_mapping[user_id]",category_mapping[user_id])
 
             # for user_id, cat_name, cat_value,operator  in cursor.fetchall():
             #     category_mapping.setdefault(user_id, {})[cat_name] = cat_value,operator
