@@ -1544,7 +1544,7 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                     aggregate = None
 
                     # CASE 1: Simple direct aggregation string
-                    if isinstance(agg_value, str) and agg_value.lower() in ["minimum","maximum","sum", "count", "avg", "mean", "min", "max","average"]:
+                    if isinstance(agg_value, str) and agg_value.lower() in ["minimum","maximum","sum", "count", "avg", "mean", "min", "max","average","distinct count"]:
                         aggregate = agg_value.lower()
                         print("✔ Using direct string aggregate:", aggregate)
 
@@ -1688,7 +1688,8 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                         'sum': 'sum',
                         'average': 'mean',
                         'minimum': 'min',
-                        'maximum': 'max'
+                        'maximum': 'max',
+                        'distinct count': 'nunique',
                     }.get(aggregate, 'sum')  # Default to 'sum' if no match
 
                     
@@ -2071,6 +2072,7 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                                 "average": "mean",
                                 "mean": "mean",
                                 "count": "count",
+                                "distinct count": "nunique",
                                 "minimum": "min",
                                 "min": "min",
                                 "maximum": "max",
@@ -2153,7 +2155,8 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                             'sum': 'sum',
                             'average': 'avg',
                             'minimum': 'min',
-                            'maximum': 'max'
+                            'maximum': 'max',
+                            'distinct count': 'distinct count'
                         }.get(aggregate, 'sum') 
                         
                         single_value_result = fetchText_data(database_name, table_name, x_axis[0], aggregate_py,selected_user,filter_options)
@@ -2191,7 +2194,8 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                             'sum': 'sum',
                             'average': 'avg',
                             'minimum': 'min',
-                            'maximum': 'max'
+                            'maximum': 'max',
+                            'distinct count': 'distinct count'
                         }.get(aggregate, 'sum') 
                         single_value_result = fetchText_data(database_name, table_name, x_axis[0], aggregate_py,selected_user,filter_options)
                         print("Single Value Result for Chart ID", chart_id, ":", single_value_result)
@@ -2361,6 +2365,7 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                                     "sum": df_filtered[value_col].astype(float).sum(),
                                     "avg": df_filtered[value_col].astype(float).mean(),
                                     "count": df_filtered[value_col].count(),
+                                    "distinct count": df_filtered[value_col].nunique(),
                                     "max": df_filtered[value_col].astype(float).max(),
                                     "min": df_filtered[value_col].astype(float).min(),
                                 }[agg]
@@ -2487,6 +2492,14 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                                 calc_formula_python = re.sub(
                                     r'count\s*\(\s*(temp_df\[.*?\])\s*\)',
                                     r'\1.count()',
+                                    calc_formula_python,
+                                    flags=re.IGNORECASE
+                                )
+
+                                # Handle DISTINCT COUNT
+                                calc_formula_python = re.sub(
+                                    r'distinct count\s*\(\s*(temp_df\[.*?\])\s*\)',
+                                    r'\1.nunique()',
                                     calc_formula_python,
                                     flags=re.IGNORECASE
                                 )
@@ -2731,6 +2744,8 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                             print(f"\nGrouping by: {x_axis[0]}")
                             # grouped_df = df.groupby(x_axis[0]).size().reset_index(name="count")
                             grouped_df = df.groupby(x_axis[0])[y_axis[0]].count().reset_index(name="count")
+
+                            
 
                             
                             

@@ -2066,7 +2066,8 @@ def listen_to_single_value_db(table_Name, x_axis, aggregate_py, databaseName):
                     'sum': 'sum',
                     'average': 'mean',
                     'minimum': 'min',
-                    'maximum': 'max'
+                    'maximum': 'max',
+                    'distinct count': 'distinct count'
                 }.get(aggregate_py, 'sum') 
                     updated_data = fetchText_data(databaseName, table_Name, x_axis[0], aggregate_py,selectedUser="null")
                     socketio.emit("chart_update", {"data": updated_data})
@@ -2613,6 +2614,8 @@ def get_bar_chart_route():
                     grouped_df = df.groupby(x_cols, as_index=False)[y_cols[0]].sum()
                 elif agg == "count":
                     grouped_df = df.groupby(x_cols, as_index=False)[y_cols[0]].count()
+                elif agg == "distinct count":
+                    grouped_df = df.groupby(x_cols, as_index=False)[y_cols[0]].nunique()
                 elif agg == "average" or agg == "mean":
                     grouped_df = df.groupby(x_cols, as_index=False)[y_cols[0]].mean()
                 elif agg == "maximum" or agg == "max":
@@ -2722,7 +2725,8 @@ def get_bar_chart_route():
             'sum': 'sum',
             'average': 'mean',
             'minimum': 'min',
-            'maximum': 'max'
+            'maximum': 'max',
+            'distinct count': 'distinct count'
         }.get(aggregation, 'sum') 
 
         try:
@@ -2887,7 +2891,8 @@ def get_bar_chart_route():
                     new_df = new_df.groupby(x_axis_columns, as_index=False)[y_axis_columns[0]].sum()
                 elif aggregation == "count":
                     new_df = new_df.groupby(x_axis_columns, as_index=False)[y_axis_columns[0]].count()
-                
+                elif aggregation == "distinct count":
+                    new_df = new_df.groupby(x_axis_columns, as_index=False)[y_axis_columns[0]].nunique()    
                 # Update: specific check for both 'mean' and 'average'
                 elif aggregation == "mean" or aggregation == "average":
                     new_df = new_df.groupby(x_axis_columns, as_index=False)[y_axis_columns[0]].mean()
@@ -2977,7 +2982,28 @@ def get_bar_chart_route():
             
             # Return the JSON response for count aggregation
             return jsonify({"categories": array1, "values": array2, "aggregation": aggregation, "dataframe": df_json})
+        
+
+        elif aggregation == "distinct count":
+            array1 = [item[0] for item in data]
+            array2 = [item[1] for item in data]
             
+            # Apply data limiting if specified
+            if data_limit_type:
+                temp_df = pd.DataFrame({'categories': array1, 'values': array2})
+                limited_df = apply_data_limiting(temp_df, data_limit_type, data_limit_column or 'values', ['categories'], ['values'], aggregation)
+                array1 = limited_df['categories'].tolist()
+                array2 = limited_df['values'].tolist()
+            
+            # Check data points limit with consent logic
+            limit_check = check_data_points_limit(len(array1), user_consent_given, data_limit_type)
+            if limit_check:
+                return jsonify(limit_check), 400
+            
+            # Return the JSON response for distinct count aggregation
+            return jsonify({"categories": array1, "values": array2, "aggregation": aggregation, "dataframe": df_json})
+
+
         elif aggregation == "average":
             array1 = [item[0] for item in data]
             array2 = [item[1] for item in data]
@@ -3098,6 +3124,8 @@ def get_bar_chart_route():
                 ts_data = temp_df_for_ts[value_column].resample(time_series_frequency).mean()
             elif aggregation == "count":
                 ts_data = temp_df_for_ts[value_column].resample(time_series_frequency).count()
+            elif aggregation == "distinct count":
+                ts_data = temp_df_for_ts[value_column].resample(time_series_frequency).nunique()
             elif aggregation ==  "minimum" or aggregation == "min":
                 ts_data = temp_df_for_ts[value_column].resample(time_series_frequency).min()
             elif aggregation == "max" or aggregation == "maximum":
@@ -3240,6 +3268,8 @@ def initial_value(aggregation):
         return float('-inf')
     elif aggregation == 'count':
         return 0
+    elif aggregation == 'distinct count':
+        return 0    
 
 def update_category(categories, category_key, y_axis_value, aggregation):
     if aggregation == 'sum':
@@ -3256,6 +3286,8 @@ def update_category(categories, category_key, y_axis_value, aggregation):
             categories[category_key] = [float(y_axis_value), 1]
     elif aggregation == 'count':
         categories[category_key] += 1
+    elif aggregation == 'distinct count':
+        categories[category_key] += 1    
     elif aggregation == 'variance':
         if isinstance(categories[category_key], list):
             categories[category_key][0] += float(y_axis_value)  # Sum of values
@@ -3266,7 +3298,6 @@ def update_category(categories, category_key, y_axis_value, aggregation):
 
 @app.route('/edit_plot_chart', methods=['POST', 'GET'])
 @token_required
-
 def get_edit_chart_route():
     df = bc.global_df
     data = request.json
@@ -3357,6 +3388,8 @@ def get_edit_chart_route():
                     grouped_df = df.groupby(x_cols, as_index=False)[y_cols[0]].sum()
                 elif agg == "count":
                     grouped_df = df.groupby(x_cols, as_index=False)[y_cols[0]].count()
+                elif agg == "distinct count":
+                    grouped_df = df.groupby(x_cols, as_index=False)[y_cols[0]].nunique()
                 elif agg == "average" or agg == "mean":
                     grouped_df = df.groupby(x_cols, as_index=False)[y_cols[0]].mean()
                 elif agg == "maximum" or agg == "max":
@@ -3426,6 +3459,7 @@ def get_edit_chart_route():
                            )
         aggregate_py = {
                         'count': 'count',
+                        'distinct count': 'distinct count',
                         'sum': 'sum',
                         'average': 'mean',
                         'minimum': 'min',
@@ -3603,6 +3637,10 @@ def get_edit_chart_route():
                 ts_data = temp_df_for_ts[value_column].resample(time_series_frequency).mean()
             elif aggregation == "count":
                 ts_data = temp_df_for_ts[value_column].resample(time_series_frequency).count()
+
+            elif aggregation == "distinct count":
+                ts_data = temp_df_for_ts[value_column].resample(time_series_frequency).nunique()
+
             elif aggregation ==  "minimum" or aggregation == "min":
                 ts_data = temp_df_for_ts[value_column].resample(time_series_frequency).min()
             elif aggregation == "max" or aggregation == "maximum":
@@ -3725,6 +3763,9 @@ def get_edit_chart_route():
                     new_df = new_df.groupby(x_axis_columns, as_index=False)[y_axis_columns[0]].sum()
                 elif aggregation == "count":
                     new_df = new_df.groupby(x_axis_columns, as_index=False)[y_axis_columns[0]].count()
+                elif aggregation == "distinct count":
+                    new_df = new_df.groupby(x_axis_columns, as_index=False)[y_axis_columns[0]].nunique()
+
                 elif aggregation == "mean":
                     new_df = new_df.groupby(x_axis_columns, as_index=False)[y_axis_columns[0]].mean()
                 else:
@@ -3791,7 +3832,7 @@ def get_edit_chart_route():
         # -----------------------------------------------------------
         # 3. SIMPLE AGGREGATION TYPES (count, average, variance)
         # -----------------------------------------------------------
-        if aggregation in ["count", "average", "variance"]:
+        if aggregation in ["count", "average", "variance", "distinct count"]:
             array1 = [item[0] for item in data]
             array2 = [item[1] for item in data]
 
@@ -5707,6 +5748,7 @@ def receive_single_value_chart_data():
 
     aggregate_py = {
                     'count': 'count',
+                    'distinct count': 'distinct count',
                     'sum': 'sum',
                     'average': 'avg',
                     'minimum': 'min',
@@ -5744,6 +5786,7 @@ def receive_chart_data():
     print("selectedUser====================",selectedUser)
     aggregate_py = {
                     'count': 'count',
+                    'distinct count': 'distinct count',
                     'sum': 'sum',
                     'average': 'avg',
                     'minimum': 'min',
@@ -5762,46 +5805,6 @@ def receive_chart_data():
                     "chart_id": chart_id,
                      "message": "Data received successfully!"})
 
-# @app.route('/api/text_chart_view', methods=['POST'])
-# @token_required
-# def receive_view_chart_data():
-#     data = request.get_json()
-#     print("data====================",data)
-#     chart_id=data.get('chart_id')
-#     x_axis = data.get('text_y_xis')[0]
-#     databaseName = data.get('text_y_database')
-#     table_Name = data.get('text_y_table')
-#     aggregate=data.get('text_y_aggregate')
-    
-    
-#     print("x_axis====================",x_axis)  
-#     print("databaseName====================",databaseName)  
-#     print("table_Name====================",table_Name)
-#     print("aggregate====================",aggregate)
-#     connection =get_db_connection()
-        
-#         # Fetch selectedUser from the database based on chart_id
-#     query = "SELECT selectedUser FROM table_chart_save WHERE id = %s"
-#     cursor = connection.cursor()
-#     cursor.execute(query, (chart_id,))  # Ensure chart_id is passed as a tuple
-#     selectedUser = cursor.fetchone()
-#     print("selectedUser",selectedUser)
-#     if not selectedUser:
-#             print("No selectedUser found for chart_id:", chart_id)
-#             return {"error": "No user found for the given chart ID"}
-        
-#     selectedUser = selectedUser[0]  # Extract value from tuple
-#     print("Fetched selectedUser:", selectedUser)
-#     fetched_data = fetchText_data(databaseName, table_Name, x_axis,aggregate,selectedUser)
-#     print("Fetched Data:", fetched_data)
-#     print(f"Received x_axis: {x_axis}")
-#     print(f"Received databaseName: {databaseName}")
-#     print(f"Received table_Name: {table_Name}")
-#     print(f"aggregate====================",{aggregate})
-
-#     return jsonify({"data": fetched_data,
-#                     "chart_id": chart_id,
-#                      "message": "Data received successfully!"})
 @app.route('/api/text_chart_view', methods=['POST'])
 @token_required
 def receive_view_chart_data():
@@ -5822,6 +5825,7 @@ def receive_view_chart_data():
     print("selectedUser====================",selectedUser)
     aggregate_py = {
                     'count': 'count',
+                    'distinct count': 'nunique',
                     'sum': 'sum',
                     'average': 'avg',
                     'minimum': 'min',
@@ -6371,6 +6375,7 @@ def receive_chart_details():
     # Define aggregate function based on request
     aggregate_py = {
         'count': 'count',
+        'distinct count': 'nunique',
         'sum': 'sum',
         'average': 'mean',
         'minimum': 'min',
