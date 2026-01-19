@@ -495,11 +495,13 @@ def fetch_project_names(user_id, database_name):
     if conn_datasource:
         try:
             with conn_datasource.cursor() as cursor:
-                # Simply query for the specific user_id and company_name
+                # Query for user_id and company_name, sorted by the latest entry first (LIFO)
                 query = """
-                    SELECT DISTINCT project_name 
+                    SELECT project_name 
                     FROM table_dashboard
-                    WHERE user_id = %s AND company_name = %s;
+                    WHERE user_id = %s AND company_name = %s
+                    GROUP BY project_name
+                    ORDER BY MAX(id) DESC;
                 """
                 # passed user_id and database_name (which maps to company_name)
                 cursor.execute(query, (str(user_id), database_name))
@@ -2036,7 +2038,7 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                     aggregate = None
 
                     # CASE 1: Simple direct aggregation string
-                    if isinstance(agg_value, str) and agg_value.lower() in ["minimum","maximum","sum", "count", "avg", "mean", "min", "max","average"]:
+                    if isinstance(agg_value, str) and agg_value.lower() in ["minimum","maximum","sum", "count", "avg", "mean", "min", "max","average","distinct count"]:
                         aggregate = agg_value.lower()
                         print("✔ Using direct string aggregate:", aggregate)
 
@@ -2067,6 +2069,125 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                     
                     print("Chart OptimizationData:", OptimizationData)
                     print("final_opacity",final_opacity)
+                    
+                                        # -----------------------------------------------
+                    # 🟦 APPLY DASHBOARD FILTER IF TABLE NAME MATCHES
+                    # -----------------------------------------------
+                    if view_mode == "edit":
+                        print("View mode is 'edit' → Skipping dashboard filters.")
+                    else:
+                        print("dashboard_Filter",dashboard_Filter)
+                        # Normalize dashboard_Filter into dict
+                        if dashboard_Filter is None:
+                            dashboard_Filter = {} # Initialize to an empty dictionary
+                        
+                        if isinstance(dashboard_Filter, list):
+                            # The user reported it coming as a list ['{"region": ...}', ...]
+                            # If it's a list, it might be a list of filter strings?
+                            # For now, if it's a list, we'll try to use the first item or default to empty dict
+                            # to avoid the crash.
+                            print("⚠️ dashboard_Filter is a LIST. Attempting to parse first item...")
+                            try:
+                                if len(dashboard_Filter) > 0:
+                                    item = dashboard_Filter[0]
+                                    if isinstance(item, str):
+                                        dashboard_Filter = json.loads(item.replace("'", '"'))
+                                    elif isinstance(item, dict):
+                                        dashboard_Filter = item
+                                    else:
+                                        dashboard_Filter = {}
+                                else:
+                                    dashboard_Filter = {}
+                            except Exception as e:
+                                print(f"⚠️ Failed to parse dashboard_Filter list: {e}")
+                                dashboard_Filter = {}
+
+                        if isinstance(dashboard_Filter, str):
+                            try:
+                                dashboard_Filter = json.loads(dashboard_Filter.replace("'", '"'))
+                            except Exception:
+                                try:
+                                    dashboard_Filter = ast.literal_eval(dashboard_Filter)
+                                except:
+                                    dashboard_Filter = {}
+
+                        print("Normalized Dashboard Filter:", dashboard_Filter)
+                        
+                        # Ensure it's a dict before calling .get()
+                        if not isinstance(dashboard_Filter, dict):
+                            print(f"⚠️ dashboard_Filter is still not a dict ({type(dashboard_Filter)}). Resetting to empty.")
+                            dashboard_Filter = {}
+
+                        dashboard_table = dashboard_Filter.get("table_name")
+                        dashboard_filters_list = dashboard_Filter.get("filters", [])
+
+                        # Normalize dashboard filters into dict {column: values}
+                        dashboard_filters = {}
+                        for item in dashboard_filters_list:
+                            if isinstance(item, dict):
+                                dashboard_filters.update(item)
+
+                        print("Dashboard Filters:", dashboard_filters)
+
+                        # Only apply dashboard filters when table name matches
+                        if dashboard_table and dashboard_table == table_name:
+
+                            print(f"Applying dashboard filters to chart {chart_id} (table matched: {table_name})")
+
+                            # Parse chart filter_options (string → dict)
+                            chart_filters_clean = {}
+                            if isinstance(filter_options, str):
+                                try:
+                                    chart_filters_clean = json.loads(filter_options)
+                                except:
+                                    chart_filters_clean = ast.literal_eval(filter_options)
+                            elif isinstance(filter_options, dict):
+                                chart_filters_clean = filter_options
+
+                            # Merge dashboard filters into chart filters
+                            # for col, val_list in dashboard_filters.items():
+                            #     if col not in chart_filters_clean:
+                            #         chart_filters_clean[col] = val_list   # Add new filter
+                            #     else:
+                            #         # Merge without duplicates
+                            #         existing = set(chart_filters_clean[col])
+                            #         new_vals = set(val_list)
+                            #         chart_filters_clean[col] = list(existing | new_vals)
+                            # Suggested Override Logic (Replacing the 'else' block)
+                            for col, val_list in dashboard_filters.items():
+                                # If the column is not in the chart filters, add it (same as before)
+                                if col not in chart_filters_clean:
+                                    chart_filters_clean[col] = val_list
+                                else:
+                                    # === CHANGE THIS SECTION ===
+                                    # If the column IS in the chart filters, OVERRIDE it with the dashboard's filter values.
+                                    chart_filters_clean[col] = val_list
+                                    # The previous 'existing = set(chart_filters_clean[col]) | new_vals' logic is removed.
+                                    # ===========================
+
+                            # Replace old filter options
+                            filter_options = chart_filters_clean
+
+                            print("Merged filter_options (with override):", filter_options)
+
+                        #]
+
+
+                    # END Dashboard Filter Merge
+                    # ------------------------------------------------
+                                        
+                    # Determine the aggregation function
+                    aggregate_py = {
+                        'count': 'count',
+                        'sum': 'sum',
+                        'average': 'mean',
+                        'minimum': 'min',
+                        'maximum': 'max',
+                        'distinct count': 'nunique',
+                    }.get(aggregate, 'sum')  # Default to 'sum' if no match
+
+                    
+                    
                     if not selected_user or selected_user.lower() == 'null':
                         print("🟢 Using default local database connection...")
                         connection = get_db_connection_view(database_name)
@@ -2594,6 +2715,7 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                                 "average": "mean",
                                 "mean": "mean",
                                 "count": "count",
+                                "distinct count": "nunique",
                                 "minimum": "min",
                                 "min": "min",
                                 "maximum": "max",
@@ -2676,7 +2798,8 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                             'sum': 'sum',
                             'average': 'avg',
                             'minimum': 'min',
-                            'maximum': 'max'
+                            'maximum': 'max',
+                            'distinct count': 'distinct count'
                         }.get(aggregate, 'sum') 
                         
                         single_value_result = fetchText_data(database_name, table_name, x_axis[0], aggregate_py,selected_user,filter_options)
@@ -2714,7 +2837,8 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                             'sum': 'sum',
                             'average': 'avg',
                             'minimum': 'min',
-                            'maximum': 'max'
+                            'maximum': 'max',
+                            'distinct count': 'distinct count'
                         }.get(aggregate, 'sum') 
                         single_value_result = fetchText_data(database_name, table_name, x_axis[0], aggregate_py,selected_user,filter_options)
                         print("Single Value Result for Chart ID", chart_id, ":", single_value_result)
@@ -2884,6 +3008,7 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                                     "sum": df_filtered[value_col].astype(float).sum(),
                                     "avg": df_filtered[value_col].astype(float).mean(),
                                     "count": df_filtered[value_col].count(),
+                                    "distinct count": df_filtered[value_col].nunique(),
                                     "max": df_filtered[value_col].astype(float).max(),
                                     "min": df_filtered[value_col].astype(float).min(),
                                 }[agg]
@@ -3010,6 +3135,14 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                                 calc_formula_python = re.sub(
                                     r'count\s*\(\s*(temp_df\[.*?\])\s*\)',
                                     r'\1.count()',
+                                    calc_formula_python,
+                                    flags=re.IGNORECASE
+                                )
+
+                                # Handle DISTINCT COUNT
+                                calc_formula_python = re.sub(
+                                    r'distinct count\s*\(\s*(temp_df\[.*?\])\s*\)',
+                                    r'\1.nunique()',
                                     calc_formula_python,
                                     flags=re.IGNORECASE
                                 )
@@ -4204,10 +4337,13 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                                 grouped_df = pd.concat([top_df, bottom_df])
 
                         categories = grouped_df[x_axis[0]].tolist()
-                        if isinstance(categories[0], pd.Timestamp):  # Assumes at least one value is present
-                            categories = [category.strftime('%Y-%m-%d') for category in categories]
+                        if categories:
+                            if isinstance(categories[0], pd.Timestamp):  # Assumes at least one value is present
+                                categories = [category.strftime('%Y-%m-%d') for category in categories]
+                            else:
+                                categories = [str(category) for category in categories]  
                         else:
-                            categories = [str(category) for category in categories]  
+                            categories = []
                         values = [float(value) for value in grouped_df[y_axis[0]]]
 
                         print("categories--222", categories)
