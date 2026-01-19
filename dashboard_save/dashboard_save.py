@@ -10,6 +10,7 @@ import pandas as pd
 import re  
 import ast
 import json
+from decimal import Decimal
 import numpy as np
 import paramiko
 import socket
@@ -43,6 +44,214 @@ def create_connection():
 #         conn.commit()
 
 # Function to create the table if it doesn't exist
+
+
+# def apply_and_or_filters(df, filter_options):
+#     if not filter_options or not isinstance(filter_options, dict):
+#         return df
+
+#     and_mask = pd.Series(True, index=df.index)
+#     or_masks = []
+
+#     for col, filter_data in filter_options.items():
+#         if col not in df.columns:
+#             continue
+
+#         # Normalize filter data
+#         if isinstance(filter_data, dict):
+#             values = filter_data.get("values", [])
+#             operator = filter_data.get("operator", "AND").upper()
+#         else:
+#             values = filter_data
+#             operator = "AND"
+
+#         if not values:
+#             continue
+
+#         is_date_col = (
+#             pd.api.types.is_datetime64_any_dtype(df[col])
+#             or "date" in col.lower()
+#         )
+
+#         # Build column mask
+#         if is_date_col:
+#             temp_dates = pd.to_datetime(df[col], errors="coerce")
+#             sample_val = str(values[0])
+
+#             if sample_val.isdigit():  # YEAR
+#                 col_mask = temp_dates.dt.year.isin([int(v) for v in values])
+
+#             elif sample_val.startswith("Q"):  # QUARTER
+#                 col_mask = temp_dates.dt.quarter.isin(
+#                     [int(v.replace("Q", "")) for v in values]
+#                 )
+
+#             else:  # MONTH NAME
+#                 col_mask = temp_dates.dt.month_name().isin(
+#                     [v.strip().capitalize() for v in values]
+#                 )
+#         else:
+#             df[col] = df[col].astype(str).str.strip()
+#             values = [str(v).strip() for v in values]
+#             col_mask = df[col].isin(values)
+
+#         # Apply operator
+#         if operator == "OR":
+#             or_masks.append(col_mask)
+#         else:  # AND
+#             and_mask &= col_mask
+
+#     # Combine AND & OR
+#     if or_masks:
+#         or_mask = or_masks[0]
+#         for m in or_masks[1:]:
+#             or_mask |= m
+#         return df[and_mask & or_mask]
+
+#     return df[and_mask]
+# def apply_and_or_filters(df, filter_options):
+#     if not filter_options or not isinstance(filter_options, dict):
+#         return df
+
+#     and_mask = pd.Series(True, index=df.index)
+#     or_mask = pd.Series(False, index=df.index)
+
+#     has_and = False
+#     has_or = False
+
+#     for col, filter_data in filter_options.items():
+#         if col not in df.columns:
+#             continue
+
+#         # Normalize
+#         if isinstance(filter_data, dict):
+#             values = filter_data.get("values", [])
+#             operator = filter_data.get("operator", "AND").upper()
+#         else:
+#             values = filter_data
+#             operator = "AND"
+
+#         if not values:
+#             continue
+
+#         # Date handling
+#         is_date_col = (
+#             pd.api.types.is_datetime64_any_dtype(df[col])
+#             or "date" in col.lower()
+#         )
+
+#         if is_date_col:
+#             temp_dates = pd.to_datetime(df[col], errors="coerce")
+#             sample_val = str(values[0])
+
+#             if sample_val.isdigit():  # YEAR
+#                 col_mask = temp_dates.dt.year.isin([int(v) for v in values])
+
+#             elif sample_val.startswith("Q"):  # QUARTER
+#                 col_mask = temp_dates.dt.quarter.isin(
+#                     [int(v.replace("Q", "")) for v in values]
+#                 )
+
+#             else:  # DATE STRING
+#                 col_mask = temp_dates.dt.strftime("%Y-%m-%d").isin(values)
+#         else:
+#             df[col] = df[col].astype(str).str.strip()
+#             values = [str(v).strip() for v in values]
+#             col_mask = df[col].isin(values)
+
+#         # 🔥 Apply operator
+#         if operator == "OR":
+#             or_mask |= col_mask
+#             has_or = True
+#         else:
+#             and_mask &= col_mask
+#             has_and = True
+
+#     # 🔥 FINAL DECISION LOGIC
+#     if has_and and has_or:
+#         return df[and_mask & or_mask]
+#     elif has_or:
+#         return df[or_mask]          # ✅ FIX: pure OR
+#     else:
+#         return df[and_mask]
+
+def apply_and_or_filters(df: pd.DataFrame, filter_options: dict) -> pd.DataFrame:
+    """
+    Apply AND/OR filters on a DataFrame.
+
+    Args:
+        df (pd.DataFrame): The input DataFrame to filter.
+        filter_options (dict): Dictionary of filters.
+            Example:
+            {
+                'country': ['Albania', 'India'],                  # AND group
+                'region': {'values': ['Asia'], 'operator': 'OR'}, # OR group
+                'product': {'values': ['Debit card'], 'operator': 'AND'}
+            }
+
+    Returns:
+        pd.DataFrame: Filtered DataFrame.
+    """
+    if not filter_options or not isinstance(filter_options, dict):
+        return df
+
+    print("filter_options:", filter_options)
+
+    # Initialize masks
+    and_mask = pd.Series(True, index=df.index)
+    or_mask = pd.Series(False, index=df.index)
+
+    # Detect if ANY OR exists
+    has_or = any(
+        isinstance(v, dict) and v.get("operator", "").upper() == "OR"
+        for v in filter_options.values()
+    )
+
+    for col, filter_data in filter_options.items():
+        if col not in df.columns:
+            continue
+
+        # Normalize filter_data
+        if isinstance(filter_data, dict):
+            values = filter_data.get("values", [])
+            operator = filter_data.get("operator", "AND").upper()
+        else:
+            values = filter_data
+            operator = "AND"
+
+        if not values:
+            continue
+
+        # Build column mask
+        if pd.api.types.is_datetime64_any_dtype(df[col]) or "date" in col.lower():
+            temp_dates = pd.to_datetime(df[col], errors="coerce")
+            sample_val = str(values[0])
+
+            if sample_val.isdigit():
+                col_mask = temp_dates.dt.year.isin([int(v) for v in values])
+            elif sample_val.startswith("Q"):
+                col_mask = temp_dates.dt.quarter.isin(
+                    [int(v.replace("Q", "")) for v in values]
+                )
+            else:
+                col_mask = temp_dates.dt.strftime("%Y-%m-%d").isin(values)
+        else:
+            col_mask = df[col].astype(str).isin(map(str, values))
+
+        # ✅ AUTO GROUPING: OR group if any OR exists and column is not 'country'
+        if has_or and operator in ("AND", "OR") and col != "country":
+            or_mask |= col_mask
+        else:
+            and_mask &= col_mask
+
+    # ✅ FINAL MASK APPLICATION
+    if has_or:
+        df_filtered = df[or_mask & and_mask]
+    else:
+        df_filtered = df[and_mask]
+
+    print("df after filter:", df_filtered)
+    return df_filtered
 
 
 def insert_combined_chart_details(conn, combined_chart_details):
@@ -287,11 +496,13 @@ def fetch_project_names(user_id, database_name):
     if conn_datasource:
         try:
             with conn_datasource.cursor() as cursor:
-                # Simply query for the specific user_id and company_name
+                # Query for user_id and company_name, sorted by the latest entry first (LIFO)
                 query = """
-                    SELECT DISTINCT project_name 
+                    SELECT project_name 
                     FROM table_dashboard
-                    WHERE user_id = %s AND company_name = %s;
+                    WHERE user_id = %s AND company_name = %s
+                    GROUP BY project_name
+                    ORDER BY MAX(id) DESC;
                 """
                 # passed user_id and database_name (which maps to company_name)
                 cursor.execute(query, (str(user_id), database_name))
@@ -890,32 +1101,284 @@ def is_restricted_role(role):
 #                 chart_filters[col] = list(emp_vals_lower)
 
 #     return chart_filters
+# def expand_filters_with_actual_values(df, chart_filters, employee_category_filter):
+#     """
+#     Replace employee_category_filter values with actual values from the dataframe
+#     Case-insensitive matching.
+    
+#     df: pandas DataFrame containing actual column values
+#     chart_filters: dict, existing chart filters
+#     employee_category_filter: dict, e.g., {'region': ['asia']}
+#     """
+#     chart_filters_clean = chart_filters.copy()
+    
+#     for col, filter_vals in employee_category_filter.items():
+#         if col not in df.columns:
+#             continue  # skip if column not in dataframe
+        
+#         # Get all unique values in the column (actual values)
+#         actual_vals = df[col].dropna().unique()
+#         actual_vals_lower = {str(v).lower(): v for v in actual_vals}  # map lowercase → actual
+        
+#         # Match filter values case-insensitively
+#         matched_vals = [actual_vals_lower[v.lower()] for v in filter_vals if v.lower() in actual_vals_lower]
+        
+#         # Override/add to chart filters
+#         chart_filters_clean[col] = matched_vals
+    
+#     return chart_filters_clean
+# def expand_filters_with_actual_values(df, chart_filters, employee_category_filter):
+#     chart_filters_clean = chart_filters.copy()
+
+#     # 🔹 Normalize employee_category_filter
+#     if isinstance(employee_category_filter, list):
+#         normalized_filter = {}
+#         for item in employee_category_filter:
+#             for k, v in item.items():
+#                 normalized_filter.setdefault(k, []).append(v)
+#         employee_category_filter = normalized_filter
+
+#     for col, filter_vals in employee_category_filter.items():
+#         if col not in df.columns:
+#             continue
+
+#         actual_vals = df[col].dropna().unique()
+#         actual_vals_lower = {str(v).lower(): v for v in actual_vals}
+
+#         matched_vals = [
+#             actual_vals_lower[v.lower()]
+#             for v in filter_vals
+#             if v.lower() in actual_vals_lower
+#         ]
+
+#         chart_filters_clean[col] = matched_vals
+
+#     return chart_filters_clean
+
+# def expand_filters_with_actual_values(df, chart_filters, employee_category_filter):
+#     chart_filters_clean = chart_filters.copy()
+
+#     # 🔹 Normalize employee_category_filter (with operator)
+#     if isinstance(employee_category_filter, list):
+#         normalized_filter = {}
+
+#         for item in employee_category_filter:
+#             col = item.get("key")
+#             val = item.get("value")
+#             op  = item.get("operator", "AND").upper()
+
+#             if col and val:
+#                 normalized_filter.setdefault(col, {
+#                     "values": [],
+#                     "operator": op
+#                 })
+#                 normalized_filter[col]["values"].append(val)
+
+#         employee_category_filter = normalized_filter
+
+#     # 🔹 Apply filters
+#     for col, filter_obj in employee_category_filter.items():
+#         if col not in df.columns:
+#             continue
+
+#         filter_vals = filter_obj.get("values", [])
+#         operator    = filter_obj.get("operator", "AND")
+
+#         actual_vals = df[col].dropna().unique()
+#         actual_vals_lower = {str(v).lower(): v for v in actual_vals}
+
+#         matched_vals = [
+#             actual_vals_lower[v.lower()]
+#             for v in filter_vals
+#             if v.lower() in actual_vals_lower
+#         ]
+
+#         # 🔹 Preserve operator in chart_filters_clean
+#         chart_filters_clean[col] = {
+#             "values": matched_vals,
+#             "operator": operator
+#         }
+
+# #     return chart_filters_clean
+# def expand_filters_with_actual_values(df, chart_filters, employee_category_filter):
+#     chart_filters_clean = chart_filters.copy()
+
+#     # 🔹 Normalize employee_category_filter (with operator)
+#     if isinstance(employee_category_filter, list):
+#         normalized_filter = {}
+
+#         for item in employee_category_filter:
+#             col = item.get("key")
+#             val = item.get("value")
+#             op  = item.get("operator", "AND").upper()
+
+#             if col and val:
+#                 normalized_filter.setdefault(col, {
+#                     "values": [],
+#                     "operator": op
+#                 })
+#                 normalized_filter[col]["values"].append(val)
+
+#         employee_category_filter = normalized_filter
+
+#     # 🔹 Apply filters
+#     for col, filter_obj in employee_category_filter.items():
+#         if col not in df.columns:
+#             continue
+
+#         filter_vals = filter_obj.get("values", [])
+#         operator    = filter_obj.get("operator", "AND")
+
+#         actual_vals = df[col].dropna().unique()
+#         actual_vals_lower = {str(v).lower(): v for v in actual_vals}
+
+#         matched_vals = []
+#         for v in filter_vals:
+#             key = str(v).lower()
+#             if key in actual_vals_lower:
+#                 matched_vals.append(actual_vals_lower[key])
+#             else:
+#                 matched_vals.append(v)  # 🔹 KEEP user value
+
+#         chart_filters_clean[col] = {
+#             "values": matched_vals,
+#             "operator": operator
+#         }
+
+#     return chart_filters_clean
+# def expand_filters_with_actual_values(df, chart_filters, employee_category_filter):
+#     chart_filters_clean = {}
+
+#     # 🔹 STEP 1: Normalize chart_filters (base filters)
+#     for col, val in chart_filters.items():
+#         if isinstance(val, dict):
+#             chart_filters_clean[col] = {
+#                 "values": val.get("values", []),
+#                 "operator": val.get("operator", "AND").upper()
+#             }
+#         else:
+#             chart_filters_clean[col] = {
+#                 "values": val,
+#                 "operator": "AND"
+#             }
+
+#     # 🔹 STEP 2: Normalize employee_category_filter
+#     if isinstance(employee_category_filter, list):
+#         normalized_filter = {}
+
+#         for item in employee_category_filter:
+#             col = item.get("key")
+#             val = item.get("value")
+#             op  = item.get("operator", "AND").upper()
+
+#             if col and val:
+#                 normalized_filter.setdefault(col, {
+#                     "values": [],
+#                     "operator": op
+#                 })
+#                 normalized_filter[col]["values"].append(val)
+
+#         employee_category_filter = normalized_filter
+
+#     # 🔹 STEP 3: Merge employee_category_filter into chart_filters_clean
+#     for col, filter_obj in employee_category_filter.items():
+#         if col not in df.columns:
+#             continue
+
+#         filter_vals = filter_obj.get("values", [])
+#         operator    = filter_obj.get("operator", "AND").upper()
+
+#         actual_vals = df[col].dropna().unique()
+#         actual_vals_lower = {str(v).lower(): v for v in actual_vals}
+
+#         matched_vals = []
+#         for v in filter_vals:
+#             key = str(v).lower()
+#             matched_vals.append(actual_vals_lower.get(key, v))
+
+#         chart_filters_clean[col] = {
+#             "values": matched_vals,
+#             "operator": operator
+#         }
+
+#     return chart_filters_clean
+from collections import OrderedDict
+
 def expand_filters_with_actual_values(df, chart_filters, employee_category_filter):
-    """
-    Replace employee_category_filter values with actual values from the dataframe
-    Case-insensitive matching.
-    
-    df: pandas DataFrame containing actual column values
-    chart_filters: dict, existing chart filters
-    employee_category_filter: dict, e.g., {'region': ['asia']}
-    """
-    chart_filters_clean = chart_filters.copy()
-    
-    for col, filter_vals in employee_category_filter.items():
+    chart_filters_clean = {}
+
+    # 🔹 STEP 1: Normalize chart_filters (ALWAYS add operator)
+    for col, val in chart_filters.items():
+        if isinstance(val, dict):
+            chart_filters_clean[col] = {
+                "values": val.get("values", []),
+                "operator": val.get("operator", "AND").upper()
+            }
+        else:
+            chart_filters_clean[col] = {
+                "values": val,
+                "operator": "AND"
+            }
+
+    # 🔹 STEP 2: Normalize employee_category_filter
+    if isinstance(employee_category_filter, list):
+        normalized_filter = {}
+
+        for item in employee_category_filter:
+            col = item.get("key")
+            val = item.get("value")
+            op  = item.get("operator", "AND").upper()
+
+            if col and val:
+                normalized_filter.setdefault(col, {
+                    "values": [],
+                    "operator": op
+                })
+                normalized_filter[col]["values"].append(val)
+
+        employee_category_filter = normalized_filter
+
+    # 🔹 STEP 3: Merge employee_category_filter WITH actual value matching
+    for col, filter_obj in employee_category_filter.items():
         if col not in df.columns:
-            continue  # skip if column not in dataframe
-        
-        # Get all unique values in the column (actual values)
+            continue
+
+        filter_vals = filter_obj.get("values", [])
+        operator    = filter_obj.get("operator", "AND").upper()
+
         actual_vals = df[col].dropna().unique()
-        actual_vals_lower = {str(v).lower(): v for v in actual_vals}  # map lowercase → actual
-        
-        # Match filter values case-insensitively
-        matched_vals = [actual_vals_lower[v.lower()] for v in filter_vals if v.lower() in actual_vals_lower]
-        
-        # Override/add to chart filters
-        chart_filters_clean[col] = matched_vals
-    
+        actual_vals_lower = {str(v).lower(): v for v in actual_vals}
+
+        matched_vals = []
+        for v in filter_vals:
+            key = str(v).lower()
+            matched_vals.append(actual_vals_lower.get(key, v))
+
+        chart_filters_clean[col] = {
+            "values": matched_vals,
+            "operator": operator
+        }
+
+    # 🔹 STEP 4: Reorder → employee_category_filter FIRST
+    ordered_filters = OrderedDict()
+
+    for col in employee_category_filter.keys():
+        if col in chart_filters_clean:
+            ordered_filters[col] = chart_filters_clean[col]
+
+    for col in chart_filters_clean.keys():
+        if col not in ordered_filters:
+            ordered_filters[col] = chart_filters_clean[col]
+
+    chart_filters_clean = ordered_filters
+
+    # ✅ FINAL DEBUG (single, correct print)
+    print("FINAL employee_category_filter:", employee_category_filter)
+    print("FINAL chart_filters_clean:", chart_filters_clean)
+
     return chart_filters_clean
+
+
 
 def apply_employee_category_filter(chart_filters, employee_category_filter, data_columns=None):
     """
@@ -944,10 +1407,10 @@ def apply_employee_category_filter(chart_filters, employee_category_filter, data
 
     return chart_filters
 DB_CONFIG_TEMPLATE = {
-    'user': 'postgres',
-    'password': 'jaTHU@12',
-    'host': 'localhost',
-    'port': 5432
+    'user': USER_NAME,
+    'password': PASSWORD,
+    'host': HOST,
+    'port': PORT
 }
 
 # --- GLOBAL VARIABLES ---
@@ -1220,6 +1683,8 @@ def background_db_listener(db_name):
                              def clean_for_json(obj):
                                  if isinstance(obj, (datetime, pd.Timestamp)):
                                      return obj.isoformat()
+                                 if isinstance(obj, Decimal):
+                                     return float(obj)  
                                  if isinstance(obj, (np.integer, np.int64)):
                                      return int(obj)
                                  if isinstance(obj, (np.floating, np.float64)):
@@ -1263,7 +1728,7 @@ def start_dynamic_listener(db_name):
 
 
 
-def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,droppableBgColor,opacity,image_ids,chart_type,dashboard_Filter,view_mode,company_name,employee_id,temp_filters=None):
+def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,droppableBgColor,opacity,image_ids,chart_type,dashboard_Filter,view_mode,company_name,employee_id,temp_filters=None,logged_user_role=None):
     conn = create_connection()  # Initial connection to your main database
     
     # Backup original dashboard_Filter to prevent loop contamination
@@ -1383,34 +1848,66 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                     chart_areacolour[chart_id] = None  # Or some default color
           
 
-            print("chart_positions",chart_positions)
+            print("chart_positions", chart_positions)
             print("Chart Filters:", chart_filters)
+
             user_role = None
-            employee_category_filter = {}
+            employee_category_filters = []
 
             try:
                 company_conn = get_company_db_connection(company_name)
                 emp_cur = company_conn.cursor()
 
+                # 🔹 Fetch user role
                 emp_cur.execute("""
-                            SELECT r.role_name, e.category
-                            FROM employee_list e
-                            JOIN role r ON e.role_id = r.role_id::text
-                            WHERE e.employee_id = %s
-                            LIMIT 1
-                        """, (employee_id,))
+                    SELECT r.role_name
+                    FROM employee_list e
+                    JOIN role r ON e.role_id = r.role_id::text
+                    WHERE e.employee_id = %s
+                    LIMIT 1
+                """, (employee_id,))
 
-                row = emp_cur.fetchone()
-                print("user_role,catagory",row)
+                role_row = emp_cur.fetchone()
+                if role_row:
+                    user_role = role_row[0].lower().strip()
+
+                # 🔹 Fetch categories WITH operator
+                emp_cur.execute("""
+                    SELECT
+                        c.category_name,
+                        ucm.category_value,
+                        COALESCE(ucm.operator, 'AND')
+                    FROM user_category_mapping ucm
+                    JOIN category c ON c.category_id = ucm.category_id
+                    WHERE ucm.user_id = %s
+                    ORDER BY ucm.id ASC
+                """, (employee_id,))
+
+                category_rows = emp_cur.fetchall()
+                print("category_rows", category_rows)
+
+                # ✅ CORRECT VARIABLE
+                employee_category_filter = [
+                    {
+                        "key": key,
+                        "value": value,
+                        "operator": op
+                    }
+                    for key, value, op in category_rows
+                    if key and value
+                ]
+
                 emp_cur.close()
                 company_conn.close()
 
-                if row:
-                    user_role = row[0].lower().strip() if row[0] else None
-                    employee_category_filter = extract_filter_from_category(row[1])
+                print("user_role:", user_role)
+                print("employee_category_filters:", employee_category_filter)
 
             except Exception as e:
                 print("Failed to fetch role/category:", e)
+
+
+
 
             print("User role:", user_role)
             print("Employee category filter:", employee_category_filter)
@@ -1542,7 +2039,7 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                     aggregate = None
 
                     # CASE 1: Simple direct aggregation string
-                    if isinstance(agg_value, str) and agg_value.lower() in ["minimum","maximum","sum", "count", "avg", "mean", "min", "max","average"]:
+                    if isinstance(agg_value, str) and agg_value.lower() in ["minimum","maximum","sum", "count", "avg", "mean", "min", "max","average","distinct count"]:
                         aggregate = agg_value.lower()
                         print("✔ Using direct string aggregate:", aggregate)
 
@@ -1686,7 +2183,8 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                         'sum': 'sum',
                         'average': 'mean',
                         'minimum': 'min',
-                        'maximum': 'max'
+                        'maximum': 'max',
+                        'distinct count': 'nunique',
                     }.get(aggregate, 'sum')  # Default to 'sum' if no match
 
                     
@@ -1834,6 +2332,155 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                         print("✅ External PostgreSQL connection established successfully!")
 
                         print('External Connection established:', connection)
+                    
+                                        # -----------------------------------------------
+                    # 🟦 APPLY DASHBOARD FILTER IF TABLE NAME MATCHES
+                    # -----------------------------------------------
+                    if view_mode == "edit":
+                        print("View mode is 'edit' → Skipping dashboard filters.")
+                    else:
+                        print("dashboard_Filter",dashboard_Filter)
+                        # Normalize dashboard_Filter into dict
+                        if dashboard_Filter is None:
+                            dashboard_Filter = {} # Initialize to an empty dictionary
+                        
+                        if isinstance(dashboard_Filter, list):
+                            # The user reported it coming as a list ['{"region": ...}', ...]
+                            # If it's a list, it might be a list of filter strings?
+                            # For now, if it's a list, we'll try to use the first item or default to empty dict
+                            # to avoid the crash.
+                            print("⚠️ dashboard_Filter is a LIST. Attempting to parse first item...")
+                            try:
+                                if len(dashboard_Filter) > 0:
+                                    item = dashboard_Filter[0]
+                                    if isinstance(item, str):
+                                        dashboard_Filter = json.loads(item.replace("'", '"'))
+                                    elif isinstance(item, dict):
+                                        dashboard_Filter = item
+                                    else:
+                                        dashboard_Filter = {}
+                                else:
+                                    dashboard_Filter = {}
+                            except Exception as e:
+                                print(f"⚠️ Failed to parse dashboard_Filter list: {e}")
+                                dashboard_Filter = {}
+
+                        if isinstance(dashboard_Filter, str):
+                            try:
+                                dashboard_Filter = json.loads(dashboard_Filter.replace("'", '"'))
+                            except Exception:
+                                try:
+                                    dashboard_Filter = ast.literal_eval(dashboard_Filter)
+                                except:
+                                    dashboard_Filter = {}
+
+                        print("Normalized Dashboard Filter:", dashboard_Filter)
+                        
+                        # Ensure it's a dict before calling .get()
+                        if not isinstance(dashboard_Filter, dict):
+                            print(f"⚠️ dashboard_Filter is still not a dict ({type(dashboard_Filter)}). Resetting to empty.")
+                            dashboard_Filter = {}
+
+                        dashboard_table = dashboard_Filter.get("table_name")
+                        dashboard_filters_list = dashboard_Filter.get("filters", [])
+
+                        # Normalize dashboard filters into dict {column: values}
+                        dashboard_filters = {}
+                        for item in dashboard_filters_list:
+                            if isinstance(item, dict):
+                                dashboard_filters.update(item)
+
+                        print("Dashboard Filters:", dashboard_filters)
+                        # -------------------------------
+                        # ✅ ALWAYS INITIALIZE chart_filters_clean
+                        # -------------------------------
+                        chart_filters_clean = {}
+
+                        if isinstance(filter_options, str):
+                            try:
+                                chart_filters_clean = json.loads(filter_options)
+                            except:
+                                chart_filters_clean = ast.literal_eval(filter_options)
+                        elif isinstance(filter_options, dict):
+                            chart_filters_clean = filter_options.copy()
+
+
+                        # Only apply dashboard filters when table name matches
+                        if dashboard_table and dashboard_table == table_name:
+
+                            print(f"Applying dashboard filters to chart {chart_id} (table matched: {table_name})")
+
+                            # Parse chart filter_options (string → dict)
+                            # chart_filters_clean = {}
+                            # if isinstance(filter_options, str):
+                            #     try:
+                            #         chart_filters_clean = json.loads(filter_options)
+                            #     except:
+                            #         chart_filters_clean = ast.literal_eval(filter_options)
+                            # elif isinstance(filter_options, dict):
+                            #     chart_filters_clean = filter_options
+
+                            # Merge dashboard filters into chart filters
+                            # for col, val_list in dashboard_filters.items():
+                            #     if col not in chart_filters_clean:
+                            #         chart_filters_clean[col] = val_list   # Add new filter
+                            #     else:
+                            #         # Merge without duplicates
+                            #         existing = set(chart_filters_clean[col])
+                            #         new_vals = set(val_list)
+                            #         chart_filters_clean[col] = list(existing | new_vals)
+                            # Suggested Override Logic (Replacing the 'else' block)
+                            for col, val_list in dashboard_filters.items():
+                                # If the column is not in the chart filters, add it (same as before)
+                                if col not in chart_filters_clean:
+                                    chart_filters_clean[col] = val_list
+                                else:
+                                    # === CHANGE THIS SECTION ===
+                                    # If the column IS in the chart filters, OVERRIDE it with the dashboard's filter values.
+                                    chart_filters_clean[col] = val_list
+                                    # The previous 'existing = set(chart_filters_clean[col]) | new_vals' logic is removed.
+                                    # ===========================
+                        if temp_filters:
+                            print("Applying TEMP filters:", temp_filters)
+                            for col, val in temp_filters.items():
+                                chart_filters_clean[col] = val  # OVERRIDE
+                        print("logged_user_role",user_role)
+                        if is_restricted_role(user_role):
+                            print("Restricted role detected → applying employee category restriction")
+                            df = fetch_chart_data(connection, table_name)
+                            print("chart_filters_clean,employee_category_filter,df",df,chart_filters_clean,employee_category_filter)
+
+                            chart_filters_clean = expand_filters_with_actual_values(df,
+                                        chart_filters_clean,
+                                        employee_category_filter
+                                        
+                            )
+                            print("chart_filters_clean",chart_filters_clean)
+                        else:
+                            print("Non-restricted role → skipping employee category filter")
+                            # Replace old filter options
+                        filter_options = chart_filters_clean
+
+                        print("Merged filter_options (with override):", filter_options)
+
+                        #]
+
+
+                    # END Dashboard Filter Merge
+                    # ------------------------------------------------
+                                        
+                    # Determine the aggregation function
+                    aggregate_py = {
+                        'count': 'count',
+                        'sum': 'sum',
+                        'average': 'mean',
+                        'minimum': 'min',
+                        'maximum': 'max'
+                    }.get(aggregate, 'sum')  # Default to 'sum' if no match
+
+                    
+                    
+                    
                     
 
                     # # -----------------------------------------------
@@ -2069,6 +2716,7 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                                 "average": "mean",
                                 "mean": "mean",
                                 "count": "count",
+                                "distinct count": "nunique",
                                 "minimum": "min",
                                 "min": "min",
                                 "maximum": "max",
@@ -2151,7 +2799,8 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                             'sum': 'sum',
                             'average': 'avg',
                             'minimum': 'min',
-                            'maximum': 'max'
+                            'maximum': 'max',
+                            'distinct count': 'distinct count'
                         }.get(aggregate, 'sum') 
                         
                         single_value_result = fetchText_data(database_name, table_name, x_axis[0], aggregate_py,selected_user,filter_options)
@@ -2189,7 +2838,8 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                             'sum': 'sum',
                             'average': 'avg',
                             'minimum': 'min',
-                            'maximum': 'max'
+                            'maximum': 'max',
+                            'distinct count': 'distinct count'
                         }.get(aggregate, 'sum') 
                         single_value_result = fetchText_data(database_name, table_name, x_axis[0], aggregate_py,selected_user,filter_options)
                         print("Single Value Result for Chart ID", chart_id, ":", single_value_result)
@@ -2359,6 +3009,7 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                                     "sum": df_filtered[value_col].astype(float).sum(),
                                     "avg": df_filtered[value_col].astype(float).mean(),
                                     "count": df_filtered[value_col].count(),
+                                    "distinct count": df_filtered[value_col].nunique(),
                                     "max": df_filtered[value_col].astype(float).max(),
                                     "min": df_filtered[value_col].astype(float).min(),
                                 }[agg]
@@ -2485,6 +3136,14 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                                 calc_formula_python = re.sub(
                                     r'count\s*\(\s*(temp_df\[.*?\])\s*\)',
                                     r'\1.count()',
+                                    calc_formula_python,
+                                    flags=re.IGNORECASE
+                                )
+
+                                # Handle DISTINCT COUNT
+                                calc_formula_python = re.sub(
+                                    r'distinct count\s*\(\s*(temp_df\[.*?\])\s*\)',
+                                    r'\1.nunique()',
                                     calc_formula_python,
                                     flags=re.IGNORECASE
                                 )
@@ -2616,59 +3275,93 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                             except json.JSONDecodeError as e:
                                 print("DEBUG: Failed to parse filter_options as JSON:", e)
                                 filter_options = {}
-                        
+                        df = apply_and_or_filters(df, filter_options)
                         # Now apply the filters BEFORE grouping
-                        if filter_options and isinstance(filter_options, dict):
-                            print("Applying filters to df...")
-                            print("Filter options received:", filter_options)
+                        # if filter_options and isinstance(filter_options, dict):
+                        #     print("Applying filters to df...")
+                        #     print("Filter options received:", filter_options)
                             
-                            for column, valid_values in filter_options.items():
-                                print(f"\n--- Processing filter for column: '{column}' ---")
-                                print(f"Filter values: {valid_values}")
+                        #     for column, valid_values in filter_options.items():
+                        #         print(f"\n--- Processing filter for column: '{column}' ---")
+                        #         print(f"Filter values: {valid_values}")
                                 
-                                if column in df.columns:
-                                    print(f"Column '{column}' found in dataframe")
-                                    print(f"Unique values in '{column}' before filter (first 20):", sorted(df[column].unique())[:20])
-                                    print(f"Data type of column '{column}':", df[column].dtype)
-                                    print(f"Rows before filtering '{column}': {len(df)}")
+                        #         if column in df.columns:
+                        #             print(f"Column '{column}' found in dataframe")
+                        #             print(f"Unique values in '{column}' before filter (first 20):", sorted(df[column].unique())[:20])
+                        #             print(f"Data type of column '{column}':", df[column].dtype)
+                        #             print(f"Rows before filtering '{column}': {len(df)}")
                                     
-                                    if valid_values:  # Check if valid_values is not empty
-                                        # Convert both dataframe values and filter values to strings for consistent comparison
-                                        df[column] = df[column].astype(str).str.strip()
-                                        valid_values_str = [str(v).strip() for v in valid_values]
+                        #             if valid_values:  # Check if valid_values is not empty
+                        #                 # Convert both dataframe values and filter values to strings for consistent comparison
+                        #                 df[column] = df[column].astype(str).str.strip()
+                        #                 valid_values_str = [str(v).strip() for v in valid_values]
                                         
-                                        print(f"Converted filter values to strings: {valid_values_str}")
+                        #                 print(f"Converted filter values to strings: {valid_values_str}")
                                         
-                                        # Show some sample values to compare
-                                        sample_df_values = df[column].unique()[:10]
-                                        print(f"Sample df values (as strings): {sample_df_values}")
+                        #                 # Show some sample values to compare
+                        #                 sample_df_values = df[column].unique()[:10]
+                        #                 print(f"Sample df values (as strings): {sample_df_values}")
                                         
-                                        # Check which filter values actually exist in the data
-                                        existing_values = []
-                                        for fv in valid_values_str:
-                                            if fv in df[column].values:
-                                                existing_values.append(fv)
-                                            else:
-                                                print(f"WARNING: Filter value '{fv}' not found in column '{column}'")
+                        #                 # Check which filter values actually exist in the data
+                        #                 existing_values = []
+                        #                 for fv in valid_values_str:
+                        #                     if fv in df[column].values:
+                        #                         existing_values.append(fv)
+                        #                     else:
+                        #                         print(f"WARNING: Filter value '{fv}' not found in column '{column}'")
                                         
-                                        print(f"Filter values that exist in data: {existing_values}")
+                        #                 print(f"Filter values that exist in data: {existing_values}")
                                         
-                                        if existing_values:
-                                            # Apply the filter
-                                            df = df[df[column].isin(valid_values_str)]
-                                            print(f"After filtering '{column}': {len(df)} rows remaining")
-                                            print(f"Unique values in '{column}' after filter:", sorted(df[column].unique()))
-                                        else:
-                                            print(f"ERROR: None of the filter values for '{column}' exist in the data!")
-                                            print(f"Available values in '{column}': {sorted(df[column].unique())}")
-                                    else:
-                                        print(f"WARNING: No valid values provided for column '{column}'")
-                                else:
-                                    print(f"ERROR: Column '{column}' not found in dataframe")
-                                    print(f"Available columns: {list(df.columns)}")
-                        
-                        print(f"\n=== FINAL FILTERING RESULTS ===")
-                        print(f"Final filtered df rows: {len(df)}")
+                        #                 if existing_values:
+                        #                     # Apply the filter
+                        #                     df = df[df[column].isin(valid_values_str)]
+                        #                     print(f"After filtering '{column}': {len(df)} rows remaining")
+                        #                     print(f"Unique values in '{column}' after filter:", sorted(df[column].unique()))
+                        #                 else:
+                        #                     print(f"ERROR: None of the filter values for '{column}' exist in the data!")
+                        #                     print(f"Available values in '{column}': {sorted(df[column].unique())}")
+                        #             else:
+                        #                 print(f"WARNING: No valid values provided for column '{column}'")
+                        #         else:
+                        #             print(f"ERROR: Column '{column}' not found in dataframe")
+                        #             print(f"Available columns: {list(df.columns)}")
+                        # for column, filter_def in filter_options.items():
+                        #     print(f"\n--- Processing filter for column: '{column}' ---")
+                        #     print("Filter definition:", filter_def)
+
+                        #     if column not in df.columns:
+                        #         print(f"ERROR: Column '{column}' not found")
+                        #         continue
+
+                        #     # ✅ Extract correctly
+                        #     values = filter_def.get("values", [])
+                        #     operator = filter_def.get("operator", "AND").upper()
+
+                        #     print("Extracted values:", values)
+                        #     print("Operator:", operator)
+
+                        #     if not values:
+                        #         print(f"WARNING: No values provided for {column}")
+                        #         continue
+
+                        #     # Normalize
+                        #     df[column] = df[column].astype(str).str.strip()
+                        #     values = [str(v).strip() for v in values]
+
+                        #     # Check existence
+                        #     existing_values = [v for v in values if v in df[column].values]
+
+                        #     if not existing_values:
+                        #         print(f"ERROR: None of the filter values exist for '{column}'")
+                        #         print("Available values:", df[column].unique())
+                        #         continue
+
+                        #     # ✅ Apply filter
+                        #     df = df[df[column].isin(existing_values)]
+
+                        #     print(f"Rows after filtering '{column}':", len(df))
+                        # print(f"\n=== FINAL FILTERING RESULTS ===")
+                        # print(f"Final filtered df rows: {len(df)}")
                         
                         if len(df) > 0:
                             print(f"Sample of filtered data:")
@@ -2728,7 +3421,21 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                             # =========================================================
                             print(f"\nGrouping by: {x_axis[0]}")
                             # grouped_df = df.groupby(x_axis[0]).size().reset_index(name="count")
-                            grouped_df = df.groupby(x_axis[0])[y_axis[0]].nunique().reset_index(name="count")
+                            # grouped_df = df.groupby(x_axis[0])[y_axis[0]].nunique().reset_index(name="count")
+                            if y_axis and aggregate_py == "count":
+                                # COUNT = number of rows
+                                grouped_df = (
+                                    df.groupby(x_axis[0])
+                                    .size()
+                                    .reset_index(name="count")
+                                )
+                            else:
+                                grouped_df = (
+                                    df.groupby(x_axis[0])[y_axis[0]]
+                                    .nunique()
+                                    .reset_index(name="count")
+                                )
+
 
                             
                             
@@ -3180,41 +3887,386 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                         #             else:
                         #                 # Normal filtering for non-date columns (like 'region' or 'product')
                         #                 dataframe = dataframe[dataframe[col].isin(allowed_values)]
+                        # if filter_options:
+                        #     for col, allowed_values in filter_options.items():
+                        #         if col in dataframe.columns:
+                        #             print(f"Applying filter on column: {col}")
+                                    
+                        #             is_date_col = pd.api.types.is_datetime64_any_dtype(dataframe[col]) or "date" in col.lower()
+                                    
+                        #             if is_date_col:
+                        #                 # 1. Convert column to datetime for extraction
+                        #                 temp_dates = pd.to_datetime(dataframe[col], errors='coerce')
+                                        
+                        #                 # 2. Check the nature of the filter values
+                        #                 sample_val = str(allowed_values[0]) if allowed_values else ""
+                                        
+                        #                 if sample_val.isdigit():
+                        #                     # Filter by YEAR (e.g., [2010, 2011])
+                        #                     years = [int(v) for v in allowed_values]
+                        #                     dataframe = dataframe[temp_dates.dt.year.isin(years)]
+                                            
+                        #                 elif sample_val.startswith('Q') and len(sample_val) <= 2:
+                        #                     # Filter by QUARTER (e.g., ["Q1", "Q2"])
+                        #                     # Extract '1' from 'Q1' and compare
+                        #                     quarters = [int(v.replace('Q', '')) for v in allowed_values]
+                        #                     dataframe = dataframe[temp_dates.dt.quarter.isin(quarters)]
+                                            
+                        #                 else:
+                        #                     # Filter by MONTH NAME (e.g., ["January", "February"])
+                        #                     # We compare month names (case-insensitive)
+                        #                     allowed_months = [v.strip().capitalize() for v in allowed_values]
+                        #                     dataframe = dataframe[temp_dates.dt.month_name().isin(allowed_months)]
+                        #             else:
+                        #                 # Normal filtering for non-date columns
+                        #                 # allowed_values_lower = [str(v).lower() for v in allowed_values]
+                        #                 # dataframe = dataframe[dataframe[col].str.lower().isin(allowed_values_lower)]
+                        #                 dataframe = dataframe[dataframe[col].isin(allowed_values)]
+                        # if filter_options:
+                        #     final_mask = pd.Series(True, index=dataframe.index)
+
+                        #     for col, filter_data in filter_options.items():
+                        #         if col not in dataframe.columns:
+                        #             continue
+
+                        #         # Normalize
+                        #         if isinstance(filter_data, dict):
+                        #             values = filter_data.get("values", [])
+                        #         else:
+                        #             values = filter_data
+
+                        #         if not values:
+                        #             continue
+
+                        #         # Build column mask
+                        #         if pd.api.types.is_datetime64_any_dtype(dataframe[col]) or "date" in col.lower():
+                        #             temp_dates = pd.to_datetime(dataframe[col], errors="coerce")
+                        #             sample_val = str(values[0])
+
+                        #             if sample_val.isdigit():
+                        #                 col_mask = temp_dates.dt.year.isin([int(v) for v in values])
+                        #             elif sample_val.startswith("Q"):
+                        #                 col_mask = temp_dates.dt.quarter.isin(
+                        #                     [int(v.replace("Q", "")) for v in values]
+                        #                 )
+                        #             else:
+                        #                 col_mask = temp_dates.dt.strftime("%Y-%m-%d").isin(values)
+                        #         else:
+                        #             # OR within same column
+                        # #             col_mask = dataframe[col].isin(values)
+
+                        # #         # ✅ AND across columns
+                        # #         final_mask &= col_mask
+
+                        # #     dataframe = dataframe[final_mask]
+                        # if filter_options:
+                        #     and_mask = pd.Series(True, index=dataframe.index)
+                        #     or_mask = pd.Series(False, index=dataframe.index)
+
+                        #     has_or = False
+                        #     has_and = False
+
+                        #     for col, filter_data in filter_options.items():
+                        #         if col not in dataframe.columns:
+                        #             continue
+
+                        #         if isinstance(filter_data, dict):
+                        #             values = filter_data.get("values", [])
+                        #             operator = filter_data.get("operator", "AND").upper()
+                        #         else:
+                        #             values = filter_data
+                        #             operator = "AND"
+
+                        #         if not values:
+                        #             continue
+
+                        #         # Build column mask
+                        #         if pd.api.types.is_datetime64_any_dtype(dataframe[col]) or "date" in col.lower():
+                        #             temp_dates = pd.to_datetime(dataframe[col], errors="coerce")
+                        #             sample_val = str(values[0])
+
+                        #             if sample_val.isdigit():
+                        #                 col_mask = temp_dates.dt.year.isin([int(v) for v in values])
+                        #             elif sample_val.startswith("Q"):
+                        #                 col_mask = temp_dates.dt.quarter.isin(
+                        #                     [int(v.replace("Q", "")) for v in values]
+                        #                 )
+                        #             else:
+                        #                 col_mask = temp_dates.dt.strftime("%Y-%m-%d").isin(values)
+                        #         else:
+                        #             col_mask = dataframe[col].isin(values)
+
+                        #         # 🔥 APPLY OPERATOR
+                        #         if operator == "OR":
+                        #             or_mask |= col_mask
+                        #             has_or = True
+                        #         else:
+                        #             and_mask &= col_mask
+                        #             has_and = True
+
+                        #     # ✅ FINAL COMBINATION LOGIC
+                        #     if has_and and has_or:
+                        #         dataframe = dataframe[and_mask & or_mask]
+                        #     elif has_or:
+                        #         dataframe = dataframe[or_mask]
+                        #     else:
+                        #         dataframe = dataframe[and_mask]
+                        # if filter_options:
+                        #     base_mask = pd.Series(True, index=dataframe.index)
+
+                        #     or_group_mask = pd.Series(False, index=dataframe.index)
+                        #     has_or_group = False
+                            
+
+                        #     for col, filter_data in filter_options.items():
+                        #         if col not in dataframe.columns:
+                        #             continue
+
+                        #         if isinstance(filter_data, dict):
+                        #             values = filter_data.get("values", [])
+                        #             operator = filter_data.get("operator", "AND").upper()
+                        #         else:
+                        #             values = filter_data
+                        #             operator = "AND"
+
+                        #         if not values:
+                        #             continue
+
+                        #         # Build column mask
+                        #         if pd.api.types.is_datetime64_any_dtype(dataframe[col]) or "date" in col.lower():
+                        #             temp_dates = pd.to_datetime(dataframe[col], errors="coerce")
+                        #             sample_val = str(values[0])
+
+                        #             if sample_val.isdigit():
+                        #                 col_mask = temp_dates.dt.year.isin([int(v) for v in values])
+                        #             elif sample_val.startswith("Q"):
+                        #                 col_mask = temp_dates.dt.quarter.isin(
+                        #                     [int(v.replace("Q", "")) for v in values]
+                        #                 )
+                        #             else:
+                        #                 col_mask = temp_dates.dt.strftime("%Y-%m-%d").isin(values)
+                        #         else:
+                        #             col_mask = dataframe[col].isin(values)
+
+                        #         # 🔥 GROUPED LOGIC
+                        #         if operator == "OR":
+                        #             or_group_mask |= col_mask
+                        #             has_or_group = True
+                        #         else:
+                        #             base_mask &= col_mask
+
+                        #     # ✅ FINAL COMBINATION (SQL-ACCURATE)
+                        #     if has_or_group:
+                        #         dataframe = dataframe[base_mask & or_group_mask]
+                        #     else:
+                        #         dataframe = dataframe[base_mask]
                         if filter_options:
-                            for col, allowed_values in filter_options.items():
-                                if col in dataframe.columns:
-                                    print(f"Applying filter on column: {col}")
-                                    
-                                    is_date_col = pd.api.types.is_datetime64_any_dtype(dataframe[col]) or "date" in col.lower()
-                                    
-                                    if is_date_col:
-                                        # 1. Convert column to datetime for extraction
-                                        temp_dates = pd.to_datetime(dataframe[col], errors='coerce')
-                                        
-                                        # 2. Check the nature of the filter values
-                                        sample_val = str(allowed_values[0]) if allowed_values else ""
-                                        
-                                        if sample_val.isdigit():
-                                            # Filter by YEAR (e.g., [2010, 2011])
-                                            years = [int(v) for v in allowed_values]
-                                            dataframe = dataframe[temp_dates.dt.year.isin(years)]
-                                            
-                                        elif sample_val.startswith('Q') and len(sample_val) <= 2:
-                                            # Filter by QUARTER (e.g., ["Q1", "Q2"])
-                                            # Extract '1' from 'Q1' and compare
-                                            quarters = [int(v.replace('Q', '')) for v in allowed_values]
-                                            dataframe = dataframe[temp_dates.dt.quarter.isin(quarters)]
-                                            
-                                        else:
-                                            # Filter by MONTH NAME (e.g., ["January", "February"])
-                                            # We compare month names (case-insensitive)
-                                            allowed_months = [v.strip().capitalize() for v in allowed_values]
-                                            dataframe = dataframe[temp_dates.dt.month_name().isin(allowed_months)]
+                            and_mask = pd.Series(True, index=dataframe.index)
+                            or_mask = pd.Series(False, index=dataframe.index)
+
+                            # 🔥 detect if ANY OR exists
+                            has_or = any(
+                                isinstance(v, dict) and v.get("operator", "").upper() == "OR"
+                                for v in filter_options.values()
+                            )
+
+                            for col, filter_data in filter_options.items():
+                                if col not in dataframe.columns:
+                                    continue
+
+                                if isinstance(filter_data, dict):
+                                    values = filter_data.get("values", [])
+                                    operator = filter_data.get("operator", "AND").upper()
+                                else:
+                                    values = filter_data
+                                    operator = "AND"
+
+                                if not values:
+                                    continue
+
+                                # Build column mask
+                                if pd.api.types.is_datetime64_any_dtype(dataframe[col]) or "date" in col.lower():
+                                    temp_dates = pd.to_datetime(dataframe[col], errors="coerce")
+                                    sample_val = str(values[0])
+
+                                    if sample_val.isdigit():
+                                        col_mask = temp_dates.dt.year.isin([int(v) for v in values])
+                                    elif sample_val.startswith("Q"):
+                                        col_mask = temp_dates.dt.quarter.isin(
+                                            [int(v.replace("Q", "")) for v in values]
+                                        )
                                     else:
-                                        # Normal filtering for non-date columns
-                                        # allowed_values_lower = [str(v).lower() for v in allowed_values]
-                                        # dataframe = dataframe[dataframe[col].str.lower().isin(allowed_values_lower)]
-                                        dataframe = dataframe[dataframe[col].isin(allowed_values)]
+                                        col_mask = temp_dates.dt.strftime("%Y-%m-%d").isin(values)
+                                else:
+                                    col_mask = dataframe[col].isin(values)
+
+                                # ✅ AUTO GROUPING
+                                if has_or and operator in ("AND", "OR") and col != "country":
+                                    # region + product → OR group
+                                    or_mask |= col_mask
+                                else:
+                                    # country → AND group
+                                    and_mask &= col_mask
+
+                            # ✅ FINAL SQL EQUIVALENT
+                            if has_or:
+                                dataframe = dataframe[or_mask & and_mask]
+                            else:
+                                dataframe = dataframe[and_mask]
+
+
+
+
+
+                        # if filter_options:
+                        #     for col, filter_data in filter_options.items():
+                        #         if col not in dataframe.columns:
+                        #             continue
+
+                        #         print(f"Applying filter on column: {col}")
+
+                        #         # 🔹 Normalize filter_data
+                        #         if isinstance(filter_data, dict):
+                        #             allowed_values = filter_data.get("values", [])
+                        #             operator = filter_data.get("operator", "AND")
+                        #         else:
+                        #             allowed_values = filter_data
+                        #             operator = "AND"
+
+                        #         if not allowed_values:
+                        #             continue
+
+                        #         is_date_col = (
+                        #             pd.api.types.is_datetime64_any_dtype(dataframe[col])
+                        #             or "date" in col.lower()
+                        #         )
+
+                        #         if is_date_col:
+                        #             temp_dates = pd.to_datetime(dataframe[col], errors="coerce")
+                        #             sample_val = str(allowed_values[0])
+
+                        #             if sample_val.isdigit():
+                        #                 years = [int(v) for v in allowed_values]
+                        #                 dataframe = dataframe[temp_dates.dt.year.isin(years)]
+
+                        #             elif sample_val.startswith("Q"):
+                        #                 quarters = [int(v.replace("Q", "")) for v in allowed_values]
+                        #                 dataframe = dataframe[temp_dates.dt.quarter.isin(quarters)]
+
+                        #             else:
+                        #                 months = [v.strip().capitalize() for v in allowed_values]
+                        #                 dataframe = dataframe[temp_dates.dt.month_name().isin(months)]
+                        #         else:
+                        #             # 🔹 AND / OR logic
+                        #             if operator == "OR":
+                        #                 dataframe = dataframe[dataframe[col].isin(allowed_values)]
+                        #             else:  # AND (default & restricted roles)
+                        #                 dataframe = dataframe[dataframe[col].isin(allowed_values)]
+                        # if filter_options:
+                        #     and_mask = pd.Series(True, index=dataframe.index)
+                        #     or_masks = []
+                        #     print("and_mask",and_mask)
+                        #     print("or_masks",or_masks)
+
+                        #     for col, filter_data in filter_options.items():
+                        #         if col not in dataframe.columns:
+                        #             continue
+
+                        #         # Normalize
+                        #         if isinstance(filter_data, dict):
+                        #             values = filter_data.get("values", [])
+                        #             operator = filter_data.get("operator", "AND").upper()
+                        #             print("operator",operator)
+
+                        #         else:
+                        #             values = filter_data
+                        #             operator = "AND"
+
+                        #         if not values:
+                        #             continue
+
+                        #         is_date_col = (
+                        #             pd.api.types.is_datetime64_any_dtype(dataframe[col])
+                        #             or "date" in col.lower()
+                        #         )
+
+                        #         # Build column mask
+                        #         if is_date_col:
+                        #             temp_dates = pd.to_datetime(dataframe[col], errors="coerce")
+                        #             sample_val = str(values[0])
+
+                        #             if sample_val.isdigit():
+                        #                 col_mask = temp_dates.dt.year.isin([int(v) for v in values])
+                        #             elif sample_val.startswith("Q"):
+                        #                 col_mask = temp_dates.dt.quarter.isin(
+                        #                     [int(v.replace("Q", "")) for v in values]
+                        #                 )
+                        #             else:
+                        #                 col_mask = temp_dates.dt.month_name().isin(
+                        #                     [v.strip().capitalize() for v in values]
+                        #                 )
+                        #         else:
+                        #             col_mask = dataframe[col].isin(values)
+
+                        #         # 🔥 KEY FIX
+                        #         if operator == "OR":
+                        #             or_masks.append(col_mask)
+                        #         else:
+                        #             and_mask &= col_mask
+
+                        #     # Apply OR group together
+                        #     if or_masks:
+                        #         or_mask = or_masks[0]
+                        #         for m in or_masks[1:]:
+                        #             or_mask |= m
+
+                        #         dataframe = dataframe[and_mask & or_mask]
+                        #         print("dataframe1",dataframe)
+                        #     else:
+                        #         dataframe = dataframe[and_mask]
+                        # if filter_options:
+                            # combined_mask = pd.Series(False, index=dataframe.index)
+
+                            # for col, filter_data in filter_options.items():
+                            #     if col not in dataframe.columns:
+                            #         continue
+
+                            #     if isinstance(filter_data, dict):
+                            #         values = filter_data.get("values", [])
+                            #         operator = filter_data.get("operator", "AND").upper()
+                            #     else:
+                            #         values = filter_data
+                            #         operator = "AND"
+
+                            #     if not values:
+                            #         continue
+
+                            #     # Build column mask
+                            #     if pd.api.types.is_datetime64_any_dtype(dataframe[col]) or "date" in col.lower():
+                            #         temp_dates = pd.to_datetime(dataframe[col], errors="coerce")
+                            #         sample_val = str(values[0])
+
+                            #         if sample_val.isdigit():
+                            #             col_mask = temp_dates.dt.year.isin([int(v) for v in values])
+                            #         elif sample_val.startswith("Q"):
+                            #             col_mask = temp_dates.dt.quarter.isin(
+                            #                 [int(v.replace("Q", "")) for v in values]
+                            #             )
+                            #         else:
+                            #             col_mask = temp_dates.dt.month_name().isin(
+                            #                 [v.strip().capitalize() for v in values]
+                            #             )
+                            #     else:
+                            #         col_mask = dataframe[col].isin(values)
+
+                            #     # 🔥 OR across different columns
+                            #     combined_mask |= col_mask
+
+                            # dataframe = dataframe[combined_mask]
+                        
+
+
+
 
                         print("DataFrame after dashboard filtering:-----")
                         print(dataframe.head())
@@ -3286,10 +4338,13 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                                 grouped_df = pd.concat([top_df, bottom_df])
 
                         categories = grouped_df[x_axis[0]].tolist()
-                        if isinstance(categories[0], pd.Timestamp):  # Assumes at least one value is present
-                            categories = [category.strftime('%Y-%m-%d') for category in categories]
+                        if categories:
+                            if isinstance(categories[0], pd.Timestamp):  # Assumes at least one value is present
+                                categories = [category.strftime('%Y-%m-%d') for category in categories]
+                            else:
+                                categories = [str(category) for category in categories]  
                         else:
-                            categories = [str(category) for category in categories]  
+                            categories = []
                         values = [float(value) for value in grouped_df[y_axis[0]]]
 
                         print("categories--222", categories)
@@ -3324,41 +4379,79 @@ def get_dashboard_view_chart_data(chart_ids,positions,filter_options,areacolour,
                         #             print("category",category,filter_options)
                         #             filtered_categories.append(category)
                         #             filtered_values.append(value)
-                        axis_col = x_axis[0]  # e.g., 'brand'
-                        if selectedFrequency:
+                        axis_col = x_axis[0]
+
+                        # 🔥 Detect OR across ANY filter
+                        has_or_logic = any(
+                            isinstance(v, dict) and v.get("operator", "").upper() == "OR"
+                            for v in filter_options.values()
+                        )
+
+                        if selectedFrequency or has_or_logic:
+                            # ✅ TRUST GROUPED DATA — DO NOT AXIS FILTER
                             filtered_categories = categories
                             filtered_values = values
-                            print("Filtered Categories1:", filtered_categories)
-                            print("Filtered Values1:", filtered_values)
+
                         else:
                             filtered_categories = []
                             filtered_values = []
-                            # allowed_values_lower = [str(v).strip().lower() for v in filter_options.get(axis_col, [])]
-                            # if not allowed_values_lower:
-                            #     filtered_categories = categories
-                            #     filtered_values = values
-                            # else:
-                            #     for category, value in zip(categories, values):
-                            #         if str(category).strip().lower() in allowed_values_lower:
-                            #             filtered_categories.append(category)
-                            #             filtered_values.append(value)
 
-                            for category, value in zip(categories, values):
-                                print("filter_options",filter_options,axis_col)
+                            if not filter_options or axis_col not in filter_options:
+                                filtered_categories = categories
+                                filtered_values = values
+                            else:
+                                filter_data = filter_options[axis_col]
 
-                                if not filter_options or axis_col not in filter_options:
-                                    filtered_categories = categories
-                                    filtered_values = values
-                                    # break  
+                                if isinstance(filter_data, dict):
+                                    allowed_values = filter_data.get("values", [])
+                                else:
+                                    allowed_values = filter_data
 
-                                if axis_col in filter_options and category in filter_options[axis_col]:
-                                # allowed_values_lower = [str(v).lower() for v in filter_options[axis_col]]
-                                # if str(category).lower() in allowed_values_lower:
+                                allowed_values_lower = [str(v).strip().lower() for v in allowed_values]
+
+                                for category, value in zip(categories, values):
+                                    if str(category).strip().lower() in allowed_values_lower:
+                                        filtered_categories.append(category)
+                                        filtered_values.append(value)
+
+                        print("Filtered Categories:", filtered_categories)
+                        print("Filtered Values:", filtered_values)
+
+                        # axis_col = x_axis[0]  # e.g., 'brand'
+                        # if selectedFrequency:
+                        #     filtered_categories = categories
+                        #     filtered_values = values
+                        #     print("Filtered Categories1:", filtered_categories)
+                        #     print("Filtered Values1:", filtered_values)
+                        # else:
+                        #     filtered_categories = []
+                        #     filtered_values = []
+                        #     # allowed_values_lower = [str(v).strip().lower() for v in filter_options.get(axis_col, [])]
+                        #     # if not allowed_values_lower:
+                        #     #     filtered_categories = categories
+                        #     #     filtered_values = values
+                        #     # else:
+                        #     #     for category, value in zip(categories, values):
+                        #     #         if str(category).strip().lower() in allowed_values_lower:
+                        #     #             filtered_categories.append(category)
+                        #     #             filtered_values.append(value)
+
+                        #     for category, value in zip(categories, values):
+                        #         print("filter_options",filter_options,axis_col)
+
+                        #         if not filter_options or axis_col not in filter_options:
+                        #             filtered_categories = categories
+                        #             filtered_values = values
+                        #             # break  
+
+                        #         if axis_col in filter_options and category in filter_options[axis_col]:
+                        #         # allowed_values_lower = [str(v).lower() for v in filter_options[axis_col]]
+                        #         # if str(category).lower() in allowed_values_lower:
                                     
-                                    filtered_categories.append(category)
-                                    filtered_values.append(value)
-                            print("Filtered Categories:", filtered_categories)
-                            print("Filtered Values:", filtered_values)
+                        #             filtered_categories.append(category)
+                        #             filtered_values.append(value)
+                        #     print("Filtered Categories:", filtered_categories)
+                        #     print("Filtered Values:", filtered_values)
 
 
                         # print("Filtered Categories:", filtered_categories)
