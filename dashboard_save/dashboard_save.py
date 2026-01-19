@@ -1406,10 +1406,10 @@ def apply_employee_category_filter(chart_filters, employee_category_filter, data
 
     return chart_filters
 DB_CONFIG_TEMPLATE = {
-    'user': 'postgres',
-    'password': 'Gayu@123',
-    'host': 'localhost',
-    'port': 5432
+    'user': USER_NAME,
+    'password': PASSWORD,
+    'host': HOST,
+    'port': PORT
 }
 
 # --- GLOBAL VARIABLES ---
