@@ -100,7 +100,7 @@ from upload import is_table_used_in_charts
 from user_upload import (
     get_db_connection,
     handle_file_upload_registration,
-    handle_manual_registration,create_user_management_log_table,log_user_management_action,handle_categories
+    handle_manual_registration,create_user_management_log_table,log_user_management_action,handle_categories,create_category_table_if_not_exists
 )
 from viewChart.viewChart import (
     fetch_ai_saved_chart_data,
@@ -8370,6 +8370,7 @@ def get_all_users():
 
         # 2️⃣ Fetch users from company DB
         conn = get_company_db_connection(company_name)
+        create_category_table_if_not_exists(conn)
         cursor = conn.cursor()
 
         offset = (page - 1) * limit
@@ -8620,6 +8621,7 @@ def fetch_user_data():
         return jsonify({'message': 'Username and organization_name required'}), 400
 
     conn = get_company_db_connection(organization_name)
+    create_category_table_if_not_exists(conn)
 
     try:
         cursor = conn.cursor()
@@ -8679,6 +8681,7 @@ def update_user_details():
     admin_email = data.get('email')
 
     conn = get_company_db_connection(company)
+    create_category_table_if_not_exists(conn)
     conn_ds = get_db_connection()
 
     try:
