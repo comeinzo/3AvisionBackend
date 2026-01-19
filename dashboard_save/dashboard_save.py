@@ -10,6 +10,7 @@ import pandas as pd
 import re  
 import ast
 import json
+from decimal import Decimal
 import numpy as np
 import paramiko
 import socket
