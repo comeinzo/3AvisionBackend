@@ -1030,6 +1030,10 @@ def fetch_data(table_name, x_axis_columns, filter_options, y_axis_column, aggreg
 
     # Handle calculation logic
     # if calculationData and calculationData.get('calculation') and calculationData.get('columnName'):
+    # At the top, before looping over calculationData
+    skip_calculated_column = False
+    y_base_column = None
+
     if calculationData and isinstance(calculationData, list):
         for calc_entry in calculationData:
             calc_formula = calc_entry.get('calculation', '').strip()
@@ -1066,7 +1070,21 @@ def fetch_data(table_name, x_axis_columns, filter_options, y_axis_column, aggreg
 
             # Handle "if (...) then ... else ..." expressions
             if calc_formula.strip().lower().startswith("if"):
-                match = re.match(r"if\s*\((.+?)\)\s*then\s*'?(.*?)'?\s*else\s*'?(.*?)'?$", calc_formula.strip(), re.IGNORECASE)
+                match = (
+                    re.match(
+                        r"if\s*\(\s*(.+?)\s*\)\s*then\s*'?(.*?)'?\s*else\s*'?(.*?)'?$",
+                        calc_formula.strip(),
+                        re.IGNORECASE
+                    )
+                    or
+                    re.match(
+                        r"if\s*\(\s*(.+?)\s*,\s*'?(.*?)'?\s*,\s*'?(.*?)'?\s*\)$",
+                        calc_formula.strip(),
+                        re.IGNORECASE
+                    )
+                )
+
+                # match = re.match(r"if\s*\((.+?)\)\s*then\s*'?(.*?)'?\s*else\s*'?(.*?)'?$", calc_formula.strip(), re.IGNORECASE)
                 if not match:
                     raise ValueError("Invalid if-then-else format in calculation.")
 
@@ -1123,6 +1141,8 @@ def fetch_data(table_name, x_axis_columns, filter_options, y_axis_column, aggreg
                     result_val = df_filtered[value_col].astype(float).mean()
                 elif agg_func == "count":
                     result_val = df_filtered[value_col].count()
+                elif agg_func == "distinct count":
+                    result_val = df_filtered[value_col].nunique()
                 elif agg_func == "max":
                     result_val = df_filtered[value_col].astype(float).max()
                 elif agg_func == "min":
@@ -1295,6 +1315,40 @@ def fetch_data(table_name, x_axis_columns, filter_options, y_axis_column, aggreg
                     raise ValueError("Invalid REPLACE format.")
                 col, old, new = match.groups()
                 temp_df[new_col_name] = temp_df[col].astype(str).str.replace(old, new, regex=False)
+            # round_match = re.match(r'round\s*\(\s*(.+?)\s*,\s*(\d+)\s*\)', calculation, re.IGNORECASE)
+            elif calc_formula.lower().startswith("round"):
+                # Match round formula: round(<expression>, <decimals>)
+                match = re.match(r'round\s*\(\s*(.+?)\s*,\s*(\d+)\s*\)', calc_formula, re.IGNORECASE)
+                if not match:
+                    raise ValueError("Invalid ROUND format. Use round([col], decimals) or round([col1]/[col2], decimals)")
+                
+                expr, decimals = match.groups()
+                decimals = int(decimals)
+
+                # Replace [column] with numeric dataframe references
+                def replace_column(match):
+                    col_name = match.group(1)
+                    if col_name not in temp_df.columns:
+                        raise ValueError(f"Missing column: {col_name}")
+                    # Convert to numeric
+                    temp_df[col_name] = pd.to_numeric(temp_df[col_name], errors='coerce')
+                    return f"temp_df['{col_name}']"
+
+                expr_python = re.sub(r'\[([^\]]+)\]', replace_column, expr)
+
+                # Handle division by zero safely
+                expr_python = re.sub(
+                    r"temp_df\['([^']+)'\]\s*/\s*temp_df\['([^']+)'\]",
+                    r"np.divide(temp_df['\1'], temp_df['\2'].replace(0, np.nan))",
+                    expr_python
+                )
+
+                # Evaluate the expression safely and round
+                try:
+                    temp_df[new_col_name] = np.round(eval(expr_python), decimals)
+                except Exception as e:
+                    print("Error evaluating ROUND formula:", e)
+                    temp_df[new_col_name] = np.nan
 
             elif calc_formula.lower().startswith("trim"):
                 match = re.match(r'trim\s*\(\s*\[([^\]]+)\]\s*\)', calc_formula, re.IGNORECASE)
@@ -1303,10 +1357,69 @@ def fetch_data(table_name, x_axis_columns, filter_options, y_axis_column, aggreg
                 col = match.group(1)
                 temp_df[new_col_name] = temp_df[col].astype(str).str.strip()
             # Case 5: Math formula like [A] * [B] - [C]
+            elif calc_formula.lower().startswith(("sum", "avg", "min", "max")):
+                match = re.match(
+                    r'(sum|avg|min|max)\s*\(\s*\[([^\]]+)\]\s*\)',
+                    calc_formula,
+                    re.IGNORECASE
+                )
+                if not match:
+                    raise ValueError("Invalid aggregation format.")
+
+                agg_func, col = match.groups()
+                agg_func = agg_func.lower()
+
+                # DO NOT create calculated column
+                # Just mark aggregation intent
+                aggregation = agg_func
+                y_base_column = col
+
+                print(f"Detected aggregation: {aggregation}({col})")
+
+                # IMPORTANT: skip dataframe eval
+                skip_calculated_column = True
+
             else:
+                # calc_formula_python = re.sub(r'\[(.*?)\]', replace_column, calc_formula)
+                # print("Evaluating math formula:", calc_formula_python)
+                # Replace column references [col] → temp_df['col']
                 calc_formula_python = re.sub(r'\[(.*?)\]', replace_column, calc_formula)
+
+                # Handle COUNT
+                calc_formula_python = re.sub(
+                    r'count\s*\(\s*(temp_df\[.*?\])\s*\)',
+                    r'\1.count()',
+                    calc_formula_python,
+                    flags=re.IGNORECASE
+                )
+                # Handle DISTINCT COUNT
+                calc_formula_python = re.sub(
+                    r'distinct count\s*\(\s*(temp_df\[.*?\])\s*\)',
+                    r'\1.nunique()',
+                    calc_formula_python,
+                    flags=re.IGNORECASE
+                )   
+
+                # Handle SUM
+                calc_formula_python = re.sub(
+                    r'sum\s*\(\s*(temp_df\[.*?\])\s*\)',
+                    r'\1.sum()',
+                    calc_formula_python,
+                    flags=re.IGNORECASE
+                )
+
+                # Handle AVG
+                calc_formula_python = re.sub(
+                    r'avg\s*\(\s*(temp_df\[.*?\])\s*\)',
+                    r'\1.mean()',
+                    calc_formula_python,
+                    flags=re.IGNORECASE
+                )
+
                 print("Evaluating math formula:", calc_formula_python)
                 temp_df[new_col_name] = eval(calc_formula_python)
+
+                # temp_df[new_col_name] = eval(calc_formula_python)
 
             # print(f"New column '{new_col_name}' created.")
             # y_axis_column = [new_col_name]
@@ -1419,25 +1532,405 @@ def fetch_data(table_name, x_axis_columns, filter_options, y_axis_column, aggreg
         y_axis_column = y_axis_column[0].get('column')
     else:
         y_axis_column = y_axis_column[0]
+    if skip_calculated_column:
+        y_axis_column = y_base_column
 
-    # Perform aggregation
-    if aggregation == "sum":
+        # Perform aggregation
+    if aggregation.lower() == "sum":
         grouped_df = filtered_df.groupby(x_axis_columns_str[0])[y_axis_column].sum().reset_index()
-    elif aggregation == "average":
+    elif aggregation.lower() in ("avg", "average", "mean"):
         grouped_df = filtered_df.groupby(x_axis_columns_str[0])[y_axis_column].mean().reset_index()
-    elif aggregation == "count":
+    elif aggregation.lower() == "count":
         grouped_df = filtered_df.groupby(x_axis_columns_str[0]).size().reset_index(name="count")
-    elif aggregation == "maximum":
+    elif aggregation.lower() == "distinct count":
+        grouped_df = filtered_df.groupby(x_axis_columns_str[0])[y_axis_column].nunique().reset_index(name="distinct_count")
+    elif aggregation.lower() in ("max", "maximum"):
         grouped_df = filtered_df.groupby(x_axis_columns_str[0])[y_axis_column].max().reset_index()
-    elif aggregation == "minimum":
+    elif aggregation.lower() in ("min", "minimum"):
         grouped_df = filtered_df.groupby(x_axis_columns_str[0])[y_axis_column].min().reset_index()
-    elif aggregation == "variance":
+    elif aggregation.lower() == "variance":
         grouped_df = filtered_df.groupby(x_axis_columns_str[0])[y_axis_column].var().reset_index()
     else:
         raise ValueError(f"Unsupported aggregation type: {aggregation}")
 
+
     result = [tuple(x) for x in grouped_df.to_numpy()]
     return result
+# def apply_and_or_filters(df, filter_options):
+#     if not filter_options or not isinstance(filter_options, dict):
+#         return df
+
+#     and_mask = pd.Series(True, index=df.index)
+#     or_mask = pd.Series(False, index=df.index)
+
+#     has_and = False
+#     has_or = False
+
+#     for col, filter_data in filter_options.items():
+#         if col not in df.columns:
+#             continue
+
+#         # Normalize
+#         if isinstance(filter_data, dict):
+#             values = filter_data.get("values", [])
+#             operator = filter_data.get("operator", "AND").upper()
+#         else:
+#             values = filter_data
+#             operator = "AND"
+
+#         if not values:
+#             continue
+
+#         # Date handling
+#         is_date_col = (
+#             pd.api.types.is_datetime64_any_dtype(df[col])
+#             or "date" in col.lower()
+#         )
+
+#         if is_date_col:
+#             temp_dates = pd.to_datetime(df[col], errors="coerce")
+#             sample_val = str(values[0])
+
+#             if sample_val.isdigit():  # YEAR
+#                 col_mask = temp_dates.dt.year.isin([int(v) for v in values])
+
+#             elif sample_val.startswith("Q"):  # QUARTER
+#                 col_mask = temp_dates.dt.quarter.isin(
+#                     [int(v.replace("Q", "")) for v in values]
+#                 )
+
+#             else:  # DATE STRING
+#                 col_mask = temp_dates.dt.strftime("%Y-%m-%d").isin(values)
+#         else:
+#             df[col] = df[col].astype(str).str.strip()
+#             values = [str(v).strip() for v in values]
+#             col_mask = df[col].isin(values)
+
+#         # 🔥 Apply operator
+#         if operator == "OR":
+#             or_mask |= col_mask
+#             has_or = True
+#         else:
+#             and_mask &= col_mask
+#             has_and = True
+
+#     # 🔥 FINAL DECISION LOGIC
+#     if has_and and has_or:
+#         return df[and_mask & or_mask]
+#     elif has_or:
+#         return df[or_mask]          # ✅ FIX: pure OR
+#     else:
+#         return df[and_mask]
+# def apply_and_or_filters(df, filter_options):
+#     if not filter_options or not isinstance(filter_options, dict):
+#         return df
+
+#     final_mask = pd.Series(False, index=df.index)
+#     current_group_mask = pd.Series(True, index=df.index)
+
+#     for col, filter_data in filter_options.items():
+#         if col not in df.columns:
+#             continue
+
+#         # Normalize
+#         if isinstance(filter_data, dict):
+#             values = filter_data.get("values", [])
+#             operator = filter_data.get("operator", "AND").upper()
+#         else:
+#             values = filter_data
+#             operator = "AND"
+
+#         if not values:
+#             continue
+
+#         # Date handling
+#         is_date_col = (
+#             pd.api.types.is_datetime64_any_dtype(df[col])
+#             or "date" in col.lower()
+#         )
+
+#         if is_date_col:
+#             temp_dates = pd.to_datetime(df[col], errors="coerce")
+#             sample_val = str(values[0])
+
+#             if sample_val.isdigit():  # YEAR
+#                 col_mask = temp_dates.dt.year.isin([int(v) for v in values])
+#             elif sample_val.startswith("Q"):  # QUARTER
+#                 col_mask = temp_dates.dt.quarter.isin(
+#                     [int(v.replace("Q", "")) for v in values]
+#                 )
+#             else:  # DATE STRING
+#                 col_mask = temp_dates.dt.strftime("%Y-%m-%d").isin(values)
+#         else:
+#             df[col] = df[col].astype(str).str.strip()
+#             values = [str(v).strip() for v in values]
+#             col_mask = df[col].isin(values)
+
+#         # 🔥 CORE LOGIC (THIS IS THE FIX)
+#         current_group_mask &= col_mask
+
+#         if operator == "OR":
+#             final_mask |= current_group_mask
+#             current_group_mask = pd.Series(True, index=df.index)
+
+#     # 🔥 ADD LAST GROUP
+#     final_mask |= current_group_mask
+
+#     return df[final_mask]
+# def apply_and_or_filters(df, filter_options):
+#     if not filter_options or not isinstance(filter_options, dict):
+#         return df
+
+#     and_mask = pd.Series(True, index=df.index)
+#     or_mask = pd.Series(False, index=df.index)
+#     has_or = False
+
+#     for col, filter_data in filter_options.items():
+#         if col not in df.columns:
+#             continue
+
+#         # Normalize
+#         if isinstance(filter_data, dict):
+#             values = filter_data.get("values", [])
+#             operator = filter_data.get("operator", "AND").upper()
+#         else:
+#             values = filter_data
+#             operator = "AND"
+
+#         if not values:
+#             continue
+
+#         # Date handling
+#         if pd.api.types.is_datetime64_any_dtype(df[col]) or "date" in col.lower():
+#             temp_dates = pd.to_datetime(df[col], errors="coerce")
+#             sample_val = str(values[0])
+
+#             if sample_val.isdigit():  # YEAR
+#                 col_mask = temp_dates.dt.year.isin([int(v) for v in values])
+#             elif sample_val.startswith("Q"):  # QUARTER
+#                 col_mask = temp_dates.dt.quarter.isin(
+#                     [int(v.replace("Q", "")) for v in values]
+#                 )
+#             else:  # FULL DATE
+#                 col_mask = temp_dates.dt.strftime("%Y-%m-%d").isin(values)
+#         else:
+#             df[col] = df[col].astype(str).str.strip()
+#             values = [str(v).strip() for v in values]
+#             col_mask = df[col].isin(values)
+
+#         # 🔥 SQL-ACCURATE LOGIC
+#         if operator == "OR":
+#             or_mask |= col_mask
+#             has_or = True
+#         else:
+#             and_mask &= col_mask
+
+#     # ✅ FINAL SQL-EQUIVALENT RESULT
+#     if has_or:
+#         return df[and_mask & or_mask]
+#     else:
+#         return df[and_mask]
+
+# def apply_and_or_filters(df, filter_options):
+#     if not filter_options or not isinstance(filter_options, dict):
+#         return df
+
+#     and_mask = pd.Series(True, index=df.index)
+#     or_mask = pd.Series(False, index=df.index)
+
+#     # Identify OR columns
+#     or_columns = [col for col, val in filter_options.items()
+#                   if isinstance(val, dict) and val.get("operator", "AND").upper() == "OR"]
+
+#     for col, val in filter_options.items():
+#         if col not in df.columns:
+#             continue
+
+#         # Normalize
+#         if isinstance(val, dict):
+#             values = val.get("values", [])
+#             operator = val.get("operator", "AND").upper()
+#         else:
+#             values = val
+#             operator = "AND"
+
+#         if not values:
+#             continue
+
+#         # Make string comparison
+#         df[col] = df[col].astype(str).str.strip()
+#         values = [str(v).strip() for v in values]
+#         mask = df[col].isin(values)
+
+#         if col in or_columns:
+#             or_mask |= mask
+#         else:
+#             and_mask &= mask
+
+#     final_mask = and_mask & (or_mask if or_mask.any() else pd.Series(True, index=df.index))
+#     return df[final_mask]
+# def apply_and_or_filters(df, filter_options):
+#     if not filter_options or not isinstance(filter_options, dict):
+#         return df
+
+#     and_mask = pd.Series(True, index=df.index)
+#     or_mask_list = []
+
+#     for col, val in filter_options.items():
+#         if col not in df.columns:
+#             continue
+
+#         # Normalize values and operator
+#         if isinstance(val, dict):
+#             values = val.get("values", [])
+#             operator = val.get("operator", "AND").upper()
+#         else:
+#             values = val
+#             operator = "AND"
+
+#         if not values:
+#             continue
+
+#         # Ensure string comparison
+#         df[col] = df[col].astype(str).str.strip()
+#         values = [str(v).strip() for v in values]
+#         mask = df[col].isin(values)
+
+#         if operator == "OR":
+#             or_mask_list.append(mask)
+#         else:
+#             and_mask &= mask
+
+#     # Combine OR masks
+#     if or_mask_list:
+#         combined_or_mask = pd.Series(False, index=df.index)
+#         for m in or_mask_list:
+#             combined_or_mask |= m
+#     else:
+#         combined_or_mask = pd.Series(True, index=df.index)
+
+#     final_mask = and_mask & combined_or_mask
+#     return df[final_mask]
+
+# def apply_and_or_filters(df, filter_options):
+#     if not filter_options or not isinstance(filter_options, dict):
+#         return df
+
+#     or_masks = []
+#     post_and_mask = pd.Series(True, index=df.index)
+
+#     for col, val in filter_options.items():
+#         if col not in df.columns:
+#             continue
+
+#         if isinstance(val, dict):
+#             values = val.get("values", [])
+#             operator = val.get("operator", "AND").upper()
+#         else:
+#             values = val
+#             operator = "AND"
+
+#         if not values:
+#             continue
+
+#         df[col] = df[col].astype(str).str.strip()
+#         values = [str(v).strip() for v in values]
+
+#         mask = df[col].isin(values)
+
+#         if operator == "OR":
+#             or_masks.append(mask)
+#         else:
+#             post_and_mask &= mask   # ← apply AFTER OR
+
+#     # Combine OR group
+#     if or_masks:
+#         or_mask = or_masks[0]
+#         for m in or_masks[1:]:
+#             or_mask |= m
+#     else:
+#         or_mask = pd.Series(True, index=df.index)
+
+#     final_mask = or_mask & post_and_mask
+#     return df[final_mask]
+
+def apply_and_or_filters(df: pd.DataFrame, filter_options: dict) -> pd.DataFrame:
+    """
+    Apply AND/OR filters on a DataFrame.
+
+    Args:
+        df (pd.DataFrame): The input DataFrame to filter.
+        filter_options (dict): Dictionary of filters.
+            Example:
+            {
+                'country': ['Albania', 'India'],                  # AND group
+                'region': {'values': ['Asia'], 'operator': 'OR'}, # OR group
+                'product': {'values': ['Debit card'], 'operator': 'AND'}
+            }
+
+    Returns:
+        pd.DataFrame: Filtered DataFrame.
+    """
+    if not filter_options or not isinstance(filter_options, dict):
+        return df
+
+    print("filter_options:", filter_options)
+
+    # Initialize masks
+    and_mask = pd.Series(True, index=df.index)
+    or_mask = pd.Series(False, index=df.index)
+
+    # Detect if ANY OR exists
+    has_or = any(
+        isinstance(v, dict) and v.get("operator", "").upper() == "OR"
+        for v in filter_options.values()
+    )
+
+    for col, filter_data in filter_options.items():
+        if col not in df.columns:
+            continue
+
+        # Normalize filter_data
+        if isinstance(filter_data, dict):
+            values = filter_data.get("values", [])
+            operator = filter_data.get("operator", "AND").upper()
+        else:
+            values = filter_data
+            operator = "AND"
+
+        if not values:
+            continue
+
+        # Build column mask
+        if pd.api.types.is_datetime64_any_dtype(df[col]) or "date" in col.lower():
+            temp_dates = pd.to_datetime(df[col], errors="coerce")
+            sample_val = str(values[0])
+
+            if sample_val.isdigit():
+                col_mask = temp_dates.dt.year.isin([int(v) for v in values])
+            elif sample_val.startswith("Q"):
+                col_mask = temp_dates.dt.quarter.isin(
+                    [int(v.replace("Q", "")) for v in values]
+                )
+            else:
+                col_mask = temp_dates.dt.strftime("%Y-%m-%d").isin(values)
+        else:
+            col_mask = df[col].astype(str).isin(map(str, values))
+
+        # ✅ AUTO GROUPING: OR group if any OR exists and column is not 'country'
+        if has_or and operator in ("AND", "OR") and col != "country":
+            or_mask |= col_mask
+        else:
+            and_mask &= col_mask
+
+    # ✅ FINAL MASK APPLICATION
+    if has_or:
+        df_filtered = df[or_mask & and_mask]
+    else:
+        df_filtered = df[and_mask]
+
+    print("df after filter:", df_filtered)
+    return df_filtered
 
 def fetch_data_tree(table_name, x_axis_columns, filter_options, y_axis_column, aggregation, db_name, selectedUser,calculationData):
     import pandas as pd
@@ -1450,6 +1943,7 @@ def fetch_data_tree(table_name, x_axis_columns, filter_options, y_axis_column, a
     print("y_axis_column:", y_axis_column)
     print("aggregation:", aggregation)
     print("filter_options:", filter_options)
+    
 
     try:
         if isinstance(filter_options, str):
@@ -1519,7 +2013,20 @@ def fetch_data_tree(table_name, x_axis_columns, filter_options, y_axis_column, a
 
                     # Handle "if (...) then ... else ..." expressions
                     if calc_formula.strip().lower().startswith("if"):
-                        match = re.match(r"if\s*\((.+?)\)\s*then\s*'?(.*?)'?\s*else\s*'?(.*?)'?$", calc_formula.strip(), re.IGNORECASE)
+                        match = (
+                            re.match(
+                                r"if\s*\(\s*(.+?)\s*\)\s*then\s*'?(.*?)'?\s*else\s*'?(.*?)'?$",
+                                calc_formula.strip(),
+                                re.IGNORECASE
+                            )
+                            or
+                            re.match(
+                                r"if\s*\(\s*(.+?)\s*,\s*'?(.*?)'?\s*,\s*'?(.*?)'?\s*\)$",
+                                calc_formula.strip(),
+                                re.IGNORECASE
+                            )
+                        )
+                        # match = re.match(r"if\s*\((.+?)\)\s*then\s*'?(.*?)'?\s*else\s*'?(.*?)'?$", calc_formula.strip(), re.IGNORECASE)
                         if not match:
                             raise ValueError("Invalid if-then-else format in calculation.")
 
@@ -1796,11 +2303,11 @@ def fetch_data_tree(table_name, x_axis_columns, filter_options, y_axis_column, a
         #     if col in temp_df.columns:
         #         temp_df[col] = temp_df[col].astype(str)
         #         temp_df = temp_df[temp_df[col].isin(filters)]
-        for col, filters in filter_options.items():
-            if col in temp_df.columns:
-                temp_df[col] = temp_df[col].astype(str)
-                filters = list(map(str, filters))  # <-- convert filter values to string too
-                temp_df = temp_df[temp_df[col].isin(filters)]
+        # for col, filters in filter_options.items():
+        #     if col in temp_df.columns:
+        #         temp_df[col] = temp_df[col].astype(str)
+        #         filters = list(map(str, filters))  # <-- convert filter values to string too
+        #         temp_df = temp_df[temp_df[col].isin(filters)]
 
         # for col, filters in filter_options.items():
         #     if col in temp_df.columns:
@@ -1812,17 +2319,21 @@ def fetch_data_tree(table_name, x_axis_columns, filter_options, y_axis_column, a
             if col in temp_df.columns:
                 temp_df[col] = temp_df[col].astype(str)
 
-        options = []
-        for col in x_axis_columns:
-            if col in filter_options:
-                options.extend(filter_options[col])
-        options = list(map(str, options))
+        # options = []
+        # for col in x_axis_columns:
+        #     if col in filter_options:
+        #         options.extend(filter_options[col])
+        # options = list(map(str, options))
+        # Apply AND / OR filters
+        filtered_df = apply_and_or_filters(temp_df, filter_options)
+        print("filter_options:", filter_options,"filtered_df",filtered_df)
 
-        filtered_df = temp_df[temp_df[x_axis_columns[0]].isin(options)]
-        if options:
-            filtered_df = temp_df[temp_df[x_axis_columns[0]].isin(options)]
-        else:
-            filtered_df = temp_df
+
+        # filtered_df = temp_df[temp_df[x_axis_columns[0]].isin(options)]
+        # if options:
+        #     filtered_df = temp_df[temp_df[x_axis_columns[0]].isin(options)]
+        # else:
+        # filtered_df = temp_df
 
         if y_axis_column and aggregation and y_axis_column[0] in filtered_df.columns:
             if aggregation.lower() == "sum":
@@ -2107,62 +2618,217 @@ def fetch_data_for_duel(
                 raise ValueError(f"Unsupported date granularity: {gran}")
 
         # ---------------------- FILTER CLAUSE ----------------------
+        # filter_clause = ""
+        # if filter_options:
+        #     where_clauses = []
+
+        #     for col, filters in filter_options.items():
+        #         if not filters:
+        #             continue
+
+        #         valid_filters = [f for f in filters if f is not None]
+        #         if not valid_filters:
+        #             continue
+
+        #         filters_str = ", ".join(["'{}'".format(str(f).replace("'", "''")) for f in valid_filters])
+
+        #         matched_calc = next(
+        #             (calc for calc in (calculationData or []) if calc.get("columnName") == col and calc.get("calculation")),
+        #             None
+        #         )
+
+        #         if matched_calc:
+        #             formula_sql = convert_calculation_to_sql(
+        #                 matched_calc["calculation"].strip(),
+        #                 dataframe_columns=global_df.columns.tolist()
+        #             )
+        #             where_clauses.append(f"({formula_sql}) IN ({filters_str})")
+
+        #         # elif col in global_df.columns:
+        #         #     where_clauses.append(f"\"{col}\" IN ({filters_str})")
+        #         elif col in global_df.columns:
+
+        #             # 🔥 If date granularity applied, filter on alias — NOT original column
+        #             if dateGranularity and col in dateGranularity:
+        #                 gran = dateGranularity[col].lower()
+        #                 alias = f"{col}_{gran}"
+
+        #                 if gran == "year":
+        #                     where_clauses.append(f"EXTRACT(YEAR FROM \"{col}\")::text IN ({filters_str})")
+
+        #                 elif gran == "quarter":
+        #                     where_clauses.append(f"'Q' || EXTRACT(QUARTER FROM \"{col}\") IN ({filters_str})")
+
+        #                 elif gran == "month":
+        #                     where_clauses.append(f"TO_CHAR(\"{col}\", 'Month') IN ({filters_str})")
+
+        #                 elif gran == "week":
+        #                     where_clauses.append(f"'Week ' || EXTRACT(WEEK FROM \"{col}\") IN ({filters_str})")
+
+        #                 elif gran == "day":
+        #                     where_clauses.append(f"\"{col}\"::date IN ({filters_str})")
+
+        #             else:
+        #                 where_clauses.append(f"\"{col}\" IN ({filters_str})")
+
+
+        #     if where_clauses:
+        #         filter_clause = "WHERE " + " AND ".join(where_clauses)
+        # ---------------------- FILTER CLAUSE ----------------------
+        # filter_clause = ""
+        # if filter_options:
+        #     where_and = []
+        #     where_or = []
+
+        #     for col, data in filter_options.items():
+        #         if col not in global_df.columns:
+        #             continue
+
+        #         # 🔹 Normalize input
+        #         if isinstance(data, dict):
+        #             values = data.get("values", [])
+        #             operator = data.get("operator", "AND").upper()
+        #         else:
+        #             values = data
+        #             operator = "AND"
+
+        #         if not values:
+        #             continue
+
+        #         # SQL-safe values
+        #         filters_str = ", ".join(["'{}'".format(str(f).replace("'", "''")) for f in values])
+
+        #         # filters_str = ", ".join(
+        #         #     f"'{str(v).replace(\"'\", \"''\")}'" for v in values
+        #         # )
+
+        #         # 🔹 Check calculated column
+        #         matched_calc = next(
+        #             (calc for calc in (calculationData or [])
+        #             if calc.get("columnName") == col and calc.get("calculation")),
+        #             None
+        #         )
+
+        #         # 🔹 Build condition
+        #         if matched_calc:
+        #             formula_sql = convert_calculation_to_sql(
+        #                 matched_calc["calculation"].strip(),
+        #                 dataframe_columns=global_df.columns.tolist()
+        #             )
+        #             condition = f"({formula_sql}) IN ({filters_str})"
+
+        #         else:
+        #             # 🔹 Date granularity support
+        #             if dateGranularity and col in dateGranularity:
+        #                 gran = dateGranularity[col].lower()
+
+        #                 if gran == "year":
+        #                     condition = f"EXTRACT(YEAR FROM \"{col}\")::text IN ({filters_str})"
+        #                 elif gran == "quarter":
+        #                     condition = f"'Q' || EXTRACT(QUARTER FROM \"{col}\") IN ({filters_str})"
+        #                 elif gran == "month":
+        #                     condition = f"TO_CHAR(\"{col}\", 'Month') IN ({filters_str})"
+        #                 elif gran == "week":
+        #                     condition = f"'Week ' || EXTRACT(WEEK FROM \"{col}\") IN ({filters_str})"
+        #                 elif gran == "day":
+        #                     condition = f"\"{col}\"::date IN ({filters_str})"
+        #                 else:
+        #                     continue
+        #             else:
+        #                 condition = f"\"{col}\" IN ({filters_str})"
+
+        #         # 🔹 Push to AND / OR bucket
+        #         if operator == "OR":
+        #             where_or.append(condition)
+        #         else:
+        #             where_and.append(condition)
+
+        #     # 🔹 Final WHERE clause
+        #     if where_and and where_or:
+        #         filter_clause = (
+        #             "WHERE " + " AND ".join(where_and)
+        #             + " AND (" + " OR ".join(where_or) + ")"
+        #         )
+        #     elif where_or:
+        #         filter_clause = "WHERE " + " OR ".join(where_or)
+        #     elif where_and:
+        #         filter_clause = "WHERE " + " AND ".join(where_and)
         filter_clause = ""
+
         if filter_options:
-            where_clauses = []
+            and_groups = []          # stores completed AND groups
+            current_group = []       # current AND group
 
-            for col, filters in filter_options.items():
-                if not filters:
+            for col, data in filter_options.items():
+                if col not in global_df.columns:
                     continue
 
-                valid_filters = [f for f in filters if f is not None]
-                if not valid_filters:
+                # 🔹 Normalize input
+                if isinstance(data, dict):
+                    values = data.get("values", [])
+                    operator = data.get("operator", "AND").upper()
+                else:
+                    values = data
+                    operator = "AND"
+
+                if not values:
                     continue
 
-                filters_str = ", ".join(["'{}'".format(str(f).replace("'", "''")) for f in valid_filters])
+                # 🔹 SQL-safe values
+                filters_str = ", ".join(["'{}'".format(str(f).replace("'", "''")) for f in values])
 
+                # 🔹 Check calculated column
                 matched_calc = next(
-                    (calc for calc in (calculationData or []) if calc.get("columnName") == col and calc.get("calculation")),
+                    (
+                        calc for calc in (calculationData or [])
+                        if calc.get("columnName") == col and calc.get("calculation")
+                    ),
                     None
                 )
 
+                # 🔹 Build condition
                 if matched_calc:
                     formula_sql = convert_calculation_to_sql(
                         matched_calc["calculation"].strip(),
                         dataframe_columns=global_df.columns.tolist()
                     )
-                    where_clauses.append(f"({formula_sql}) IN ({filters_str})")
-
-                # elif col in global_df.columns:
-                #     where_clauses.append(f"\"{col}\" IN ({filters_str})")
-                elif col in global_df.columns:
-
-                    # 🔥 If date granularity applied, filter on alias — NOT original column
+                    condition = f"({formula_sql}) IN ({filters_str})"
+                else:
                     if dateGranularity and col in dateGranularity:
                         gran = dateGranularity[col].lower()
-                        alias = f"{col}_{gran}"
 
                         if gran == "year":
-                            where_clauses.append(f"EXTRACT(YEAR FROM \"{col}\")::text IN ({filters_str})")
-
+                            condition = f"EXTRACT(YEAR FROM \"{col}\")::text IN ({filters_str})"
                         elif gran == "quarter":
-                            where_clauses.append(f"'Q' || EXTRACT(QUARTER FROM \"{col}\") IN ({filters_str})")
-
+                            condition = f"'Q' || EXTRACT(QUARTER FROM \"{col}\") IN ({filters_str})"
                         elif gran == "month":
-                            where_clauses.append(f"TO_CHAR(\"{col}\", 'Month') IN ({filters_str})")
-
+                            condition = f"TO_CHAR(\"{col}\", 'Month') IN ({filters_str})"
                         elif gran == "week":
-                            where_clauses.append(f"'Week ' || EXTRACT(WEEK FROM \"{col}\") IN ({filters_str})")
-
+                            condition = f"'Week ' || EXTRACT(WEEK FROM \"{col}\") IN ({filters_str})"
                         elif gran == "day":
-                            where_clauses.append(f"\"{col}\"::date IN ({filters_str})")
-
+                            condition = f"\"{col}\"::date IN ({filters_str})"
+                        else:
+                            continue
                     else:
-                        where_clauses.append(f"\"{col}\" IN ({filters_str})")
+                        condition = f"\"{col}\" IN ({filters_str})"
+
+                # 🔥 ADD to current AND group
+                current_group.append(condition)
+
+                # 🔥 CLOSE GROUP on OR
+                if operator == "OR":
+                    and_groups.append("(" + " AND ".join(current_group) + ")")
+                    current_group = []
+
+            # 🔥 ADD LAST GROUP
+            if current_group:
+                and_groups.append("(" + " AND ".join(current_group) + ")")
+
+            # 🔥 FINAL WHERE
+            if and_groups:
+                filter_clause = "WHERE " + " OR ".join(and_groups)
 
 
-            if where_clauses:
-                filter_clause = "WHERE " + " AND ".join(where_clauses)
 
         # ---------------------- AGGREGATION ----------------------
         # agg_func = {
@@ -2230,14 +2896,34 @@ def fetch_data_for_duel(
                 "sum": "SUM",
                 "average": "AVG",
                 "count": "COUNT",
+                "distinct count": "COUNT(DISTINCT)",
                 "maximum": "MAX",
                 "minimum": "MIN"
             }.get(selected_agg, "SUM")
 
             # detect datatype based on sample row
-            cur.execute(f'SELECT "{y_col}" FROM {table_name} LIMIT 1')
-            sample_value = cur.fetchone()[0]
-            is_numeric = True
+            if y_col not in global_df.columns:
+                matched_calc = next(
+                    (calc for calc in (calculationData or []) if calc.get("columnName") == y_col and calc.get("calculation")),
+                    None
+                )
+                if matched_calc:
+                    # OK, it’s a calculated column — skip direct SELECT
+                    sample_value = 0  # dummy, will cast to numeric later
+                    is_numeric = True
+                else:
+                    raise ValueError(f"Column '{y_col}' does not exist in table '{table_name}'")
+            else:
+                cur.execute(f'SELECT "{y_col}" FROM {table_name} LIMIT 1')
+                sample_value = cur.fetchone()[0]
+                is_numeric = True
+                try:
+                    float(sample_value)
+                except Exception:
+                    is_numeric = False
+            # cur.execute(f'SELECT "{y_col}" FROM {table_name} LIMIT 1')
+            # sample_value = cur.fetchone()[0]
+            # is_numeric = True
             try:
                 float(sample_value)
             except Exception:
@@ -2248,6 +2934,7 @@ def fetch_data_for_duel(
                 None
             )
 
+
             if matched_calc:
                 formula_sql = convert_calculation_to_sql(
                     matched_calc["calculation"].strip(),
@@ -2255,19 +2942,52 @@ def fetch_data_for_duel(
                 )
                 alias = f"{y_col}_calculated"
 
+                # If formula already contains aggregation
                 if re.search(r"\b(SUM|AVG|COUNT|MAX|MIN)\b", formula_sql, re.IGNORECASE):
                     select_exprs.append(f"{formula_sql} AS \"{alias}\"")
                 else:
-                    if is_numeric:
+                    # DISTINCT COUNT for calculated column
+                    # if agg_func.lower() == "count_distinct":
+                    #     select_exprs.append(f"COUNT(DISTINCT ({formula_sql})) AS \"{alias}\"")
+                    if selected_agg == "distinct count":
+                        select_exprs.append(f"COUNT(DISTINCT ({formula_sql})::numeric) AS \"{alias}\"")
+
+                    elif is_numeric:
                         select_exprs.append(f"{agg_func}(({formula_sql})::numeric) AS \"{alias}\"")
                     else:
                         select_exprs.append(f"COUNT(({formula_sql})) AS \"{alias}\"")
 
             else:
-                if is_numeric:
+                # DISTINCT COUNT for normal column
+                if selected_agg == "distinct count":
+                     select_exprs.append(f"COUNT(DISTINCT \"{y_col}\"::numeric) AS \"{y_col}\"")
+
+                elif is_numeric:
                     select_exprs.append(f"{agg_func}(\"{y_col}\"::numeric) AS \"{y_col}\"")
                 else:
                     select_exprs.append(f"COUNT(\"{y_col}\") AS \"{y_col}\"")
+
+
+            # if matched_calc:
+            #     formula_sql = convert_calculation_to_sql(
+            #         matched_calc["calculation"].strip(),
+            #         dataframe_columns=global_df.columns.tolist()
+            #     )
+            #     alias = f"{y_col}_calculated"
+
+            #     if re.search(r"\b(SUM|AVG|COUNT|MAX|MIN)\b", formula_sql, re.IGNORECASE):
+            #         select_exprs.append(f"{formula_sql} AS \"{alias}\"")
+            #     else:
+            #         if is_numeric:
+            #             select_exprs.append(f"{agg_func}(({formula_sql})::numeric) AS \"{alias}\"")
+            #         else:
+            #             select_exprs.append(f"COUNT(({formula_sql})) AS \"{alias}\"")
+
+            # else:
+            #     if is_numeric:
+            #         select_exprs.append(f"{agg_func}(\"{y_col}\"::numeric) AS \"{y_col}\"")
+            #     else:
+            #         select_exprs.append(f"COUNT(\"{y_col}\") AS \"{y_col}\"")
 
         # ---------------------- FINAL QUERY ----------------------
         query = f"""
@@ -2363,10 +3083,22 @@ def convert_calculation_to_sql(formula: str, dataframe_columns=None) -> str:
     #     condition_expr = condition_expr.replace("==","=")
     #     return f"(CASE WHEN {condition_expr} THEN '{then_val}' ELSE '{else_val}' END)"
 
-    match = re.match(
-        r"if\s*\(\s*(.+?)\s*\)\s*then\s*['\"]?(.*?)['\"]?\s*else\s*['\"]?(.*?)['\"]?$",
-        formula, re.IGNORECASE
+    # match = re.match(
+    #     r"if\s*\(\s*(.+?)\s*\)\s*then\s*['\"]?(.*?)['\"]?\s*else\s*['\"]?(.*?)['\"]?$",
+    #     formula, re.IGNORECASE
+    # )
+    match = (
+        re.match(
+            r"if\s*\(\s*(.+?)\s*\)\s*then\s*['\"]?(.*?)['\"]?\s*else\s*['\"]?(.*?)['\"]?$",
+            formula, re.IGNORECASE
+        )
+        or
+        re.match(
+            r"if\s*\(\s*(.+?)\s*,\s*['\"]?(.*?)['\"]?\s*,\s*['\"]?(.*?)['\"]?\s*\)$",
+            formula, re.IGNORECASE
+        )
     )
+
     if match:
         condition_expr, then_val, else_val = match.groups()
 
@@ -2594,6 +3326,13 @@ def convert_calculation_to_sql(formula: str, dataframe_columns=None) -> str:
     if match := re.match(r'trim\s*\(\s*\[([^\]]+)\]\s*\)', formula, re.IGNORECASE):
         col = match.group(1)
         return f"TRIM(\"{col}\")"
+    if match := re.match(r'(sum|avg|min|max)\s*\(\s*\[([^\]]+)\]\s*\)', formula, re.IGNORECASE):
+        agg_func, col = match.groups()
+        agg_func = agg_func.lower()
+        # Instead of returning a new column placeholder, return the **base column**
+        # The aggregation will be applied later
+        print(f"Detected aggregation formula: {agg_func}([{col}]) → using base column '{col}'")
+        return col  # <- key fix: return the real column name
 
 
 
@@ -2794,7 +3533,8 @@ def fetch_data_for_duel_bar(
         "average": "AVG",
         "count": "COUNT",
         "maximum": "MAX",
-        "minimum": "MIN"
+        "minimum": "MIN",
+        "distinct count": "distinct count"
     }.get(aggregation.lower())
 
     if not agg_func:
@@ -2820,54 +3560,129 @@ def fetch_data_for_duel_bar(
 
     # ------------------------- WHERE FILTERS -------------------------
     filter_clause = ""
+
     if filter_options:
-        where_clauses = []
+        and_groups = []          # stores completed AND groups
+        current_group = []       # current AND group
 
-        for col, filters in filter_options.items():
+        for col, data in filter_options.items():
+            if col not in global_df.columns:
+                continue
 
+                # 🔹 Normalize input
+            if isinstance(data, dict):
+                values = data.get("values", [])
+                operator = data.get("operator", "AND").upper()
+            else:
+                values = data
+                operator = "AND"
+
+            if not values:
+                continue
+
+                # 🔹 SQL-safe values
+            filters_str = ", ".join(["'{}'".format(str(f).replace("'", "''")) for f in values])
+
+                # 🔹 Check calculated column
             matched_calc = next(
-                (calc for calc in (calculationData or []) if calc.get("columnName") == col and calc.get("calculation")),
+                (
+                    calc for calc in (calculationData or [])
+                    if calc.get("columnName") == col and calc.get("calculation")
+                ),
                 None
             )
 
-            valid_filters = [f for f in filters if f is not None]
-            filters_str = ", ".join("'" + str(v).replace("'", "''") + "'" for v in valid_filters)
-
+                # 🔹 Build condition
             if matched_calc:
-                fsql = convert_calculation_to_sql(
+                formula_sql = convert_calculation_to_sql(
                     matched_calc["calculation"].strip(),
                     dataframe_columns=global_df.columns.tolist()
                 )
-                where_clauses.append(f"({fsql}) IN ({filters_str})")
-
-            elif col in global_df.columns:
-            #     where_clauses.append(f"\"{col}\" IN ({filters_str})")
-                            # 🔥 If date granularity applied, filter on alias — NOT original column
+                condition = f"({formula_sql}) IN ({filters_str})"
+            else:
                 if dateGranularity and col in dateGranularity:
                     gran = dateGranularity[col].lower()
-                    alias = f"{col}_{gran}"
 
                     if gran == "year":
-                        where_clauses.append(f"EXTRACT(YEAR FROM \"{col}\")::text IN ({filters_str})")
-
+                        condition = f"EXTRACT(YEAR FROM \"{col}\")::text IN ({filters_str})"
                     elif gran == "quarter":
-                        where_clauses.append(f"'Q' || EXTRACT(QUARTER FROM \"{col}\") IN ({filters_str})")
-
+                        condition = f"'Q' || EXTRACT(QUARTER FROM \"{col}\") IN ({filters_str})"
                     elif gran == "month":
-                        where_clauses.append(f"TO_CHAR(\"{col}\", 'Month') IN ({filters_str})")
-
+                        condition = f"TO_CHAR(\"{col}\", 'Month') IN ({filters_str})"
                     elif gran == "week":
-                        where_clauses.append(f"'Week ' || EXTRACT(WEEK FROM \"{col}\") IN ({filters_str})")
-
+                        condition = f"'Week ' || EXTRACT(WEEK FROM \"{col}\") IN ({filters_str})"
                     elif gran == "day":
-                        where_clauses.append(f"\"{col}\"::date IN ({filters_str})")
-
+                        condition = f"\"{col}\"::date IN ({filters_str})"
+                    else:
+                        continue
                 else:
-                    where_clauses.append(f"\"{col}\" IN ({filters_str})")
+                    condition = f"\"{col}\" IN ({filters_str})"
+
+                # 🔥 ADD to current AND group
+            current_group.append(condition)
+
+                # 🔥 CLOSE GROUP on OR
+            if operator == "OR":
+                and_groups.append("(" + " AND ".join(current_group) + ")")
+                current_group = []
+
+            # 🔥 ADD LAST GROUP
+        if current_group:
+            and_groups.append("(" + " AND ".join(current_group) + ")")
+
+            # 🔥 FINAL WHERE
+        if and_groups:
+            filter_clause = "WHERE " + " OR ".join(and_groups)
+
+    # filter_clause = ""
+    # if filter_options:
+    #     where_clauses = []
+
+    #     for col, filters in filter_options.items():
+
+    #         matched_calc = next(
+    #             (calc for calc in (calculationData or []) if calc.get("columnName") == col and calc.get("calculation")),
+    #             None
+    #         )
+
+    #         valid_filters = [f for f in filters if f is not None]
+    #         filters_str = ", ".join("'" + str(v).replace("'", "''") + "'" for v in valid_filters)
+
+    #         if matched_calc:
+    #             fsql = convert_calculation_to_sql(
+    #                 matched_calc["calculation"].strip(),
+    #                 dataframe_columns=global_df.columns.tolist()
+    #             )
+    #             where_clauses.append(f"({fsql}) IN ({filters_str})")
+
+    #         elif col in global_df.columns:
+    #         #     where_clauses.append(f"\"{col}\" IN ({filters_str})")
+    #                         # 🔥 If date granularity applied, filter on alias — NOT original column
+    #             if dateGranularity and col in dateGranularity:
+    #                 gran = dateGranularity[col].lower()
+    #                 alias = f"{col}_{gran}"
+
+    #                 if gran == "year":
+    #                     where_clauses.append(f"EXTRACT(YEAR FROM \"{col}\")::text IN ({filters_str})")
+
+    #                 elif gran == "quarter":
+    #                     where_clauses.append(f"'Q' || EXTRACT(QUARTER FROM \"{col}\") IN ({filters_str})")
+
+    #                 elif gran == "month":
+    #                     where_clauses.append(f"TO_CHAR(\"{col}\", 'Month') IN ({filters_str})")
+
+    #                 elif gran == "week":
+    #                     where_clauses.append(f"'Week ' || EXTRACT(WEEK FROM \"{col}\") IN ({filters_str})")
+
+    #                 elif gran == "day":
+    #                     where_clauses.append(f"\"{col}\"::date IN ({filters_str})")
+
+    #             else:
+    #                 where_clauses.append(f"\"{col}\" IN ({filters_str})")
 
 
-        if where_clauses:
-            filter_clause = "WHERE " + " AND ".join(where_clauses)
+    #     if where_clauses:
+    #         filter_clause = "WHERE " + " AND ".join(where_clauses)
 
     # ------------------------- Y-AXIS EXPRESSIONS -------------------------
     y_axis_exprs = []
@@ -2879,9 +3694,28 @@ def fetch_data_for_duel_bar(
         )
 
         # Detect numeric values
-        cur.execute(f'SELECT "{y_col}" FROM {table_name} LIMIT 1')
-        sample_value = cur.fetchone()[0]
-        is_numeric = True
+        # cur.execute(f'SELECT "{y_col}" FROM {table_name} LIMIT 1')
+        # sample_value = cur.fetchone()[0]
+        # is_numeric = True
+        if y_col not in global_df.columns:
+            matched_calc = next(
+                (calc for calc in (calculationData or []) if calc.get("columnName") == y_col and calc.get("calculation")),
+                None
+            )
+            if matched_calc:
+                # OK, it’s a calculated column — skip direct SELECT
+                sample_value = 0  # dummy, will cast to numeric later
+                is_numeric = True
+            else:
+                raise ValueError(f"Column '{y_col}' does not exist in table '{table_name}'")
+        else:
+            cur.execute(f'SELECT "{y_col}" FROM {table_name} LIMIT 1')
+            sample_value = cur.fetchone()[0]
+            is_numeric = True
+            try:
+                float(sample_value)
+            except Exception:
+                is_numeric = False
         try:
             float(sample_value)
         except:
@@ -2898,13 +3732,17 @@ def fetch_data_for_duel_bar(
             if re.search(r"\b(SUM|AVG|COUNT|MAX|MIN)\b", formula_sql, re.IGNORECASE):
                 y_axis_exprs.append(f"{formula_sql} AS \"{alias}\"")
             else:
-                if is_numeric:
+                if agg_func == "distinct count":
+                    y_axis_exprs.append(f"COUNT(DISTINCT ({formula_sql})::numeric) AS \"{alias}\"")
+                elif is_numeric:
                     y_axis_exprs.append(f"{agg_func}(({formula_sql})::numeric) AS \"{alias}\"")
                 else:
                     y_axis_exprs.append(f"COUNT(({formula_sql})) AS \"{alias}\"")
 
         else:
-            if is_numeric:
+            if agg_func == "distinct count":
+                y_axis_exprs.append(f"COUNT(DISTINCT \"{y_col}\"::numeric) AS \"{y_col}\"")
+            elif is_numeric:
                 y_axis_exprs.append(f"{agg_func}(\"{y_col}\"::numeric) AS \"{y_col}\"")
             else:
                 y_axis_exprs.append(f"COUNT(\"{y_col}\") AS \"{y_col}\"")
@@ -3331,11 +4169,34 @@ import pandas as pd
 def perform_calculation(dataframe, columnName, calculation):
     global global_df
     calculation = calculation.strip()
+    def replace_columns(expr):
+        columns = re.findall(r'\[([^\]]+)\]', expr)
+        for col in columns:
+            if col not in dataframe.columns:
+                raise ValueError(f"Missing column: {col}")
+            # Force numeric conversion if possible
+            dataframe[col] = pd.to_numeric(dataframe[col], errors='coerce')
+            expr = expr.replace(f"[{col}]", f'dataframe["{col}"]')
+        return expr
+
 
     # ========== 1. IF condition ==========
    
-    pattern_if = r"if\s*\(\s*(.+?)\s*\)\s*then\s*['\"]?(.*?)['\"]?\s*else\s*['\"]?(.*?)['\"]?$"
-    match = re.match(pattern_if, calculation, re.IGNORECASE)
+    pattern_then_else = (
+        r"if\s*\(\s*(.+?)\s*\)\s*then\s*['\"]?(.*?)['\"]?\s*else\s*['\"]?(.*?)['\"]?$"
+    )
+
+    # Pattern 2: if(condition, a, b)
+    pattern_comma = (
+        r"if\s*\(\s*(.+?)\s*,\s*['\"]?(.*?)['\"]?\s*,\s*['\"]?(.*?)['\"]?\s*\)$"
+    )
+
+    match = (
+        re.match(pattern_then_else, calculation, re.IGNORECASE)
+        or re.match(pattern_comma, calculation, re.IGNORECASE)
+    )
+    # pattern_if = r"if\s*\(\s*(.+?)\s*\)\s*then\s*['\"]?(.*?)['\"]?\s*else\s*['\"]?(.*?)['\"]?$"
+    # match = re.match(pattern_if, calculation, re.IGNORECASE)
     if match:
         condition_expr, then_val, else_val = match.groups()
         print("Eval condition string:", condition_expr)
@@ -3524,12 +4385,32 @@ def perform_calculation(dataframe, columnName, calculation):
         return dataframe
 
     # ========== 10. ROUND ==========
-    round_match = re.match(r'round\s*\(\s*\[([^\]]+)\]\s*,\s*(\d+)\s*\)', calculation, re.IGNORECASE)
+    # round_match = re.match(r'round\s*\(\s*\[([^\]]+)\]\s*,\s*(\d+)\s*\)', calculation, re.IGNORECASE)
+    # if round_match:
+    #     col, decimals = round_match.groups()
+    #     if col not in dataframe.columns:
+    #         raise ValueError(f"Missing column: {col}")
+    #     dataframe[columnName] = dataframe[col].round(int(decimals))
+    #     global_df = dataframe
+    #     return dataframe
+
+    round_match = re.match(r'round\s*\(\s*(.+?)\s*,\s*(\d+)\s*\)', calculation, re.IGNORECASE)
     if round_match:
-        col, decimals = round_match.groups()
-        if col not in dataframe.columns:
-            raise ValueError(f"Missing column: {col}")
-        dataframe[columnName] = dataframe[col].round(int(decimals))
+        expr, decimals = round_match.groups()
+
+        # Replace [column] with numeric dataframe references
+        def replace_column(match):
+            col_name = match.group(1)
+            if col_name not in dataframe.columns:
+                raise ValueError(f"Missing column: {col_name}")
+            # Convert to numeric (errors='coerce' will turn non-numeric to NaN)
+            dataframe[col_name] = pd.to_numeric(dataframe[col_name], errors='coerce')
+            return f"dataframe['{col_name}']"
+
+        expr_python = re.sub(r'\[([^\]]+)\]', replace_column, expr)
+
+        # Evaluate expression
+        dataframe[columnName] = eval(expr_python).round(int(decimals))
         global_df = dataframe
         return dataframe
 
@@ -3707,25 +4588,205 @@ def perform_calculation(dataframe, columnName, calculation):
 
         except Exception as e:
             raise ValueError(f"Error in extended IF-ELSEIF expression: {str(e)}")
+    # ===== CASE WHEN =====
+    # ===== CASE WHEN =====
+    case_pattern = r'case\s+(when.+?)\s+else\s+(.+?)\s+end'
+    case_match = re.match(case_pattern, calculation, re.IGNORECASE | re.DOTALL)
+    if case_match:
+        when_part, else_val = case_match.groups()
+        else_val = else_val.strip()
+        try:
+            # Initialize empty Series
+            result = pd.Series([np.nan] * len(dataframe))
+
+            # Split all WHEN ... THEN ... clauses
+            when_clauses = re.findall(r'when\s+(.+?)\s+then\s+(.+?)(?=when|$)', when_part, re.IGNORECASE | re.DOTALL)
+
+            for condition, then_val in when_clauses:
+                # Replace [columns] with dataframe references
+                condition_expr = replace_columns(condition.strip())
+                then_val_expr = replace_columns(then_val.strip())
+
+                # Evaluate condition
+                mask = pd.eval(condition_expr, engine='python')
+
+                # Evaluate THEN value if possible
+                try:
+                    then_val_eval = pd.eval(then_val_expr, engine='python')
+                except:
+                    then_val_eval = then_val.strip()
+
+                # Assign values safely using pandas indexing
+                result.loc[mask] = then_val_eval
+
+            # ELSE value
+            else_val_expr = replace_columns(else_val)
+            try:
+                else_val_eval = pd.eval(else_val_expr, engine='python')
+            except:
+                else_val_eval = else_val
+
+            # Fill remaining NaNs with ELSE
+            result.fillna(else_val_eval, inplace=True)
+
+            # Force numeric if possible
+            dataframe[columnName] = pd.to_numeric(result, errors='coerce').replace([np.inf, -np.inf], np.nan).fillna(0)
+            global_df = dataframe
+            return dataframe
+
+        except Exception as e:
+            raise ValueError(f"Error evaluating CASE WHEN: {str(e)}")
+
+    # ===== Extended IF-ELSEIF-ELSE =====
+    extended_if_match = re.match(
+        r'^if\s*\((.*?)\)\s*then\s*(.*?)((?:\s*else\s*if\s*\(.*?\)\s*then\s*.*?)*)(?:\s*else\s*(.*?))?\s*end\s*$',
+        calculation,
+        re.IGNORECASE | re.DOTALL
+    )
+
+    if extended_if_match:
+        try:
+            result = pd.Series([np.nan] * len(dataframe))
+            conditions = []
+            then_values = []
+
+            # First IF
+            conditions.append(extended_if_match.group(1).strip())
+            then_values.append(extended_if_match.group(2).strip())
+
+            # ELSE IF blocks
+            elseif_part = extended_if_match.group(3)
+            if elseif_part:
+                elseif_matches = re.findall(r'else\s*if\s*\((.*?)\)\s*then\s*(.*?)($|\s*else)', elseif_part, re.IGNORECASE | re.DOTALL)
+                for cond, val, _ in elseif_matches:
+                    conditions.append(cond.strip())
+                    then_values.append(val.strip())
+
+            # ELSE block
+            else_value = extended_if_match.group(4).strip() if extended_if_match.group(4) else None
+
+            # Evaluate each condition
+            for i, cond in enumerate(conditions):
+                cond_eval = re.sub(r'\[([^\]]+)\]', r'dataframe["\1"]', cond)
+                mask = pd.eval(cond_eval)
+                then_val_expr = re.sub(r'\[([^\]]+)\]', r'dataframe["\1"]', then_values[i])
+                try:
+                    then_val_eval = pd.eval(then_val_expr, engine='python')
+                except:
+                    then_val_eval = then_values[i]
+                result.loc[mask] = then_val_eval
+
+            # ELSE block
+            if else_value is not None:
+                else_val_expr = re.sub(r'\[([^\]]+)\]', r'dataframe["\1"]', else_value)
+                try:
+                    else_val_eval = pd.eval(else_val_expr, engine='python')
+                except:
+                    else_val_eval = else_value
+                result.fillna(else_val_eval, inplace=True)
+
+            # Final numeric conversion
+            dataframe[columnName] = pd.to_numeric(result, errors='coerce').replace([np.inf, -np.inf], np.nan).fillna(0)
+            global_df = dataframe
+            return dataframe
+
+        except Exception as e:
+            raise ValueError(f"Error in extended IF-ELSEIF expression: {str(e)}")
+
+
+    
+    
 
     # ========== 13. Arithmetic/Logical Expressions ==========
+    # words = re.findall(r'\[([^\]]+)\]', calculation)
+    # if not words:
+    #     raise ValueError("No valid column names found in expression.")
+    # # for col in words:
+    # #     if col not in dataframe.columns:
+    # #         raise ValueError(f"Missing column: {col}")
+    # #     calculation = calculation.replace(f"[{col}]", f'dataframe["{col}"]')
+    # for col in words:
+    #     if col not in dataframe.columns:
+    #         raise ValueError(f"Missing column: {col}")
+
+    #     # 🔥 FORCE numeric conversion
+    #     dataframe[col] = pd.to_numeric(dataframe[col], errors='coerce')
+
+    #     calculation = calculation.replace(
+    #         f"[{col}]",
+    #         f'dataframe["{col}"]'
+    #     )
+
+    # try:
+    #     # Evaluate expression
+    #     result = eval(calculation)
+
+    #     # Convert to numeric (float), coerce errors to NaN
+    #     # if isinstance(result, pd.Series):
+    #     #     result = pd.to_numeric(result, errors='coerce')  # ensures dtype is float
+    #     #     result = result.replace([np.inf, -np.inf], np.nan)
+    #     #     result = result.fillna(0)  # replace NaN with 0
+    #     #     dataframe[columnName] = result
+    #     if isinstance(result, pd.Series):
+    #         # Convert to float safely and handle NaN/inf
+    #         result = pd.to_numeric(result, errors='coerce').replace([np.inf, -np.inf], np.nan).fillna(0)
+    #         dataframe[columnName] = result.astype(float)
+    #     else:
+    #         # For scalar result
+    #         result = float(result)
+    #         dataframe[columnName] = result
+
+    #     global_df = dataframe
+    #     return dataframe
+    # ===== 13. Arithmetic/Logical Expressions (Safe) =====
     words = re.findall(r'\[([^\]]+)\]', calculation)
     if not words:
         raise ValueError("No valid column names found in expression.")
+
+    # Step 1: Ensure all referenced columns exist and are numeric
     for col in words:
         if col not in dataframe.columns:
             raise ValueError(f"Missing column: {col}")
-        calculation = calculation.replace(f"[{col}]", f'dataframe["{col}"]')
+        dataframe[col] = pd.to_numeric(dataframe[col], errors='coerce')  # force numeric
+
+    # Step 2: Replace [column] with dataframe["column"] references
+    expr_python = re.sub(r'\[([^\]]+)\]', r'dataframe["\1"]', calculation)
+
+    # Step 3: Convert Excel/PowerBI-style IF to Python np.where
+    # Example: IF([A] > 0, [B], 0) => np.where(dataframe["A"]>0, dataframe["B"], 0)
+    def convert_if(match):
+        condition, true_val, false_val = match.groups()
+        return f'np.where({condition}, {true_val}, {false_val})'
+
+    expr_python = re.sub(
+        r'if\s*\(\s*(.+?)\s*,\s*(.+?)\s*,\s*(.+?)\s*\)', 
+        convert_if, 
+        expr_python, 
+        flags=re.IGNORECASE
+    )
+
+    # Step 4: Evaluate using pandas safely
     try:
-        result = eval(calculation)
-        if isinstance(result, pd.Series) and result.dtype == bool:
-            filtered_df = dataframe[result]
-            global_df = filtered_df
-            return filtered_df
+        result = pd.eval(expr_python, engine='python')  # safe evaluation
+        if isinstance(result, pd.Series):
+            # Convert to float, handle NaN/inf
+            result = pd.to_numeric(result, errors='coerce').replace([np.inf, -np.inf], np.nan).fillna(0)
+            dataframe[columnName] = result.astype(float)
         else:
-            dataframe[columnName] = result
-            global_df = dataframe
-            return dataframe
+            dataframe[columnName] = float(result)
+        global_df = dataframe
+        return dataframe
+
+    # try:
+    #     result = eval(calculation)
+    #     if isinstance(result, pd.Series) and result.dtype == bool:
+    #         filtered_df = dataframe[result]
+    #         global_df = filtered_df
+    #         return filtered_df
+    #     else:
+    #         dataframe[columnName] = result
+    #         global_df = dataframe
+    #         return dataframe
         
     except Exception as e:
         raise ValueError(f"Failed to evaluate general expression: {str(e)}")
@@ -3873,28 +4934,71 @@ def fetchText_data(databaseName, table_Name, x_axis, aggregate_py, selectedUser,
     cur = conn.cursor()
 
     # --- 1. Dynamic WHERE Clause Construction ---
+    # where_sql = ""
+    # query_params = []
+
+    # # Check if filter_options exists AND is a dictionary (handles None case)
+    # if filter_options and isinstance(filter_options, dict):
+    #     where_clauses = []
+        
+    #     for column, values in filter_options.items():
+    #         # Only process if 'values' is a valid list with items
+    #         if values and isinstance(values, list) and len(values) > 0:
+    #             # Create placeholders: %s, %s, %s
+    #             placeholders = ', '.join(['%s'] * len(values))
+                
+    #             # Add clause: "region IN (%s, %s)"
+    #             where_clauses.append(f'"{column}" IN ({placeholders})')
+                
+    #             # Add actual values to params list
+    #             query_params.extend(values)
+
+    #     # If we successfully created clauses, join them
+    #     if where_clauses:
+    #         where_sql = "WHERE " + " AND ".join(where_clauses)
     where_sql = ""
     query_params = []
 
-    # Check if filter_options exists AND is a dictionary (handles None case)
     if filter_options and isinstance(filter_options, dict):
-        where_clauses = []
-        
-        for column, values in filter_options.items():
-            # Only process if 'values' is a valid list with items
-            if values and isinstance(values, list) and len(values) > 0:
-                # Create placeholders: %s, %s, %s
-                placeholders = ', '.join(['%s'] * len(values))
-                
-                # Add clause: "region IN (%s, %s)"
-                where_clauses.append(f'"{column}" IN ({placeholders})')
-                
-                # Add actual values to params list
-                query_params.extend(values)
+        or_groups = []          # list of AND groups joined by OR
+        current_and_group = []
 
-        # If we successfully created clauses, join them
-        if where_clauses:
-            where_sql = "WHERE " + " AND ".join(where_clauses)
+        for column, data in filter_options.items():
+
+            # Normalize input
+            if isinstance(data, dict):
+                values = data.get("values", [])
+                operator = data.get("operator", "AND").upper()
+            else:
+                values = data
+                operator = "AND"
+
+            if not values:
+                continue
+
+            # Create placeholders for parametrized SQL
+            placeholders = ", ".join(["%s"] * len(values))
+            condition = f"\"{column}\" IN ({placeholders})"
+
+            # Add params
+            query_params.extend(values)
+
+            # Add to current AND group
+            current_and_group.append(condition)
+
+            # Close AND group on OR
+            if operator == "OR":
+                or_groups.append("(" + " AND ".join(current_and_group) + ")")
+                current_and_group = []
+
+        # Add remaining AND group
+        if current_and_group:
+            or_groups.append("(" + " AND ".join(current_and_group) + ")")
+
+        # Build final WHERE clause
+        if or_groups:
+            where_sql = "WHERE " + " OR ".join(or_groups)
+
 
     # --- 2. Check Data Type ---
     # (Checking column type to decide between COUNT or SUM/AVG)
@@ -3914,11 +5018,23 @@ def fetchText_data(databaseName, table_Name, x_axis, aggregate_py, selectedUser,
 
     column_type = row[0]
 
-    # --- 3. Construct Final Query ---
+    # 3. Construct Final Query
     # If where_sql is "", it simply acts as whitespace
     
-    if column_type == 'character varying' or column_type == 'text':
-        # For text, we usually Count Distinct
+    if aggregate_py.lower() == 'distinct count':
+        query = f"""
+            SELECT COUNT(DISTINCT "{x_axis}") AS total_x_axis
+            FROM "{table_Name}"
+            {where_sql}
+        """
+    elif aggregate_py.lower() == 'count':
+        query = f"""
+            SELECT COUNT("{x_axis}") AS total_x_axis
+            FROM "{table_Name}"
+            {where_sql}
+        """
+    elif column_type == 'character varying' or column_type == 'text':
+        # For text, we usually Count Distinct if no specific aggregate matched above
         query = f"""
             SELECT COUNT(DISTINCT "{x_axis}") AS total_x_axis
             FROM "{table_Name}"
@@ -3948,6 +5064,100 @@ def fetchText_data(databaseName, table_Name, x_axis, aggregate_py, selectedUser,
         conn.close()
 
     return data
+# def fetchText_data(databaseName, table_Name, x_axis, aggregate_py, selectedUser, filter_options):
+#     print(f"Fetch Data Triggered: Agg={aggregate_py}, Table={table_Name}, Filters={filter_options}")
+
+#     conn = get_db_connection_or_path(selectedUser, databaseName)
+#     cur = conn.cursor()
+
+#     where_sql = ""
+#     query_params = []
+
+#     # ---------------------- FILTER CLAUSE (AND / OR SUPPORT) ----------------------
+#     if filter_options and isinstance(filter_options, dict):
+#         where_and = []
+#         where_or = []
+
+#         for col, data in filter_options.items():
+#             # Normalize input
+#             if isinstance(data, dict):
+#                 values = data.get("values", [])
+#                 operator = data.get("operator", "AND").upper()
+#             else:
+#                 values = data
+#                 operator = "AND"
+
+#             if not values:
+#                 continue
+
+#             placeholders = ", ".join(["%s"] * len(values))
+#             condition = f"\"{col}\" IN ({placeholders})"
+
+#             if operator == "OR":
+#                 where_or.append(condition)
+#             else:
+#                 where_and.append(condition)
+
+#             query_params.extend(values)
+
+#         # Build WHERE clause
+#         if where_and and where_or:
+#             where_sql = (
+#                 "WHERE " + " AND ".join(where_and)
+#                 + " AND (" + " OR ".join(where_or) + ")"
+#             )
+#         elif where_or:
+#             where_sql = "WHERE " + " OR ".join(where_or)
+#         elif where_and:
+#             where_sql = "WHERE " + " AND ".join(where_and)
+
+#     # ---------------------- CHECK COLUMN TYPE ----------------------
+#     cur.execute("""
+#         SELECT data_type 
+#         FROM information_schema.columns 
+#         WHERE table_name = %s AND column_name = %s
+#     """, (table_Name, x_axis))
+
+#     row = cur.fetchone()
+
+#     if not row:
+#         print(f"Error: Column {x_axis} not found in table {table_Name}")
+#         cur.close()
+#         conn.close()
+#         return {"total_x_axis": 0}
+
+#     column_type = row[0]
+
+#     # ---------------------- FINAL QUERY ----------------------
+#     if column_type in ('character varying', 'text'):
+#         query = f"""
+#             SELECT COUNT(DISTINCT "{x_axis}") AS total_x_axis
+#             FROM "{table_Name}"
+#             {where_sql}
+#         """
+#     else:
+#         query = f"""
+#             SELECT {aggregate_py}("{x_axis}") AS total_x_axis
+#             FROM "{table_Name}"
+#             {where_sql}
+#         """
+
+#     print("Final Query SQL:", query)
+#     print("Query Parameters:", query_params)
+
+#     # ---------------------- EXECUTE ----------------------
+#     try:
+#         cur.execute(query, tuple(query_params))
+#         result = cur.fetchone()
+#         data = {"total_x_axis": result[0] if result and result[0] is not None else 0}
+#     except Exception as e:
+#         print("SQL Execution Error:", e)
+#         data = {"total_x_axis": 0}
+#     finally:
+#         cur.close()
+#         conn.close()
+
+#     return data
 
 
 def Hierarchial_drill_down(clicked_category, x_axis_columns, y_axis_column, depth, aggregation):

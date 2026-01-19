@@ -197,53 +197,332 @@ def check_username_exists(cursor, username):
     result = cursor.fetchone()
     return result and result[0] > 0
 
+# def insert_user(cursor, employee_name, role_id, username, email, password, categories, action_type, action_by, reporting_id=None):
+#     print("insert")
+#     cursor.execute("""
+#         INSERT INTO employee_list (employee_name, role_id, username, email, password, category, action_type, action_by, reporting_id)
+#         VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+#     """, (employee_name, role_id, username, email, password, categories, action_type, action_by, reporting_id))
+#     cursor.execute("SELECT currval(pg_get_serial_sequence('employee_list', 'employee_id'))")
+#     return cursor.fetchone()[0]
+
 def insert_user(cursor, employee_name, role_id, username, email, password, categories, action_type, action_by, reporting_id=None):
     print("insert")
     cursor.execute("""
-        INSERT INTO employee_list (employee_name, role_id, username, email, password, category, action_type, action_by, reporting_id)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-    """, (employee_name, role_id, username, email, password, categories, action_type, action_by, reporting_id))
+        INSERT INTO employee_list (employee_name, role_id, username, email, password, action_type, action_by, reporting_id)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+    """, (employee_name, role_id, username, email, password, action_type, action_by, reporting_id))
     cursor.execute("SELECT currval(pg_get_serial_sequence('employee_list', 'employee_id'))")
     return cursor.fetchone()[0]
+# def handle_categories(conn, conn_datasource, employee_id, role_id, company, categories):
+#     with conn_datasource.cursor() as source_cursor:
+#         source_cursor.execute("""
+#             SELECT id FROM organizationdatatest WHERE organizationname = %s
+#         """, (company,))
+#         org_result = source_cursor.fetchone()
+#         if not org_result:
+#             raise ValueError(f"Company '{company}' not found in organizationdatatest.")
+#         company_id = org_result[0]
+#         print("company_id",company_id)
+
+#     with conn.cursor() as cursor:
+#         for category in categories:
+#             # Check if category already exists
+#             cursor.execute("""
+#                 SELECT category_id FROM category 
+#                 WHERE LOWER(category_name) = LOWER(%s) AND company_id = %s
+#             """, (category.lower(), company_id))
+#             result = cursor.fetchone()
+
+#             if result:
+#                 category_id = result[0]  # Use existing category_id
+#                 print("category_id",category_id)
+#             else:
+#                 # Insert new category
+#                 cursor.execute("""
+#                     INSERT INTO category (category_name, company_id)
+#                     VALUES (%s, %s)
+#                     RETURNING category_id;
+#                 """, (category, company_id))
+#                 category_id = cursor.fetchone()[0]
+
+#             # Insert into user table
+#             cursor.execute("""
+#                 INSERT INTO "user" (company_id, user_id, role_id, category_id)
+#                 VALUES (%s, %s, %s, %s)
+#             """, (company_id, employee_id, role_id, category_id))
 
 
-def handle_categories(conn, conn_datasource, employee_id, role_id, company, categories):
-    with conn_datasource.cursor() as source_cursor:
+# import json
+
+# def handle_categories(conn, conn_datasource, employee_id, role_id, company, categories):
+#     print("Raw categories:", categories, company)
+
+#     # Ensure categories is a list of dicts
+#     if isinstance(categories, str):
+#         try:
+#             categories = json.loads(categories)
+#         except Exception as e:
+#             print("Error parsing categories JSON:", e)
+#             categories = []
+
+#     # If the frontend sends a single dict instead of list, wrap it in a list
+#     if isinstance(categories, dict):
+#         categories = [categories]
+
+#     # Get company_id
+#     with conn_datasource.cursor() as source_cursor:
+#         source_cursor.execute("""
+#             SELECT id FROM organizationdatatest WHERE organizationname = %s
+#         """, (company,))
+#         org_result = source_cursor.fetchone()
+#         if not org_result:
+#             raise ValueError(f"Company '{company}' not found.")
+#         company_id = org_result[0]
+
+#     with conn.cursor() as cursor:
+#         # Get existing mappings
+#         cursor.execute("""
+#             SELECT category_id, category_value FROM user_category_mapping
+#             WHERE user_id = %s
+#         """, (employee_id,))
+#         existing_mappings = {row[0]: row[1] for row in cursor.fetchall()}
+#         print("existing_mappings", existing_mappings)
+
+#         for category in categories:
+#             category_key = category.get("key")
+#             category_value = category.get("value")
+#             print("Processing category:", category_key, category_value)
+
+#             if not category_key:
+#                 continue
+
+#             # Check if category exists
+#             cursor.execute("""
+#                 SELECT category_id FROM category
+#                 WHERE LOWER(category_name) = LOWER(%s) AND company_id = %s
+#             """, (category_key, company_id))
+#             result = cursor.fetchone()
+#             if result:
+#                 category_id = result[0]
+#             else:
+#                 cursor.execute("""
+#                     INSERT INTO category (category_name, company_id)
+#                     VALUES (%s, %s) RETURNING category_id
+#                 """, (category_key, company_id))
+#                 category_id = cursor.fetchone()[0]
+
+#             # Update or insert user_category_mapping
+#             if category_id in existing_mappings:
+#                 cursor.execute("""
+#                     UPDATE user_category_mapping
+#                     SET category_value = %s, role_id = %s
+#                     WHERE user_id = %s AND category_id = %s
+#                 """, (category_value, role_id, employee_id, category_id))
+#             else:
+#                 cursor.execute("""
+#                     INSERT INTO user_category_mapping
+#                     (company_id, user_id, role_id, category_id, category_value)
+#                     VALUES (%s, %s, %s, %s, %s)
+#                 """, (company_id, employee_id, role_id, category_id, category_value))
+# import json
+
+# def handle_categories(conn, conn_ds,user_id, role_id, company, categories):
+#     print("Raw categories:", categories)
+
+#     # 🔹 Normalize input
+#     if isinstance(categories, str):
+#         try:
+#             categories = json.loads(categories)
+#         except Exception:
+#             categories = []
+
+#     if isinstance(categories, dict):
+#         categories = [categories]
+
+#     # 🔹 Get company_id
+#     with conn_ds.cursor() as source_cursor:
+#         source_cursor.execute("""
+#             SELECT id FROM organizationdatatest
+#             WHERE organizationname = %s
+#         """, (company,))
+#         result = source_cursor.fetchone()
+#         if not result:
+#             raise ValueError("Company not found")
+#         company_id = result[0]
+
+#     with conn.cursor() as cursor:
+#         # 🔹 Existing mappings
+#         cursor.execute("""
+#             SELECT category_id FROM user_category_mapping
+#             WHERE user_id = %s
+#         """, (user_id,))
+#         existing_category_ids = {row[0] for row in cursor.fetchall()}
+#         print("existing_category_ids",existing_category_ids)
+
+#         incoming_category_ids = set()
+
+#         for category in categories:
+#             category_key = category.get("key")
+#             category_value = category.get("value")
+#             operator = category.get("operator", "AND")  # 🔹 Default AND
+
+#             if not category_key:
+#                 continue
+
+#             # 🔹 Get or create category
+#             cursor.execute("""
+#                 SELECT category_id FROM category
+#                 WHERE LOWER(category_name) = LOWER(%s)
+#                 AND company_id = %s
+#             """, (category_key, company_id))
+#             result = cursor.fetchone()
+
+#             if result:
+#                 category_id = result[0]
+#             else:
+#                 cursor.execute("""
+#                     INSERT INTO category (category_name, company_id)
+#                     VALUES (%s, %s)
+#                     RETURNING category_id
+#                 """, (category_key, company_id))
+#                 category_id = cursor.fetchone()[0]
+
+#             incoming_category_ids.add(category_id)
+#             print("incoming_category_ids",incoming_category_ids)
+
+#             # 🔹 Update or insert mapping
+#             cursor.execute("""
+#                 SELECT 1 FROM user_category_mapping
+#                 WHERE user_id = %s AND category_id = %s AND category_value = %s
+#             """, (user_id, category_id,category_value))
+
+#             if cursor.fetchone():
+#                 cursor.execute("""
+#                     UPDATE user_category_mapping
+#                     SET category_value = %s,
+#                         role_id = %s,
+#                         operator = %s
+#                     WHERE user_id = %s AND category_id = %s AND category_value = %s 
+#                 """, (category_value, role_id, operator, user_id, category_id,category_value))
+#             else:
+#                 cursor.execute("""
+#                     INSERT INTO user_category_mapping
+#                     (company_id, user_id, role_id, category_id, category_value, operator)
+#                     VALUES (%s, %s, %s, %s, %s, %s)
+#                 """, (
+#                     company_id,
+#                     user_id,
+#                     role_id,
+#                     category_id,
+#                     category_value,
+#                     operator
+#                 ))
+
+#         # 🔹 Remove deleted categories
+#         to_delete = existing_category_ids - incoming_category_ids
+#         if to_delete:
+#             cursor.execute("""
+#                 DELETE FROM user_category_mapping
+#                 WHERE user_id = %s
+#                 AND category_id = ANY(%s) 
+#             """, (user_id, list(to_delete),))
+def handle_categories(conn, conn_ds, user_id, role_id, company, categories):
+    print("Raw categories:", categories)
+
+    # Normalize input
+    if isinstance(categories, str):
+        try:
+            categories = json.loads(categories)
+        except Exception:
+            categories = []
+
+    if isinstance(categories, dict):
+        categories = [categories]
+
+    # Get company_id
+    with conn_ds.cursor() as source_cursor:
         source_cursor.execute("""
-            SELECT id FROM organizationdatatest WHERE organizationname = %s
+            SELECT id FROM organizationdatatest
+            WHERE organizationname = %s
         """, (company,))
-        org_result = source_cursor.fetchone()
-        if not org_result:
-            raise ValueError(f"Company '{company}' not found in organizationdatatest.")
-        company_id = org_result[0]
-        print("company_id",company_id)
+        result = source_cursor.fetchone()
+        if not result:
+            raise ValueError("Company not found")
+        company_id = result[0]
 
     with conn.cursor() as cursor:
+        # Existing mappings: track (category_id, category_value)
+        cursor.execute("""
+            SELECT category_id, category_value FROM user_category_mapping
+            WHERE user_id = %s
+        """, (user_id,))
+        existing_pairs = {(row[0], row[1]) for row in cursor.fetchall()}
+        print("existing_pairs:", existing_pairs)
+
+        incoming_pairs = set()
+
         for category in categories:
-            # Check if category already exists
+            category_key = category.get("key")
+            category_value = category.get("value")
+            operator = category.get("operator", "AND")
+
+            if not category_key:
+                continue
+
+            # Get or create category
             cursor.execute("""
-                SELECT category_id FROM category 
-                WHERE LOWER(category_name) = LOWER(%s) AND company_id = %s
-            """, (category.lower(), company_id))
+                SELECT category_id FROM category
+                WHERE LOWER(category_name) = LOWER(%s)
+                AND company_id = %s
+            """, (category_key, company_id))
             result = cursor.fetchone()
 
             if result:
-                category_id = result[0]  # Use existing category_id
-                print("category_id",category_id)
+                category_id = result[0]
             else:
-                # Insert new category
                 cursor.execute("""
                     INSERT INTO category (category_name, company_id)
                     VALUES (%s, %s)
-                    RETURNING category_id;
-                """, (category, company_id))
-                category_id = cursor.fetchone()[0]
+                    RETURNING category_id
+                """, (category_key, company_id))
+                result = cursor.fetchone()
+                if result:
+                    category_id = result[0]
+                else:
+                    raise ValueError(f"Failed to insert category {category_key}")
 
-            # Insert into user table
+            incoming_pairs.add((category_id, category_value))
+            print("incoming_pairs:", incoming_pairs)
+
+            # Update or insert mapping
             cursor.execute("""
-                INSERT INTO "user" (company_id, user_id, role_id, category_id)
-                VALUES (%s, %s, %s, %s)
-            """, (company_id, employee_id, role_id, category_id))
+                SELECT 1 FROM user_category_mapping
+                WHERE user_id = %s AND category_id = %s AND category_value = %s
+            """, (user_id, category_id, category_value))
+
+            if cursor.fetchone():
+                cursor.execute("""
+                    UPDATE user_category_mapping
+                    SET role_id = %s,
+                        operator = %s
+                    WHERE user_id = %s AND category_id = %s AND category_value = %s
+                """, (role_id, operator, user_id, category_id, category_value))
+            else:
+                cursor.execute("""
+                    INSERT INTO user_category_mapping
+                    (company_id, user_id, role_id, category_id, category_value, operator)
+                    VALUES (%s, %s, %s, %s, %s, %s)
+                """, (company_id, user_id, role_id, category_id, category_value, operator))
+
+        # Remove deleted mappings
+        to_delete = existing_pairs - incoming_pairs
+        if to_delete:
+            for cat_id, cat_val in to_delete:
+                cursor.execute("""
+                    DELETE FROM user_category_mapping
+                    WHERE user_id = %s AND category_id = %s AND category_value = %s
+                """, (user_id, cat_id, cat_val))
 
 
 def create_user_table(conn):
@@ -276,6 +555,31 @@ def create_category_table_if_not_exists(conn):
                 company_id INT NOT NULL
                 
             );
+        """)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS user_category_mapping (
+                id SERIAL PRIMARY KEY,
+                company_id INT NOT NULL,
+                user_id INT NOT NULL,
+                role_id INT NOT NULL,
+                category_id INT NOT NULL,
+                category_value TEXT,
+                operator VARCHAR(5) DEFAULT 'AND',
+
+                CONSTRAINT fk_ucm_category
+                    FOREIGN KEY (category_id)
+                    REFERENCES category(category_id)
+                    ON DELETE CASCADE
+            );
+        """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_category_company
+            ON category(company_id);
+        """)
+
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_ucm_user
+            ON user_category_mapping(user_id);
         """)
     conn.commit()
 

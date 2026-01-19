@@ -56,6 +56,44 @@ from psycopg2.extras import execute_values
 #         df[column] = df[column].apply(mask_value)
 
 #     return df
+def sync_masked_columns(cur, table_name, df):
+    """
+    Drop masked columns from DB that are not present in the current upload
+    """
+    # Masked columns in DataFrame
+    df_masked_cols = {col for col in df.columns if col.endswith("_masked") or col.endswith("__masked")}
+
+    # Fetch masked columns from DB
+    cur.execute(
+        """
+        SELECT column_name
+        FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = %s
+          AND column_name LIKE %s
+        """,
+        (table_name, '%masked')
+    )
+
+    rows = cur.fetchall()
+
+    # ✅ Defensive: handle empty or malformed rows
+    db_masked_cols = set()
+    for row in rows:
+        if row and len(row) > 0:
+            db_masked_cols.add(row[0])
+
+    # Columns to drop
+    cols_to_drop = db_masked_cols - df_masked_cols
+
+    for col in cols_to_drop:
+        cur.execute(
+            sql.SQL("ALTER TABLE {} DROP COLUMN {}").format(
+                sql.Identifier(table_name),
+                sql.Identifier(col)
+            )
+        )
+        print(f"🗑 Dropped obsolete masked column '{col}' from '{table_name}'")
 def apply_masking(df, mask_settings):
     if not isinstance(mask_settings, dict):
         return df
@@ -615,6 +653,7 @@ def upload_json_to_postgresql(database_name, username, password, json_file_path,
         table_exists = validate_table_structure(cur, table_name)
 
         if not table_exists:
+            
             print(f"Creating table '{table_name}'.")
             column_defs = []
             for col in df.columns:
@@ -652,6 +691,7 @@ def upload_json_to_postgresql(database_name, username, password, json_file_path,
                 conn.rollback()
                 return f"Error: Could not create table {table_name}. {str(e)}"
         else:
+            sync_masked_columns(cur, table_name, df)
             print(f"Table '{table_name}' already exists. Updating its structure if necessary.")
             # Update structure (add/drop columns, alter types, ensure PK constraint)
             update_table_structure_for_json(cur, conn, table_name, df, db_primary_key_column)
