@@ -3479,7 +3479,7 @@ def get_edit_chart_route():
              "categories": [row[0] for row in datass],
             "series1": [row[1] for row in datass],
             "series2": [row[2] for row in datass],
-            "aggregation": aggregation,
+            "aggregation": agg_value,
             "x_axis_columns":x_axis_columns,
             "y_axis_columns":y_axis_columns
         }
@@ -3858,7 +3858,7 @@ def get_edit_chart_route():
             return jsonify({
                 "categories": array1,
                 "values": array2,
-                "aggregation": aggregation,
+                "aggregation": agg_value,
                 "hello": "hi"
             })
 
@@ -3986,7 +3986,7 @@ def get_edit_chart_route():
              "categories": [row[0] for row in datass],
             "series1": [row[1] for row in datass],
             "series2": [row[2] for row in datass],
-            "aggregation": aggregation
+            "aggregation": agg_value
         }
         print("data====================", data)
         
