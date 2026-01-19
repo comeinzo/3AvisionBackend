@@ -7736,7 +7736,7 @@ def dashboard_data(dashboard_name,company_name):
    
     # --- NEW: Parse Temporary Filters ---
     temp_filters_param = request.args.get('filters')
-    active_temp_filters = []
+    active_temp_filters = {}
     
     if temp_filters_param:
         try:
@@ -7744,20 +7744,20 @@ def dashboard_data(dashboard_name,company_name):
             # The frontend sends a JSON string representing a list of strings/dicts
             raw_list = json.loads(temp_filters_param)
             
-            # Normalize to list of dicts
+            # Normalize to single dict
             for item in raw_list:
                 if isinstance(item, str):
                     try:
-                        active_temp_filters.append(json.loads(item))
+                        active_temp_filters.update(json.loads(item))
                     except:
                         pass # Ignore invalid JSON strings
                 elif isinstance(item, dict):
-                    active_temp_filters.append(item)
+                    active_temp_filters.update(item)
             
             print(f"✅ Active Override Filters: {active_temp_filters}")
         except Exception as e:
             print(f"⚠️ Error parsing temporary filters: {e}")
-            active_temp_filters = []
+            active_temp_filters = {}
     # ------------------------------------
 
     data = get_dashboard_data(dashboard_name,company_name,user_id)
