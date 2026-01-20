@@ -18557,26 +18557,198 @@ def fix_calculation():
         print("fixed_calc",fixed_calc)
     except Exception as e:
         return {"fixedCalculation": None, "message": str(e)}
+# def auto_fix_formula(calc: str) -> str:
+#     """
+#     Auto-fix common calculation syntax issues:
+#     - Adds missing END in CASE WHEN
+#     - Normalizes IF, SWITCH, IFERROR, MAXX/MINX, ROUND, DATEDIFF, DATEADD
+#     - Fixes TODAY(), NOW(), FORMATDATE(), REPLACE(), CONCAT(), ISNULL(), IN expressions
+#     """
+#     calc = calc.strip()
+
+#     # --------- 0. Normalize CASE WHEN ---------
+#     # Ensure CASE WHEN ... THEN ... ELSE ... END
+#     if re.match(r'case\s+when', calc, re.IGNORECASE) and not re.search(r'end\s*$', calc, re.IGNORECASE):
+#         calc = calc + " END"
+
+#     # Normalize keywords spacing
+#     calc = re.sub(r'\s+then\s+', ' THEN ', calc, flags=re.IGNORECASE)
+#     calc = re.sub(r'\s+else\s+', ' ELSE ', calc, flags=re.IGNORECASE)
+#     calc = re.sub(r'\s+end\s*$', ' END', calc, flags=re.IGNORECASE)
+
+#     # --------- 1. IF(condition, then, else) ---------
+#     calc = re.sub(
+#         r'if\s*\(\s*(.+?)\s*,\s*(.+?)\s*,\s*(.+?)\s*\)',
+#         r'IF(\1, \2, \3)',
+#         calc,
+#         flags=re.IGNORECASE
+#     )
+
+#     # --------- 2. SWITCH ---------
+#     calc = re.sub(
+#         r'switch\s*\(\s*\[([^\]]+)\](.*?)\)',
+#         lambda m: f"SWITCH([{m.group(1)}]{m.group(2)})",
+#         calc,
+#         flags=re.IGNORECASE
+#     )
+
+#     # --------- 3. IFERROR ---------
+#     calc = re.sub(
+#         r'iferror\s*\(\s*(.+?)\s*,\s*(.+?)\s*\)',
+#         r'IFERROR(\1, \2)',
+#         calc,
+#         flags=re.IGNORECASE
+#     )
+
+#     # --------- 4. MAXX / MINX ---------
+#     calc = re.sub(r'(maxx|minx)\s*\(\s*\[([^\]]+)\]\s*\)', r'\1([\2])', calc, flags=re.IGNORECASE)
+
+#     # --------- 5. ROUND ---------
+#     calc = re.sub(r'round\s*\(\s*(.+?)\s*,\s*(\d+)\s*\)', r'ROUND(\1, \2)', calc, flags=re.IGNORECASE)
+
+#     # --------- 6. DATEDIFF ---------
+#     calc = re.sub(r'datediff\s*\(\s*\[([^\]]+)\]\s*,\s*\[([^\]]+)\]\s*\)', r'DATEDIFF([\1], [\2])', calc, flags=re.IGNORECASE)
+
+#     # --------- 7. DATEADD ---------
+#     calc = re.sub(
+#         r'dateadd\s*\(\s*\[([^\]]+)\]\s*,\s*(-?\d+)\s*,\s*["\']?(day|month|year)["\']?\s*\)',
+#         r'DATEADD([\1], \2, "\3")',
+#         calc,
+#         flags=re.IGNORECASE
+#     )
+
+#     # --------- 8. TODAY / NOW ---------
+#     calc = re.sub(r'today\(\)', 'TODAY()', calc, flags=re.IGNORECASE)
+#     calc = re.sub(r'now\(\)', 'NOW()', calc, flags=re.IGNORECASE)
+
+#     # --------- 9. FORMATDATE ---------
+#     calc = re.sub(
+#         r'formatdate\s*\(\s*\[([^\]]+)\]\s*,\s*["\'](.+?)["\']\s*\)',
+#         r'FORMATDATE([\1], "\2")',
+#         calc,
+#         flags=re.IGNORECASE
+#     )
+
+#     # --------- 10. Text functions ---------
+#     for func in ["upper", "lower", "len", "trim"]:
+#         calc = re.sub(
+#             rf'{func}\s*\(\s*\[([^\]]+)\]\s*\)',
+#             rf'{func.upper()}([\1])',
+#             calc,
+#             flags=re.IGNORECASE
+#         )
+
+#     # --------- 11. REPLACE ---------
+#     calc = re.sub(
+#         r'replace\s*\(\s*\[([^\]]+)\]\s*,\s*["\'](.*?)["\']\s*,\s*["\'](.*?)["\']\s*\)',
+#         r'REPLACE([\1], "\2", "\3")',
+#         calc,
+#         flags=re.IGNORECASE
+#     )
+
+#     # --------- 12. CONCAT ---------
+#     concat_match = re.match(r'concat\s*\((.+)\)', calc, re.IGNORECASE)
+#     if concat_match:
+#         inner = concat_match.group(1)
+#         parts = [p.strip() for p in re.split(r',(?![^\[]*\])', inner)]
+#         calc = f"CONCAT({', '.join(parts)})"
+
+#     # --------- 13. ISNULL ---------
+#     calc = re.sub(
+#         r'isnull\s*\(\s*\[([^\]]+)\]\s*,\s*["\']?(.*?)["\']?\s*\)',
+#         r'ISNULL([\1], "\2")',
+#         calc,
+#         flags=re.IGNORECASE
+#     )
+
+#     # --------- 14. IN expression ---------
+#     calc = re.sub(
+#         r'\[([^\]]+)\]\s+in\s+\((.*?)\)',
+#         lambda m: f"[{m.group(1)}] IN ({m.group(2)})",
+#         calc,
+#         flags=re.IGNORECASE
+#     )
+
+#     calc = balance_brackets(calc)
+
+#     return calc
+import re
+def auto_close_syntax(calc: str) -> str:
+    """
+    Auto-close missing quotes, brackets, and parentheses
+    without breaking column references.
+    """
+
+    # -------- Quotes --------
+    single_quotes = calc.count("'")
+    double_quotes = calc.count('"')
+
+    if single_quotes % 2 != 0:
+        calc += "'"
+
+    if double_quotes % 2 != 0:
+        calc += '"'
+
+    # -------- Column Brackets --------
+    open_sq = calc.count('[')
+    close_sq = calc.count(']')
+
+    if close_sq < open_sq:
+        calc += ']' * (open_sq - close_sq)
+
+    # -------- Parentheses --------
+    open_paren = calc.count('(')
+    close_paren = calc.count(')')
+
+    if close_paren < open_paren:
+        calc += ')' * (open_paren - close_paren)
+
+    return calc
+
 def auto_fix_formula(calc: str) -> str:
     """
-    Auto-fix common calculation syntax issues:
-    - Adds missing END in CASE WHEN
-    - Normalizes IF, SWITCH, IFERROR, MAXX/MINX, ROUND, DATEDIFF, DATEADD
-    - Fixes TODAY(), NOW(), FORMATDATE(), REPLACE(), CONCAT(), ISNULL(), IN expressions
+    Normalize user-entered formula into syntax
+    supported by perform_calculation()
     """
     calc = calc.strip()
+    calc = auto_close_syntax(calc)    
+   
 
-    # --------- 0. Normalize CASE WHEN ---------
-    # Ensure CASE WHEN ... THEN ... ELSE ... END
-    if re.match(r'case\s+when', calc, re.IGNORECASE) and not re.search(r'end\s*$', calc, re.IGNORECASE):
-        calc = calc + " END"
+    # ------------------------------
+    # 1. CASE WHEN → ensure END
+    # ------------------------------
+    # if re.match(r'case\s+when', calc, re.IGNORECASE) and not re.search(r'\bend\b', calc, re.IGNORECASE):
+    #     calc += " END"
 
-    # Normalize keywords spacing
+    # calc = re.sub(r'\s+then\s+', ' THEN ', calc, flags=re.IGNORECASE)
+    # calc = re.sub(r'\s+else\s+', ' ELSE ', calc, flags=re.IGNORECASE)
+    # calc = re.sub(r'"([^"]+)"', r"'\1'", calc)
+    has_end = bool(
+        re.search(r'(?<!\')\bEND\b(?!\')', calc, re.IGNORECASE)
+    )
+
+    if re.match(r'case\s+when', calc, re.IGNORECASE) and not has_end:
+        calc = calc.rstrip()
+        calc += "\nEND"
+
+    # Normalize CASE keywords safely
     calc = re.sub(r'\s+then\s+', ' THEN ', calc, flags=re.IGNORECASE)
     calc = re.sub(r'\s+else\s+', ' ELSE ', calc, flags=re.IGNORECASE)
-    calc = re.sub(r'\s+end\s*$', ' END', calc, flags=re.IGNORECASE)
 
-    # --------- 1. IF(condition, then, else) ---------
+    # Normalize quotes AFTER END is handled
+    calc = re.sub(r'"([^"]+)"', r"'\1'", calc)
+
+
+    # ------------------------------
+    # 2. IF normalization
+    # ------------------------------
+    calc = re.sub(
+        r'if\s*\((.+?)\)\s*then\s*(.+?)\s*else\s*(.+)',
+        r'IF(\1, \2, \3)',
+        calc,
+        flags=re.IGNORECASE
+    )
+
     calc = re.sub(
         r'if\s*\(\s*(.+?)\s*,\s*(.+?)\s*,\s*(.+?)\s*\)',
         r'IF(\1, \2, \3)',
@@ -18584,94 +18756,88 @@ def auto_fix_formula(calc: str) -> str:
         flags=re.IGNORECASE
     )
 
-    # --------- 2. SWITCH ---------
-    calc = re.sub(
-        r'switch\s*\(\s*\[([^\]]+)\](.*?)\)',
-        lambda m: f"SWITCH([{m.group(1)}]{m.group(2)})",
-        calc,
-        flags=re.IGNORECASE
-    )
+    # ------------------------------
+    # 3. SWITCH normalization
+    # ------------------------------
+    calc = re.sub(r'switch\s*\(', 'SWITCH(', calc, flags=re.IGNORECASE)
 
-    # --------- 3. IFERROR ---------
-    calc = re.sub(
-        r'iferror\s*\(\s*(.+?)\s*,\s*(.+?)\s*\)',
-        r'IFERROR(\1, \2)',
-        calc,
-        flags=re.IGNORECASE
-    )
-
-    # --------- 4. MAXX / MINX ---------
-    calc = re.sub(r'(maxx|minx)\s*\(\s*\[([^\]]+)\]\s*\)', r'\1([\2])', calc, flags=re.IGNORECASE)
-
-    # --------- 5. ROUND ---------
-    calc = re.sub(r'round\s*\(\s*(.+?)\s*,\s*(\d+)\s*\)', r'ROUND(\1, \2)', calc, flags=re.IGNORECASE)
-
-    # --------- 6. DATEDIFF ---------
-    calc = re.sub(r'datediff\s*\(\s*\[([^\]]+)\]\s*,\s*\[([^\]]+)\]\s*\)', r'DATEDIFF([\1], [\2])', calc, flags=re.IGNORECASE)
-
-    # --------- 7. DATEADD ---------
-    calc = re.sub(
-        r'dateadd\s*\(\s*\[([^\]]+)\]\s*,\s*(-?\d+)\s*,\s*["\']?(day|month|year)["\']?\s*\)',
-        r'DATEADD([\1], \2, "\3")',
-        calc,
-        flags=re.IGNORECASE
-    )
-
-    # --------- 8. TODAY / NOW ---------
-    calc = re.sub(r'today\(\)', 'TODAY()', calc, flags=re.IGNORECASE)
-    calc = re.sub(r'now\(\)', 'NOW()', calc, flags=re.IGNORECASE)
-
-    # --------- 9. FORMATDATE ---------
-    calc = re.sub(
-        r'formatdate\s*\(\s*\[([^\]]+)\]\s*,\s*["\'](.+?)["\']\s*\)',
-        r'FORMATDATE([\1], "\2")',
-        calc,
-        flags=re.IGNORECASE
-    )
-
-    # --------- 10. Text functions ---------
-    for func in ["upper", "lower", "len", "trim"]:
+    # ------------------------------
+    # 4. Aggregates
+    # ------------------------------
+    for fn in ['sum','avg','mean','min','max','count','maxx','minx']:
         calc = re.sub(
-            rf'{func}\s*\(\s*\[([^\]]+)\]\s*\)',
-            rf'{func.upper()}([\1])',
+            rf'{fn}\s*\(',
+            fn.upper() + '(',
             calc,
             flags=re.IGNORECASE
         )
 
-    # --------- 11. REPLACE ---------
+    # ------------------------------
+    # 5. Math
+    # ------------------------------
+    calc = re.sub(r'abs\s*\(', 'ABS(', calc, flags=re.IGNORECASE)
+    calc = re.sub(r'round\s*\(', 'ROUND(', calc, flags=re.IGNORECASE)
+
+    # ------------------------------
+    # 6. Text
+    # ------------------------------
+    for fn in ['upper','lower','len','trim','concat','replace']:
+        calc = re.sub(
+            rf'{fn}\s*\(',
+            fn.upper() + '(',
+            calc,
+            flags=re.IGNORECASE
+        )
+
+    # ------------------------------
+    # 7. ISNULL (keep as-is)
+    # ------------------------------
+    calc = re.sub(r'isnull\s*\(', 'ISNULL(', calc, flags=re.IGNORECASE)
+
+    # ------------------------------
+    # 8. DATE FUNCTIONS
+    # ------------------------------
+    for fn in ['year','month','day','datediff','today','now']:
+        calc = re.sub(
+            rf'{fn}\s*\(',
+            fn.upper() + '(',
+            calc,
+            flags=re.IGNORECASE
+        )
+
+    # DATEADD normalization
     calc = re.sub(
-        r'replace\s*\(\s*\[([^\]]+)\]\s*,\s*["\'](.*?)["\']\s*,\s*["\'](.*?)["\']\s*\)',
-        r'REPLACE([\1], "\2", "\3")',
+        r'dateadd\s*\(\s*(.+?)\s*,\s*(-?\d+)\s*,\s*["\']?(day|month|year)["\']?\s*\)',
+        r'DATEADD(\1, \2, "\3")',
         calc,
         flags=re.IGNORECASE
     )
 
-    # --------- 12. CONCAT ---------
-    concat_match = re.match(r'concat\s*\((.+)\)', calc, re.IGNORECASE)
-    if concat_match:
-        inner = concat_match.group(1)
-        parts = [p.strip() for p in re.split(r',(?![^\[]*\])', inner)]
-        calc = f"CONCAT({', '.join(parts)})"
-
-    # --------- 13. ISNULL ---------
+    # FORMAT → FORMATDATE
     calc = re.sub(
-        r'isnull\s*\(\s*\[([^\]]+)\]\s*,\s*["\']?(.*?)["\']?\s*\)',
-        r'ISNULL([\1], "\2")',
+        r'format\s*\(',
+        'FORMATDATE(',
         calc,
         flags=re.IGNORECASE
     )
 
-    # --------- 14. IN expression ---------
+    # ------------------------------
+    # 9. IN {} → IN ()
+    # ------------------------------
     calc = re.sub(
-        r'\[([^\]]+)\]\s+in\s+\((.*?)\)',
-        lambda m: f"[{m.group(1)}] IN ({m.group(2)})",
+        r'\bin\s*\{(.+?)\}',
+        r'IN (\1)',
         calc,
         flags=re.IGNORECASE
     )
 
-    calc = balance_brackets(calc)
+    # ------------------------------
+    # 10. CALCULATE normalization
+    # ------------------------------
+    calc = re.sub(r'calculate\s*\(', 'CALCULATE(', calc, flags=re.IGNORECASE)
 
     return calc
+
 def balance_brackets(expr: str) -> str:
     # Balance parentheses ()
     open_paren = expr.count("(")
