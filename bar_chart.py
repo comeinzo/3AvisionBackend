@@ -1141,6 +1141,8 @@ def fetch_data(table_name, x_axis_columns, filter_options, y_axis_column, aggreg
                     result_val = df_filtered[value_col].astype(float).mean()
                 elif agg_func == "count":
                     result_val = df_filtered[value_col].count()
+                elif agg_func == "distinct count":
+                    result_val = df_filtered[value_col].nunique()
                 elif agg_func == "max":
                     result_val = df_filtered[value_col].astype(float).max()
                 elif agg_func == "min":
@@ -1390,6 +1392,13 @@ def fetch_data(table_name, x_axis_columns, filter_options, y_axis_column, aggreg
                     calc_formula_python,
                     flags=re.IGNORECASE
                 )
+                # Handle DISTINCT COUNT
+                calc_formula_python = re.sub(
+                    r'distinct count\s*\(\s*(temp_df\[.*?\])\s*\)',
+                    r'\1.nunique()',
+                    calc_formula_python,
+                    flags=re.IGNORECASE
+                )   
 
                 # Handle SUM
                 calc_formula_python = re.sub(
@@ -1533,6 +1542,8 @@ def fetch_data(table_name, x_axis_columns, filter_options, y_axis_column, aggreg
         grouped_df = filtered_df.groupby(x_axis_columns_str[0])[y_axis_column].mean().reset_index()
     elif aggregation.lower() == "count":
         grouped_df = filtered_df.groupby(x_axis_columns_str[0]).size().reset_index(name="count")
+    elif aggregation.lower() == "distinct count":
+        grouped_df = filtered_df.groupby(x_axis_columns_str[0])[y_axis_column].nunique().reset_index(name="distinct_count")
     elif aggregation.lower() in ("max", "maximum"):
         grouped_df = filtered_df.groupby(x_axis_columns_str[0])[y_axis_column].max().reset_index()
     elif aggregation.lower() in ("min", "minimum"):
@@ -2897,6 +2908,7 @@ def fetch_data_for_duel(
                 "sum": "SUM",
                 "average": "AVG",
                 "count": "COUNT",
+                "distinct count": "COUNT(DISTINCT)",
                 "maximum": "MAX",
                 "minimum": "MIN"
             }.get(selected_agg, "SUM")
@@ -2934,6 +2946,7 @@ def fetch_data_for_duel(
                 None
             )
 
+
             if matched_calc:
                 formula_sql = convert_calculation_to_sql(
                     matched_calc["calculation"].strip(),
@@ -2941,19 +2954,52 @@ def fetch_data_for_duel(
                 )
                 alias = f"{y_col}_calculated"
 
+                # If formula already contains aggregation
                 if re.search(r"\b(SUM|AVG|COUNT|MAX|MIN)\b", formula_sql, re.IGNORECASE):
                     select_exprs.append(f"{formula_sql} AS \"{alias}\"")
                 else:
-                    if is_numeric:
+                    # DISTINCT COUNT for calculated column
+                    # if agg_func.lower() == "count_distinct":
+                    #     select_exprs.append(f"COUNT(DISTINCT ({formula_sql})) AS \"{alias}\"")
+                    if selected_agg == "distinct count":
+                        select_exprs.append(f"COUNT(DISTINCT ({formula_sql})::numeric) AS \"{alias}\"")
+
+                    elif is_numeric:
                         select_exprs.append(f"{agg_func}(({formula_sql})::numeric) AS \"{alias}\"")
                     else:
                         select_exprs.append(f"COUNT(({formula_sql})) AS \"{alias}\"")
 
             else:
-                if is_numeric:
+                # DISTINCT COUNT for normal column
+                if selected_agg == "distinct count":
+                     select_exprs.append(f"COUNT(DISTINCT \"{y_col}\"::numeric) AS \"{y_col}\"")
+
+                elif is_numeric:
                     select_exprs.append(f"{agg_func}(\"{y_col}\"::numeric) AS \"{y_col}\"")
                 else:
                     select_exprs.append(f"COUNT(\"{y_col}\") AS \"{y_col}\"")
+
+
+            # if matched_calc:
+            #     formula_sql = convert_calculation_to_sql(
+            #         matched_calc["calculation"].strip(),
+            #         dataframe_columns=global_df.columns.tolist()
+            #     )
+            #     alias = f"{y_col}_calculated"
+
+            #     if re.search(r"\b(SUM|AVG|COUNT|MAX|MIN)\b", formula_sql, re.IGNORECASE):
+            #         select_exprs.append(f"{formula_sql} AS \"{alias}\"")
+            #     else:
+            #         if is_numeric:
+            #             select_exprs.append(f"{agg_func}(({formula_sql})::numeric) AS \"{alias}\"")
+            #         else:
+            #             select_exprs.append(f"COUNT(({formula_sql})) AS \"{alias}\"")
+
+            # else:
+            #     if is_numeric:
+            #         select_exprs.append(f"{agg_func}(\"{y_col}\"::numeric) AS \"{y_col}\"")
+            #     else:
+            #         select_exprs.append(f"COUNT(\"{y_col}\") AS \"{y_col}\"")
 
         # ---------------------- FINAL QUERY ----------------------
         query = f"""
@@ -3499,7 +3545,8 @@ def fetch_data_for_duel_bar(
         "average": "AVG",
         "count": "COUNT",
         "maximum": "MAX",
-        "minimum": "MIN"
+        "minimum": "MIN",
+        "distinct count": "distinct count"
     }.get(aggregation.lower())
 
     if not agg_func:
@@ -3710,13 +3757,17 @@ def fetch_data_for_duel_bar(
             if re.search(r"\b(SUM|AVG|COUNT|MAX|MIN)\b", formula_sql, re.IGNORECASE):
                 y_axis_exprs.append(f"{formula_sql} AS \"{alias}\"")
             else:
-                if is_numeric:
+                if agg_func == "distinct count":
+                    y_axis_exprs.append(f"COUNT(DISTINCT ({formula_sql})::numeric) AS \"{alias}\"")
+                elif is_numeric:
                     y_axis_exprs.append(f"{agg_func}(({formula_sql})::numeric) AS \"{alias}\"")
                 else:
                     y_axis_exprs.append(f"COUNT(({formula_sql})) AS \"{alias}\"")
 
         else:
-            if is_numeric:
+            if agg_func == "distinct count":
+                y_axis_exprs.append(f"COUNT(DISTINCT \"{y_col}\"::numeric) AS \"{y_col}\"")
+            elif is_numeric:
                 y_axis_exprs.append(f"{agg_func}(\"{y_col}\"::numeric) AS \"{y_col}\"")
             else:
                 y_axis_exprs.append(f"COUNT(\"{y_col}\") AS \"{y_col}\"")
@@ -4992,11 +5043,23 @@ def fetchText_data(databaseName, table_Name, x_axis, aggregate_py, selectedUser,
 
     column_type = row[0]
 
-    # --- 3. Construct Final Query ---
+    # 3. Construct Final Query
     # If where_sql is "", it simply acts as whitespace
     
-    if column_type == 'character varying' or column_type == 'text':
-        # For text, we usually Count Distinct
+    if aggregate_py.lower() == 'distinct count':
+        query = f"""
+            SELECT COUNT(DISTINCT "{x_axis}") AS total_x_axis
+            FROM "{table_Name}"
+            {where_sql}
+        """
+    elif aggregate_py.lower() == 'count':
+        query = f"""
+            SELECT COUNT("{x_axis}") AS total_x_axis
+            FROM "{table_Name}"
+            {where_sql}
+        """
+    elif column_type == 'character varying' or column_type == 'text':
+        # For text, we usually Count Distinct if no specific aggregate matched above
         query = f"""
             SELECT COUNT(DISTINCT "{x_axis}") AS total_x_axis
             FROM "{table_Name}"
