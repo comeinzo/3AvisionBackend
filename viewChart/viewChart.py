@@ -539,7 +539,7 @@ import psycopg2
 from psycopg2.extras import RealDictCursor
 from config import USER_NAME, DB_NAME, PASSWORD, HOST, PORT
 from bar_chart import fetch_external_db_connection,convert_calculation_to_sql
-from user_upload import get_db_connection
+from user_upload import get_db_connection,get_company_db_connection
 import json
 import pyodbc
 
@@ -991,16 +991,32 @@ def fetch_ai_saved_chart_data(connection, tableName, chart_id):
 #         if connection:
 #             connection.close()
 
+def build_where_from_filters(filter_options):
+    clauses = []
+    params = []
 
-def filter_chart_data(database_name, table_name, x_axis, y_axis, aggregate, clicked_category_Xaxis, category, chart_id, calculationData, chart_type):
+    for col, rule in filter_options.items():
+        values = rule.get("values", [])
+        if not values:
+            continue
+
+        placeholders = ",".join(["%s"] * len(values))
+        clauses.append(f'"{col}" IN ({placeholders})')
+        params.extend(values)
+
+    return clauses, params
+
+def filter_chart_data(database_name, table_name, x_axis, y_axis, aggregate, clicked_category_Xaxis, category, chart_id, calculationData, chart_type,filter_options,user_id):
     try:
         connection = get_db_connection()
         cursor = connection.cursor()
+        
 
         # Get selectedUser
         cursor.execute("SELECT selectedUser FROM table_chart_save WHERE id = %s", (chart_id,))
         selectedUser = cursor.fetchone()
         selectedUser = selectedUser[0] if selectedUser else None
+       
 
         if selectedUser:
             external_conn = fetch_external_db_connection(database_name, selectedUser)
@@ -1102,6 +1118,92 @@ def filter_chart_data(database_name, table_name, x_axis, y_axis, aggregate, clic
 
         aggregate = AGGREGATE_MAP.get(aggregate.lower(), "sum")
         print("✔ PostgreSQL Aggregate Used:", aggregate)
+        # =========================================================
+        # 🔐 ROLE + EMPLOYEE CATEGORY FILTERING (ADDED ONLY)
+        # =========================================================
+
+        # ---------- Parse chart filter_options safely ----------
+        try:
+            # raw_filter_options = filter_options if filter_options else None
+            # raw_filter_options = filter_options.replace('null', 'null') if filter_options else None
+            chart_filters_clean = filter_options
+        except Exception as e:
+            print("Invalid filter_options:", e)
+            chart_filters_clean = {}
+
+        # ---------- Fetch role + employee category ----------
+        user_role = None
+        employee_category_filter = []
+
+        try:
+            company_conn = get_company_db_connection(database_name)
+            emp_cur = company_conn.cursor()
+
+            # 🔹 Fetch user role
+            emp_cur.execute("""
+                SELECT r.role_name
+                FROM employee_list e
+                JOIN role r ON e.role_id = r.role_id::text
+                WHERE e.employee_id = %s
+                LIMIT 1
+            """, (user_id,))
+            role_row = emp_cur.fetchone()
+            if role_row:
+                user_role = role_row[0].lower().strip()
+
+            # 🔹 Fetch employee category mapping
+            emp_cur.execute("""
+                SELECT c.category_name, ucm.category_value, COALESCE(ucm.operator, 'AND')
+                FROM user_category_mapping ucm
+                JOIN category c ON c.category_id = ucm.category_id
+                WHERE ucm.user_id = %s
+                ORDER BY ucm.id ASC
+            """, (user_id,))
+
+            employee_category_filter = [
+                {"key": k, "value": v, "operator": op}
+                for k, v, op in emp_cur.fetchall()
+                if k and v
+            ]
+            print("employee_category_filter",employee_category_filter)
+
+        except Exception as e:
+            print("Failed to fetch role/category:", e)
+
+        finally:
+            if company_conn:
+                emp_cur.close()
+                company_conn.close()
+        from dashboard_save.dashboard_save import is_restricted_role
+
+        # ---------- Apply restriction ONLY for restricted roles ----------
+        if is_restricted_role(user_role):
+            # print("Restricted role detected → applying employee category restriction")
+            from dashboard_save.dashboard_save import expand_filters_with_actual_values
+            print("Restricted role detected → applying employee category restriction")
+
+           
+            # Fetch dataframe
+            df = fetch_chart_data(connection, table_name)
+                
+
+            chart_filters_clean = expand_filters_with_actual_values(
+                df,
+                chart_filters_clean,
+                employee_category_filter
+            )
+
+        # ---------- Merge drill-down click into filters ----------
+        if category and clicked_category_Xaxis:
+            chart_filters_clean.setdefault(clicked_category_Xaxis, {})
+            chart_filters_clean[clicked_category_Xaxis] = {
+                "values": [category],
+                "operator": "AND"
+            }
+
+        # ---------- FINAL filters used everywhere below ----------
+        filter_options = chart_filters_clean
+
 
         
         # **NEW: Handle singleValueChart early**
@@ -1308,15 +1410,56 @@ def filter_chart_data(database_name, table_name, x_axis, y_axis, aggregate, clic
                     # Default behavior for non-date columns (region, country, etc.)
                     where_expr = f'"{clicked_category_Xaxis}" = %s'
                 # --- NEW DATE LOGIC END ---
+                # ============================================================
+            # 🔹 ADDED PART: merge employee / chart filters (NO REWRITE)
+            # ============================================================
+
+            where_clauses = []
+            query_params = []
+
+            # Existing drill-down condition
+            where_clauses.append(where_expr)
+            query_params.append(category)
+
+            # 🔹 ADDITION: apply filter_options if present
+            if filter_options:
+                filter_dict = filter_options if isinstance(filter_options, dict) else json.loads(filter_options)
+
+                if clicked_category_Xaxis in filter_dict:
+                    filter_dict.pop(clicked_category_Xaxis, None)
+                for key, rule in filter_dict.items():
+                    values = rule.get("values") if isinstance(rule, dict) else rule
+                    if values:
+                        placeholders = ",".join(["%s"] * len(values))
+                        where_clauses.append(f'"{key}" IN ({placeholders})')
+                        query_params.extend(values)
+
+            # if filter_options:
+            #     for col, rule in filter_options.items():
+            #         values = rule.get("values", [])
+            #         if not values:
+            #             continue
+
+            #         placeholders = ",".join(["%s"] * len(values))
+            #         where_clauses.append(f'"{col}" IN ({placeholders})')
+            #         query_params.extend(values)
+
+            final_where = " AND ".join(where_clauses)
+            print("where",final_where)
+
 
             query = f"""
                 SELECT {X_Axis}, {y_axis_aggregate}
                 FROM "{table_name}"
-                WHERE {where_expr}
+                WHERE {final_where}
                 GROUP BY {X_Axis_group};
             """
-            print("Executing query:", query, "with param:", category)
-            cursor.execute(query, (category,))
+            print("Executing query:", query, "with params:", query_params)
+
+            # ✅ FIXED LINE
+            cursor.execute(query, tuple(query_params))
+
+            # cursor.execute(query, (category,))
                 
         # if category:
         #     # Handle category filtering
@@ -1337,11 +1480,11 @@ def filter_chart_data(database_name, table_name, x_axis, y_axis, aggregate, clic
 
         else:
             # Handle general filtering
-            connection = get_db_connection()
-            cursor = connection.cursor(cursor_factory=RealDictCursor)
-            cursor.execute("SELECT filter_options FROM table_chart_save WHERE id = %s", (chart_id,))
-            filterdata_result = cursor.fetchone()
-            filter_options = filterdata_result.get('filter_options') if filterdata_result else None
+            # connection = get_db_connection()
+            # cursor = connection.cursor(cursor_factory=RealDictCursor)
+            # cursor.execute("SELECT filter_options FROM table_chart_save WHERE id = %s", (chart_id,))
+            # filterdata_result = cursor.fetchone()
+            # filter_options = filterdata_result.get('filter_options') if filterdata_result else None
 
             where_clauses = []
             if filter_options:

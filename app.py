@@ -5891,6 +5891,7 @@ def handle_clicked_category():
     category = data.get('category')
     charts= data.get('charts')  
     clicked_catagory_Xaxis=data.get('x_axis')
+    user_id=data.get("user_id")
     # print("data", data)
     print("Category clicked:", category)
     database_name = data.get('databaseName')
@@ -5937,7 +5938,7 @@ def handle_clicked_category():
             
             print("x_axis====================",x_axis)
             print("x_axis====================",x_axis)
-            chart_data = filter_chart_data(database_name, table_name, x_axis, y_axis, aggregate,clicked_catagory_Xaxis,category,chart_id,calculationData,chart_type)
+            chart_data = filter_chart_data(database_name, table_name, x_axis, y_axis, aggregate,clicked_catagory_Xaxis,category,chart_id,calculationData,chart_type,filter_options,user_id)
             chart_data_list.append({
                 "chart_id": chart_id,
                 "data": chart_data
