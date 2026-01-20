@@ -2760,8 +2760,20 @@ def fetch_data_for_duel(
             current_group = []       # current AND group
 
             for col, data in filter_options.items():
-                if col not in global_df.columns:
+                # if col not in global_df.columns:
+                #     continue
+                matched_calc = next(
+                    (
+                        calc for calc in (calculationData or [])
+                        if calc.get("columnName") == col and calc.get("calculation")
+                    ),
+                    None
+                )
+
+                # 🚨 Only skip if it's neither real column nor calculated column
+                if col not in global_df.columns and not matched_calc:
                     continue
+
 
                 # 🔹 Normalize input
                 if isinstance(data, dict):
@@ -3566,8 +3578,20 @@ def fetch_data_for_duel_bar(
         current_group = []       # current AND group
 
         for col, data in filter_options.items():
-            if col not in global_df.columns:
+            # if col not in global_df.columns:
+            #     continue
+            matched_calc = next(
+                (
+                    calc for calc in (calculationData or [])
+                    if calc.get("columnName") == col and calc.get("calculation")
+                ),
+                None
+            )
+
+            # 🚨 Only skip if it's neither real column nor calculated column
+            if col not in global_df.columns and not matched_calc:
                 continue
+
 
                 # 🔹 Normalize input
             if isinstance(data, dict):
@@ -3720,6 +3744,7 @@ def fetch_data_for_duel_bar(
             float(sample_value)
         except:
             is_numeric = False
+            
 
         if matched_calc:
             formula_sql = convert_calculation_to_sql(
