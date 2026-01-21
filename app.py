@@ -2956,7 +2956,7 @@ def get_bar_chart_route():
 
 
         except Exception as e:
-            print("Error preparing Tree Hierarchy data:", e)
+            print("Error preparing Tree Hierarchy data:----1", e)
             return jsonify({"error": str(e)})
 
     # Single Y-axis chart
@@ -3586,7 +3586,7 @@ def get_edit_chart_route():
             })
 
         except Exception as e:
-            print("Error preparing Tree Hierarchy data:", e)
+            print("Error preparing Tree Hierarchy data:-----2", e)
             return jsonify({"error": str(e)})
 
     elif chartType == "timeSeriesDecomposition":
@@ -3788,7 +3788,7 @@ def get_edit_chart_route():
            
 
         except Exception as e:
-            print("Error preparing Tree Hierarchy data:", e)
+            print("Error preparing Tree Hierarchy data:------3", e)
             return jsonify({"error": str(e)})
 
     elif (
