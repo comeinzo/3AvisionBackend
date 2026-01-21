@@ -7564,7 +7564,7 @@ def receive_chart_details():
         print("Error: ", e)
         return jsonify({"message": "Error processing request", "error": str(e)}), 500
 
-def get_dashboard_data(dashboard_name, company_name,user_id):
+def get_dashboard_data(dashboard_name, company_name,project_name,user_id):
     conn = connect_to_db()
     if conn:
         try:
@@ -7572,12 +7572,14 @@ def get_dashboard_data(dashboard_name, company_name,user_id):
             query = """
                 SELECT *
                 FROM table_dashboard
-                WHERE file_name = %s AND company_name = %s AND user_id = %s
+                WHERE file_name = %s AND company_name = %s AND project_name = %s AND user_id = %s
             """
             print("query",query)
             print("user_id",user_id)
-            cursor.execute(query, (dashboard_name, company_name,user_id))
+            cursor.execute(query, (dashboard_name, company_name,project_name,user_id))
             data = cursor.fetchone()
+
+            print("data",data)
             
             if data is None:
                 print(f"No data found for Chart: {dashboard_name} and Company: {company_name}")
@@ -7724,9 +7726,9 @@ def get_dashboard_data(dashboard_name, company_name,user_id):
 #         return jsonify({'error': 'Failed to fetch data for Chart {}'.format(dashboard_name)})
     
 
-@app.route('/Dashboard_data/<dashboard_name>/<company_name>', methods=['GET'])
+@app.route('/Dashboard_data/<dashboard_name>/<company_name>/<project_name>', methods=['GET'])
 @token_required
-def dashboard_data(dashboard_name,company_name):
+def dashboard_data(dashboard_name,company_name,project_name):
     user_id, dashboard_name = dashboard_name.split(",", 1)  # Split only once
     view_mode = request.args.get('view_mode') 
     logged_user_role=request.args.get("user_role")
@@ -7759,8 +7761,11 @@ def dashboard_data(dashboard_name,company_name):
             print(f"⚠️ Error parsing temporary filters: {e}")
             active_temp_filters = {}
     # ------------------------------------
-
-    data = get_dashboard_data(dashboard_name,company_name,user_id)
+    print("dashboard_name",dashboard_name)
+    print("company_name",company_name)
+    print("project_name",project_name)
+    print("user_id",user_id)
+    data = get_dashboard_data(dashboard_name,company_name,project_name,user_id)
     if data is not None:
         chart_ids = data[4]
         positions=data[5]
@@ -10804,19 +10809,20 @@ def check_save_name():
 @token_required
 def check_filename(fileName, company_name):
     user_id = request.args.get('user_id')  # Use query param for GET
+    project_name = request.args.get('project_name') # Get project_name from query params
 
     try:
         conn = get_db_connection()
         cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
         # create_dashboard_table(conn)
         
-        # Query to check if the file name exists for the given company name
+        # Query to check if the file name exists for the given company name AND project
         query = """
             SELECT COUNT(*) 
             FROM table_dashboard 
-            WHERE file_name = %s AND company_name = %s AND user_id= %s
+            WHERE file_name = %s AND company_name = %s AND user_id= %s AND project_name = %s
         """
-        cursor.execute(query, (fileName, company_name,user_id))
+        cursor.execute(query, (fileName, company_name, user_id, project_name))
         exists = cursor.fetchone()[0] > 0
 
         cursor.close()
