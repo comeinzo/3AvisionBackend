@@ -8813,13 +8813,36 @@ def handle_hierarchical_bar_click():
             if y_axis_column[0] not in global_df.columns:
                 return jsonify({"error": f"Column {y_axis_column[0]} not found in global_df."}), 500
             
+            
             global_df[y_axis_column[0]] = pd.to_numeric(global_df[y_axis_column[0]], errors='coerce')
+            
+            # Handle aggregation if it's sent as a JSON string
+            agg_param = data.get('aggregation', 'sum')
+            final_aggregation = 'sum'
+            
+            if isinstance(agg_param, str):
+                try:
+                    agg_param = agg_param.strip()
+                    if agg_param.startswith('[') or agg_param.startswith('{'):
+                        parsed_agg = json.loads(agg_param)
+                        if isinstance(parsed_agg, list) and len(parsed_agg) > 0:
+                            final_aggregation = parsed_agg[0].get('aggregation', 'sum')
+                        elif isinstance(parsed_agg, dict):
+                             final_aggregation = parsed_agg.get('aggregation', 'sum')
+                    else:
+                        final_aggregation = agg_param
+                except Exception as e:
+                    print(f"Error parsing aggregation JSON: {e}")
+                    final_aggregation = 'sum'
+            else:
+                final_aggregation = agg_param
+
             drill_down_result = Hierarchial_drill_down(
                 clicked_category=clicked_category, 
                 x_axis_columns=x_axis_columns, 
                 y_axis_column=y_axis_column, 
                 depth=current_depth, 
-                aggregation=data.get('aggregation')
+                aggregation=final_aggregation
             )
             print("Drill-down result:", drill_down_result)
             return jsonify(drill_down_result)
