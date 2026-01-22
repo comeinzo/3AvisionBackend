@@ -516,101 +516,143 @@ def fetch_project_names(user_id, database_name):
 
 
 
+# def get_dashboard_names(user_id, database_name, project_name=None):
+#     # Step 1: Get employees reporting to the given user_id from the company database.
+#     conn_company = get_company_db_connection(database_name)
+#     reporting_employees = []
+
+#     if conn_company:
+#         try:
+#             with conn_company.cursor() as cursor:
+#                 cursor.execute("""
+#                     SELECT column_name FROM information_schema.columns
+#                     WHERE table_name='employee_list' AND column_name='reporting_id'
+#                 """)
+#                 column_exists = cursor.fetchone()
+
+#                 if column_exists:
+#                     cursor.execute("""
+#                         WITH RECURSIVE subordinates AS (
+#                             SELECT employee_id, reporting_id
+#                             FROM employee_list
+#                             WHERE reporting_id = %s
+
+#                             UNION
+
+#                             SELECT e.employee_id, e.reporting_id
+#                             FROM employee_list e
+#                             INNER JOIN subordinates s ON e.reporting_id = s.employee_id
+#                         )
+#                         SELECT employee_id FROM subordinates
+#                         UNION
+#                         SELECT %s;
+#                     """, (user_id, user_id))
+#                     reporting_employees = [row[0] for row in cursor.fetchall()]
+#                 else:
+#                     reporting_employees = [] # If no reporting_id, only user_id will be considered below
+
+#         except psycopg2.Error as e:
+#             print(f"Error fetching reporting employees: {e}")
+#         finally:
+#             conn_company.close()
+
+#     # Include the user's own employee_id for fetching their charts.
+#     all_employee_ids = list(map(int, reporting_employees)) + [int(user_id)]
+
+#     # Step 2: Fetch dashboard names for these employees from the datasource database.
+#     conn_datasource = get_db_connection(DB_NAME)
+#     dashboard_names = {}
+
+#     if conn_datasource:
+#         try:
+#             with conn_datasource.cursor() as cursor:
+#                 placeholders = ', '.join(['%s'] * len(all_employee_ids))
+#                 # query = f"""
+#                 #     SELECT user_id, file_name FROM table_dashboard
+#                 #     WHERE user_id IN ({placeholders}) AND company_name = %s AND project_name = %s 
+#                 # """
+#                 # params = tuple(map(str, all_employee_ids)) + (database_name, project_name)
+                
+#                 # if project_name: # Add project_name filter if provided
+#                 #     query += " AND project_name = %s"
+#                 #     params += (project_name,)
+
+#                 if project_name:
+#                     query = f"""
+#                         SELECT user_id, file_name
+#                         FROM table_dashboard
+#                         WHERE user_id IN ({placeholders})
+#                         AND company_name = %s
+#                         AND project_name = %s
+#                         ORDER BY updated_at DESC;
+#                     """
+#                     params = tuple(map(str, all_employee_ids)) + (database_name, project_name)
+
+#                 else:
+#                     query = f"""
+#                         SELECT user_id, file_name
+#                         FROM table_dashboard
+#                         WHERE user_id IN ({placeholders})
+#                         AND company_name = %s
+#                         ORDER BY updated_at DESC;
+#                     """
+#                     params = tuple(map(str, all_employee_ids)) + (database_name,)
+#                 cursor.execute(query, params)
+#                 dashboards = cursor.fetchall()
+#                 print("dashboards",dashboards)
+
+#                 # for uid, file_name in dashboards:
+#                 #     if uid not in dashboard_names:
+#                 #         dashboard_names[uid] = []
+#                 #     dashboard_names[uid].append(file_name)
+#         except psycopg2.Error as e:
+#             print(f"Error fetching dashboard details: {e}")
+#         finally:
+#             conn_datasource.close()
+
+#     return dashboards
+
+
 def get_dashboard_names(user_id, database_name, project_name=None):
-    # Step 1: Get employees reporting to the given user_id from the company database.
-    conn_company = get_company_db_connection(database_name)
-    reporting_employees = []
-
-    if conn_company:
-        try:
-            with conn_company.cursor() as cursor:
-                cursor.execute("""
-                    SELECT column_name FROM information_schema.columns
-                    WHERE table_name='employee_list' AND column_name='reporting_id'
-                """)
-                column_exists = cursor.fetchone()
-
-                if column_exists:
-                    cursor.execute("""
-                        WITH RECURSIVE subordinates AS (
-                            SELECT employee_id, reporting_id
-                            FROM employee_list
-                            WHERE reporting_id = %s
-
-                            UNION
-
-                            SELECT e.employee_id, e.reporting_id
-                            FROM employee_list e
-                            INNER JOIN subordinates s ON e.reporting_id = s.employee_id
-                        )
-                        SELECT employee_id FROM subordinates
-                        UNION
-                        SELECT %s;
-                    """, (user_id, user_id))
-                    reporting_employees = [row[0] for row in cursor.fetchall()]
-                else:
-                    reporting_employees = [] # If no reporting_id, only user_id will be considered below
-
-        except psycopg2.Error as e:
-            print(f"Error fetching reporting employees: {e}")
-        finally:
-            conn_company.close()
-
-    # Include the user's own employee_id for fetching their charts.
-    all_employee_ids = list(map(int, reporting_employees)) + [int(user_id)]
-
-    # Step 2: Fetch dashboard names for these employees from the datasource database.
+    # We only need one connection now, as we aren't looking up subordinates
     conn_datasource = get_db_connection(DB_NAME)
-    dashboard_names = {}
+    dashboards = []
 
     if conn_datasource:
         try:
             with conn_datasource.cursor() as cursor:
-                placeholders = ', '.join(['%s'] * len(all_employee_ids))
-                # query = f"""
-                #     SELECT user_id, file_name FROM table_dashboard
-                #     WHERE user_id IN ({placeholders}) AND company_name = %s AND project_name = %s 
-                # """
-                # params = tuple(map(str, all_employee_ids)) + (database_name, project_name)
-                
-                # if project_name: # Add project_name filter if provided
-                #     query += " AND project_name = %s"
-                #     params += (project_name,)
+                # Step 1: Construct the base query
+                # We switch from "IN (...) " to " = %s " for a single user
+                query = """
+                    SELECT user_id, file_name
+                    FROM table_dashboard
+                    WHERE user_id = %s 
+                    AND company_name = %s
+                """
+                params = [user_id, database_name]
 
+                # Step 2: Add optional filter for project_name
                 if project_name:
-                    query = f"""
-                        SELECT user_id, file_name
-                        FROM table_dashboard
-                        WHERE user_id IN ({placeholders})
-                        AND company_name = %s
-                        AND project_name = %s
-                        ORDER BY updated_at DESC;
-                    """
-                    params = tuple(map(str, all_employee_ids)) + (database_name, project_name)
+                    query += " AND project_name = %s"
+                    params.append(project_name)
 
-                else:
-                    query = f"""
-                        SELECT user_id, file_name
-                        FROM table_dashboard
-                        WHERE user_id IN ({placeholders})
-                        AND company_name = %s
-                        ORDER BY updated_at DESC;
-                    """
-                    params = tuple(map(str, all_employee_ids)) + (database_name,)
-                cursor.execute(query, params)
+                # Step 3: Add ordering
+                query += " ORDER BY updated_at DESC;"
+
+                # Step 4: Execute
+                cursor.execute(query, tuple(params))
                 dashboards = cursor.fetchall()
-                print("dashboards",dashboards)
+                
+                print("dashboards", dashboards)
 
-                # for uid, file_name in dashboards:
-                #     if uid not in dashboard_names:
-                #         dashboard_names[uid] = []
-                #     dashboard_names[uid].append(file_name)
         except psycopg2.Error as e:
             print(f"Error fetching dashboard details: {e}")
         finally:
             conn_datasource.close()
 
     return dashboards
+
+
 
 def get_Edit_dashboard_names(user_id, database_name):
     """
