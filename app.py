@@ -17269,47 +17269,47 @@ def generate_business_insights(table_name, schema, data_summary, focus_area, sam
     
     prompt = f"""You are an expert business analyst and data scientist. Analyze the following database table and provide actionable insights.
 
-Table Name: {table_name}
+                Table Name: {table_name}
 
-Schema:
-{schema}
+                Schema:
+                {schema}
 
-Data Summary:
-- Total Records: {data_summary['total_rows']}
-- Numeric Columns Stats: {
-            # safer json stringify of summary
-            json.dumps(data_summary.get('numeric_stats',{}), indent=2)
-}
-- Categorical Columns Stats: {
-            json.dumps(data_summary.get('categorical_stats',{}), indent=2)
-}
+                Data Summary:
+                - Total Records: {data_summary['total_rows']}
+                - Numeric Columns Stats: {
 
-Sample Data Preview:
-{sample_data}
+                            json.dumps(data_summary.get('numeric_stats',{}), indent=2)
+                }
+                - Categorical Columns Stats: {
+                            json.dumps(data_summary.get('categorical_stats',{}), indent=2)
+                }
 
-Focus Area: {focus_area}
+                Sample Data Preview:
+                {sample_data}
 
-Please provide:
-1. **Key Findings**
-2. **Actionable Recommendations**
-3. **Data Quality Observations**
-4. **Suggested Metrics to Track**
-5. **Quick Wins**
+                Focus Area: {focus_area}
 
-Format your response as JSON with the following structure:
-{{
-  "key_findings": ["finding 1", ...],
-  "recommendations": [
-    {{"title": "Title", "description": "Desc", "priority": "high", "impact": "Impact"}}
-  ],
-  "data_quality": ["obs 1", ...],
-  "suggested_metrics": ["metric 1", ...],
-  "quick_wins": [
-    {{"action": "Action", "expected_outcome": "Outcome"}}
-  ]
-}}
+                Please provide:
+                1. **Key Findings**
+                2. **Actionable Recommendations**
+                3. **Data Quality Observations**
+                4. **Suggested Metrics to Track**
+                5. **Quick Wins**
 
-Provide ONLY the JSON response, no additional text or markdown."""
+                Format your response as JSON with the following structure:
+                {{
+                "key_findings": ["finding 1", ...],
+                "recommendations": [
+                    {{"title": "Title", "description": "Desc", "priority": "high", "impact": "Impact"}}
+                ],
+                "data_quality": ["obs 1", ...],
+                "suggested_metrics": ["metric 1", ...],
+                "quick_wins": [
+                    {{"action": "Action", "expected_outcome": "Outcome"}}
+                ]
+                }}
+
+            Provide ONLY the JSON response, no additional text or markdown."""
     
     try:
         insights_text = generate_content_with_fallback(prompt, genai.GenerationConfig(temperature=0.7), json_mode=True)
