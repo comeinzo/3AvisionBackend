@@ -1957,10 +1957,8 @@ def fetch_data_tree(table_name, x_axis_columns, filter_options, y_axis_column, a
 
         # Fetch data from database
         print("Fetching data from the database...")
-        
         connection = get_db_connection_or_path(selectedUser, db_name)
         print("connection..........")
-
         cur = connection.cursor()
         query = f'SELECT * FROM "{table_name}"'
         print("query:", query)
@@ -1971,7 +1969,6 @@ def fetch_data_tree(table_name, x_axis_columns, filter_options, y_axis_column, a
         cur.close()
         connection.close()
         print(f"Fetched {len(df)} rows from table {table_name}")
-
         # Work on a copy
         temp_df = df.copy()
         print("temp_df", temp_df)
@@ -1982,14 +1979,11 @@ def fetch_data_tree(table_name, x_axis_columns, filter_options, y_axis_column, a
                 calc_formula = calc_entry.get('calculation', '').strip()
                 new_col_name = calc_entry.get('columnName', '').strip()
                 replace_col = calc_entry.get('replaceColumn', new_col_name)
-
                 if not calc_formula or not new_col_name:
                     continue  # Skip incomplete entries
-
                 # Apply only if the column is involved in x or y axis
                 if new_col_name not in (x_axis_columns or []) and new_col_name not in (y_axis_column or []):
                     continue
-
                 def replace_column(match):
                     col_name = match.group(1)
                     if col_name in temp_df.columns:
@@ -2002,15 +1996,10 @@ def fetch_data_tree(table_name, x_axis_columns, filter_options, y_axis_column, a
                             return f"temp_df['{col_name}']" # Treat as string if not numeric
                     else:
                         raise ValueError(f"Column '{col_name}' not found in DataFrame for calculation.")
-
                 if y_axis_column:
                     y_axis_column = [new_col_name if col == replace_col else col for col in y_axis_column]
-
                 if x_axis_columns:
                     x_axis_columns = [new_col_name if col == replace_col else col for col in x_axis_columns]
-
-                        # if new_col_name in y_axis_column:
-
                     # Handle "if (...) then ... else ..." expressions
                     if calc_formula.strip().lower().startswith("if"):
                         match = (
@@ -2026,30 +2015,17 @@ def fetch_data_tree(table_name, x_axis_columns, filter_options, y_axis_column, a
                                 re.IGNORECASE
                             )
                         )
-                        # match = re.match(r"if\s*\((.+?)\)\s*then\s*'?(.*?)'?\s*else\s*'?(.*?)'?$", calc_formula.strip(), re.IGNORECASE)
                         if not match:
                             raise ValueError("Invalid if-then-else format in calculation.")
 
                         condition_expr, then_val, else_val = match.groups()
-
-                        # def replace_column(match):
-                        #     col_name = match.group(1)
-                        #     if col_name in temp_df.columns:
-                        #         return f"temp_df['{col_name}']"
-                        #     else:
-                        #         raise ValueError(f"Column {col_name} not found in DataFrame.")
-
                         condition_expr_python = re.sub(r'\[(.*?)\]', replace_column, condition_expr)
-
-                        # print("Evaluating formula as np.where:", f"np.where({condition_expr_python}, '{then_val}', '{else_val}')")
-                        # Strip any unnecessary wrapping quotes from then/else values
                         then_val = then_val.strip('"').strip("'")
                         else_val = else_val.strip('"').strip("'")
 
                         print("Evaluating formula as np.where:", f"np.where({condition_expr_python}, {then_val}, {else_val})")
                         temp_df[new_col_name] = np.where(eval(condition_expr_python),f"{then_val}",f"{else_val}")
 
-                        # temp_df[new_col_name] = np.where(eval(condition_expr_python), then_val, else_val)
                     elif calc_formula.lower().startswith("switch"):
                         switch_match = re.match(r"switch\s*\(\s*\[([^\]]+)\](.*?)\)", calc_formula, re.IGNORECASE)
                         if not switch_match:
@@ -2195,18 +2171,11 @@ def fetch_data_tree(table_name, x_axis_columns, filter_options, y_axis_column, a
                         temp_df[end_col] = pd.to_datetime(temp_df[end_col], errors='coerce')
                         temp_df[start_col] = pd.to_datetime(temp_df[start_col], errors='coerce')
                         temp_df[new_col_name] = (temp_df[end_col] - temp_df[start_col]).dt.days
-
-                    # elif calc_formula.lower().startswith("today()"):
-                    #     temp_df[new_col_name] = pd.Timestamp.today().normalize()
                     elif calc_formula.lower().startswith("today()"):
                         # Assign today's date (normalized to midnight) to each row
                         temp_df[new_col_name] = pd.to_datetime(pd.Timestamp.today().normalize())
-
-
                     elif calc_formula.lower().startswith("now()"):
                         temp_df[new_col_name] = pd.Timestamp.now()
-
-                
                     elif calc_formula.lower().startswith("dateadd"):
                         match = re.match(
                             r'dateadd\s*\(\s*\[([^\]]+)\]\s*,\s*(-?\d+)\s*,\s*["\'](day|month|year)["\']\s*\)',
@@ -2222,10 +2191,8 @@ def fetch_data_tree(table_name, x_axis_columns, filter_options, y_axis_column, a
                         # Step 1: Ensure the source column exists
                         if col not in temp_df.columns:
                             raise ValueError(f"DATEADD error: Column '{col}' not found in dataframe")
-
                         # Step 2: Convert to datetime (NaNs will be handled)
                         temp_df[col] = pd.to_datetime(temp_df[col], errors='coerce')
-
                         # Step 3: Apply the offset
                         if unit == "day":
                             temp_df[new_col_name] = temp_df[col] + pd.to_timedelta(interval, unit='d')
@@ -2235,32 +2202,21 @@ def fetch_data_tree(table_name, x_axis_columns, filter_options, y_axis_column, a
                             temp_df[new_col_name] = temp_df[col] + pd.DateOffset(years=interval)
                         else:
                             raise ValueError("DATEADD error: Unsupported time unit. Use 'day', 'month', or 'year'")
-
                         # Step 4: Normalize the new date column (remove time for consistent filtering)
-                        temp_df[new_col_name] = temp_df[new_col_name].dt.normalize()
-
-                    
+                        temp_df[new_col_name] = temp_df[new_col_name].dt.normalize()                    
                         print("DATEADD applied — preview:")
                         print(temp_df[[col, new_col_name]].dropna().head(10))
                         print("Nulls in source column:", temp_df[col].isna().sum())
                         print("Nulls in new column:", temp_df[new_col_name].isna().sum())
-
-
-
                     elif calc_formula.lower().startswith("formatdate"):
                         match = re.match(r'formatdate\s*\(\s*(?:\[([^\]]+)\]|"([^"]+)")\s*,\s*["\'](.+?)["\']\s*\)', calc_formula, re.IGNORECASE)
                         if not match:
                             raise ValueError("Invalid FORMATDATE format.")
-                        
                         col = match.group(1) or match.group(2)
                         fmt = match.group(3)
-
                         temp_df[col] = pd.to_datetime(temp_df[col], errors='coerce')
                         # temp_df[new_col_name] = temp_df[col].dt.strftime(fmt)
                         temp_df[new_col_name] = temp_df[col].dt.strftime(fmt.replace("YYYY", "%Y").replace("MM", "%m").replace("DD", "%d"))
-
-
-
                     elif calc_formula.lower().startswith("replace"):
                         match = re.match(r'replace\s*\(\s*\[([^\]]+)\]\s*,\s*["\'](.*?)["\']\s*,\s*["\'](.*?)["\']\s*\)', calc_formula, re.IGNORECASE)
                         if not match:
@@ -2274,83 +2230,40 @@ def fetch_data_tree(table_name, x_axis_columns, filter_options, y_axis_column, a
                             raise ValueError("Invalid TRIM format.")
                         col = match.group(1)
                         temp_df[new_col_name] = temp_df[col].astype(str).str.strip()
-
-
-
-
-
-
                     # Case 5: Math formula like [A] * [B] - [C]
                     else:
                         calc_formula_python = re.sub(r'\[(.*?)\]', replace_column, calc_formula)
                         print("Evaluating math formula:", calc_formula_python)
                         temp_df[new_col_name] = eval(calc_formula_python)
-
-                    # print(f"New column '{new_col_name}' created.")
-                    # y_axis_column = [new_col_name]
                     if y_axis_column:
                         y_axis_column = [new_col_name if col == replace_col else col for col in y_axis_column]
                     if x_axis_columns:
                         x_axis_columns = [new_col_name if col == replace_col else col for col in x_axis_columns]
-
-
-
         # Apply filters
         if isinstance(filter_options, str):
             filter_options = json.loads(filter_options)
-
-        # for col, filters in filter_options.items():
-        #     if col in temp_df.columns:
-        #         temp_df[col] = temp_df[col].astype(str)
-        #         temp_df = temp_df[temp_df[col].isin(filters)]
-        # for col, filters in filter_options.items():
-        #     if col in temp_df.columns:
-        #         temp_df[col] = temp_df[col].astype(str)
-        #         filters = list(map(str, filters))  # <-- convert filter values to string too
-        #         temp_df = temp_df[temp_df[col].isin(filters)]
-
-        # for col, filters in filter_options.items():
-        #     if col in temp_df.columns:
-        #         temp_df[col] = temp_df[col].astype(str)
-        #         filter_options[col] = list(map(str, filters))
-        #         temp_df = temp_df[temp_df[col].isin(filter_options[col])]
-
         for col in x_axis_columns:
             if col in temp_df.columns:
                 temp_df[col] = temp_df[col].astype(str)
-
-        # options = []
-        # for col in x_axis_columns:
-        #     if col in filter_options:
-        #         options.extend(filter_options[col])
-        # options = list(map(str, options))
-        # Apply AND / OR filters
         filtered_df = apply_and_or_filters(temp_df, filter_options)
         print("filter_options:", filter_options,"filtered_df",filtered_df)
-
-
-        # filtered_df = temp_df[temp_df[x_axis_columns[0]].isin(options)]
-        # if options:
-        #     filtered_df = temp_df[temp_df[x_axis_columns[0]].isin(options)]
-        # else:
-        # filtered_df = temp_df
-
         if y_axis_column and aggregation and y_axis_column[0] in filtered_df.columns:
             if aggregation.lower() == "sum":
                 filtered_df = filtered_df.groupby(x_axis_columns, as_index=False)[y_axis_column[0]].sum()
-            elif aggregation.lower() == "avg":
+            elif aggregation.lower() == "average":
                 filtered_df = filtered_df.groupby(x_axis_columns, as_index=False)[y_axis_column[0]].mean()
-            elif aggregation.lower() == "min":
+            elif aggregation.lower() == "minimum":
                 filtered_df = filtered_df.groupby(x_axis_columns, as_index=False)[y_axis_column[0]].min()
-            elif aggregation.lower() == "max":
+            elif aggregation.lower() == "maximum":
                 filtered_df = filtered_df.groupby(x_axis_columns, as_index=False)[y_axis_column[0]].max()
             elif aggregation.lower() == "count":
                 filtered_df = filtered_df.groupby(x_axis_columns, as_index=False)[y_axis_column[0]].count()
+            elif aggregation.lower() == "distinct count":
+                filtered_df = filtered_df.groupby(x_axis_columns, as_index=False)[y_axis_column[0]].nunique()
             else:
                 raise ValueError("Unsupported aggregation type. Use 'sum', 'avg', 'min', 'max', or 'count'.")
 
         print("filtered_df:", filtered_df)
-
         categories = []
         values = []
         for index, row in filtered_df.iterrows():
@@ -2369,7 +2282,7 @@ def fetch_data_tree(table_name, x_axis_columns, filter_options, y_axis_column, a
         return result
 
     except Exception as e:
-        print("Error preparing Tree Hierarchy data:", e)
+        print("Error preparing Tree Hierarchy data: bar_chart.py file", e)
         return {"error": str(e)}
 
 
