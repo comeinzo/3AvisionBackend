@@ -2956,7 +2956,7 @@ def get_bar_chart_route():
 
 
         except Exception as e:
-            print("Error preparing Tree Hierarchy data:", e)
+            print("Error preparing Tree Hierarchy data:----1", e)
             return jsonify({"error": str(e)})
 
     # Single Y-axis chart
@@ -3586,7 +3586,7 @@ def get_edit_chart_route():
             })
 
         except Exception as e:
-            print("Error preparing Tree Hierarchy data:", e)
+            print("Error preparing Tree Hierarchy data:-----2", e)
             return jsonify({"error": str(e)})
 
     elif chartType == "timeSeriesDecomposition":
@@ -3788,7 +3788,7 @@ def get_edit_chart_route():
            
 
         except Exception as e:
-            print("Error preparing Tree Hierarchy data:", e)
+            print("Error preparing Tree Hierarchy data:------3", e)
             return jsonify({"error": str(e)})
 
     elif (
@@ -7564,7 +7564,7 @@ def receive_chart_details():
         print("Error: ", e)
         return jsonify({"message": "Error processing request", "error": str(e)}), 500
 
-def get_dashboard_data(dashboard_name, company_name,user_id):
+def get_dashboard_data(dashboard_name, company_name,project_name,user_id):
     conn = connect_to_db()
     if conn:
         try:
@@ -7572,12 +7572,14 @@ def get_dashboard_data(dashboard_name, company_name,user_id):
             query = """
                 SELECT *
                 FROM table_dashboard
-                WHERE file_name = %s AND company_name = %s AND user_id = %s
+                WHERE file_name = %s AND company_name = %s AND project_name = %s AND user_id = %s
             """
             print("query",query)
             print("user_id",user_id)
-            cursor.execute(query, (dashboard_name, company_name,user_id))
+            cursor.execute(query, (dashboard_name, company_name,project_name,user_id))
             data = cursor.fetchone()
+
+            print("data",data)
             
             if data is None:
                 print(f"No data found for Chart: {dashboard_name} and Company: {company_name}")
@@ -7724,9 +7726,9 @@ def get_dashboard_data(dashboard_name, company_name,user_id):
 #         return jsonify({'error': 'Failed to fetch data for Chart {}'.format(dashboard_name)})
     
 
-@app.route('/Dashboard_data/<dashboard_name>/<company_name>', methods=['GET'])
+@app.route('/Dashboard_data/<dashboard_name>/<company_name>/<project_name>', methods=['GET'])
 @token_required
-def dashboard_data(dashboard_name,company_name):
+def dashboard_data(dashboard_name,company_name,project_name):
     user_id, dashboard_name = dashboard_name.split(",", 1)  # Split only once
     view_mode = request.args.get('view_mode') 
     logged_user_role=request.args.get("user_role")
@@ -7759,8 +7761,11 @@ def dashboard_data(dashboard_name,company_name):
             print(f"⚠️ Error parsing temporary filters: {e}")
             active_temp_filters = {}
     # ------------------------------------
-
-    data = get_dashboard_data(dashboard_name,company_name,user_id)
+    print("dashboard_name",dashboard_name)
+    print("company_name",company_name)
+    print("project_name",project_name)
+    print("user_id",user_id)
+    data = get_dashboard_data(dashboard_name,company_name,project_name,user_id)
     if data is not None:
         chart_ids = data[4]
         positions=data[5]
@@ -8808,13 +8813,36 @@ def handle_hierarchical_bar_click():
             if y_axis_column[0] not in global_df.columns:
                 return jsonify({"error": f"Column {y_axis_column[0]} not found in global_df."}), 500
             
+            
             global_df[y_axis_column[0]] = pd.to_numeric(global_df[y_axis_column[0]], errors='coerce')
+            
+            # Handle aggregation if it's sent as a JSON string
+            agg_param = data.get('aggregation', 'sum')
+            final_aggregation = 'sum'
+            
+            if isinstance(agg_param, str):
+                try:
+                    agg_param = agg_param.strip()
+                    if agg_param.startswith('[') or agg_param.startswith('{'):
+                        parsed_agg = json.loads(agg_param)
+                        if isinstance(parsed_agg, list) and len(parsed_agg) > 0:
+                            final_aggregation = parsed_agg[0].get('aggregation', 'sum')
+                        elif isinstance(parsed_agg, dict):
+                             final_aggregation = parsed_agg.get('aggregation', 'sum')
+                    else:
+                        final_aggregation = agg_param
+                except Exception as e:
+                    print(f"Error parsing aggregation JSON: {e}")
+                    final_aggregation = 'sum'
+            else:
+                final_aggregation = agg_param
+
             drill_down_result = Hierarchial_drill_down(
                 clicked_category=clicked_category, 
                 x_axis_columns=x_axis_columns, 
                 y_axis_column=y_axis_column, 
                 depth=current_depth, 
-                aggregation=data.get('aggregation')
+                aggregation=final_aggregation
             )
             print("Drill-down result:", drill_down_result)
             return jsonify(drill_down_result)
@@ -10804,19 +10832,20 @@ def check_save_name():
 @token_required
 def check_filename(fileName, company_name):
     user_id = request.args.get('user_id')  # Use query param for GET
+    project_name = request.args.get('project_name') # Get project_name from query params
 
     try:
         conn = get_db_connection()
         cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
         # create_dashboard_table(conn)
         
-        # Query to check if the file name exists for the given company name
+        # Query to check if the file name exists for the given company name AND project
         query = """
             SELECT COUNT(*) 
             FROM table_dashboard 
-            WHERE file_name = %s AND company_name = %s AND user_id= %s
+            WHERE file_name = %s AND company_name = %s AND user_id= %s AND project_name = %s
         """
-        cursor.execute(query, (fileName, company_name,user_id))
+        cursor.execute(query, (fileName, company_name, user_id, project_name))
         exists = cursor.fetchone()[0] > 0
 
         cursor.close()
@@ -16764,6 +16793,8 @@ def serve_static(filename):
 
 # Load environment variables
 load_dotenv()
+load_dotenv(override=True)
+print(f"DEBUG: HF Key loaded: {bool(os.getenv('HUGGINGFACE_API_KEY'))}")
 
 # ============================================================================
 # GOOGLE GEMINI CONFIGURATION & ROBUST MODEL SELECTOR
@@ -17002,8 +17033,130 @@ def execute_sql(sql_query):
 #         return None
 
 
+import requests
+import time
+
+# Hugging Face Configuration (OpenAI Compatible)
+# Hugging Face Configuration (OpenAI Compatible)
+HF_API_URL = "https://router.huggingface.co/v1/chat/completions"
+
+def query_huggingface(prompt, max_new_tokens=1024, system_prompt=None):
+    """Fallback generation using Hugging Face (OpenAI Compatible Endpoint)."""
+    api_key = os.getenv("HUGGINGFACE_API_KEY")
+    if not api_key:
+        print("⚠️ HUGGINGFACE_API_KEY missing. Cannot failover.")
+        return None
+
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json"
+    }
+    
+    messages = []
+    if system_prompt:
+        messages.append({"role": "system", "content": system_prompt})
+    
+    messages.append({"role": "user", "content": prompt})
+    
+    # OpenAI Format
+    payload = {
+        "model": "meta-llama/Meta-Llama-3-8B-Instruct", 
+        "messages": messages,
+        "max_tokens": max_new_tokens,
+        "temperature": 0.3 # Lower temp for more deterministic/focused output
+    }
+    
+    try:
+        response = requests.post(HF_API_URL, headers=headers, json=payload)
+        
+        # DEBUG: Print status and raw text if not 200
+        if response.status_code != 200:
+            print(f"⚠️ HF API Status: {response.status_code}")
+            print(f"⚠️ HF API Response: {response.text}")
+        
+        try:
+            output = response.json()
+        except ValueError:
+            print(f"❌ HF JSON Decode Error. Raw text: {response.text}")
+            return None
+            
+        # Parse OpenAI-style response
+        if "choices" in output and len(output["choices"]) > 0:
+            content = output["choices"][0]["message"]["content"]
+            return content.strip()
+            
+        # Fallback for error messages in JSON
+        if "error" in output:
+             print(f"HF Error: {output['error']}")
+        
+        print(f"Unexpected HF response format: {output}")
+        return None
+        
+    except Exception as e:
+        print(f"Error querying Hugging Face: {e}")
+        return None
+
+
+def generate_content_with_fallback(prompt, config=None, json_mode=False):
+    """
+    Wrapper to try Gemini first, then fallback to Hugging Face on error.
+    """
+    # 0. Force Hugging Face (Testing/User Preference)
+    FORCE_HUGGINGFACE_ONLY = False  # <--- CHANGED BACK TO FALSE (Gemini First)
+    
+    if FORCE_HUGGINGFACE_ONLY:
+        print("🟢 FORCE MODE: Using Hugging Face Only...")
+        hf_prompt = prompt
+        sys_prompt = "You are a helpful AI assistant."
+        
+        if json_mode:
+             hf_prompt += "\n\nProvide the response strictly in valid JSON format. Do not add markdown backticks."
+             sys_prompt = "You are an expert data analyst. Your task is to analyze data and output valid, strict JSON ONLY. No preamble, no explanation."
+             
+        return query_huggingface(hf_prompt, system_prompt=sys_prompt)
+
+    # 1. Try Gemini
+    try:
+        print("🔵 Attempting to generate with Google Gemini...")
+        model = genai.GenerativeModel(ACTIVE_MODEL_NAME)
+        # Adjust config for JSON mode if requested (Gemini specific)
+        generation_config = config if config else genai.GenerationConfig(temperature=0.7)
+        if json_mode:
+            generation_config.response_mime_type = "application/json"
+            
+        response = model.generate_content(prompt, generation_config=generation_config)
+        print("✅ Google Gemini Success")
+        return response.text.strip() # Success
+        
+    except Exception as e:
+        error_str = str(e).lower()
+        # Check for Rate Limit (429) or Quota issues (ResourceExhausted)
+        if "429" in error_str or "quota" in error_str or "resource" in error_str:
+            print(f"⚠️ Gemini Quota Exceeded. Failing over to Hugging Face... ({e})")
+            print("🟢 Attempting to generate with Hugging Face...")
+            
+            # 2. Fallback to Hugging Face
+            hf_prompt = prompt
+            sys_prompt = "You are a helpful AI assistant."
+            
+            if json_mode:
+                 hf_prompt += "\n\nProvide the response strictly in valid JSON format. Do not add markdown backticks."
+                 sys_prompt = "You are an expert data analyst. Your task is to analyze data and output valid, strict JSON ONLY. No preamble, no explanation."
+            
+            hf_result = query_huggingface(hf_prompt, system_prompt=sys_prompt)
+            if hf_result:
+                print("✅ Hugging Face Fallback Success")
+                return hf_result
+            else:
+                print("❌ Hugging Face fallback failed.")
+                raise e # Re-raise original if fallback fails
+        else:
+            print(f"❌ Gemini Error (Not Quota): {e}")
+            raise e
+
+
 def generate_sql_with_gemini(question, schema, table_name):
-    """Generate SQL using Google Gemini API."""
+    """Generate SQL using Google Gemini API (with HF Fallback)."""
     prompt = f"""You are an expert SQL agent who generates optimized PostgreSQL queries.
     
 Database Schema:
@@ -17021,19 +17174,18 @@ Instructions:
 SQL Query:"""
     
     try:
-        model = genai.GenerativeModel(ACTIVE_MODEL_NAME)
-        response = model.generate_content(
-            prompt,
-            generation_config=genai.GenerationConfig(temperature=0.6)
-        )
+        # Use fallback wrapper
+        response_text = generate_content_with_fallback(prompt, genai.GenerationConfig(temperature=0.6))
         
-        sql = response.text.strip()
-        # Clean up the SQL if Gemini adds markdown
+        if not response_text:
+             return None
+             
+        sql = response_text
+        # Clean up the SQL if AI adds markdown
         sql = sql.replace('```sql', '').replace('```', '').strip()
-        
         return sql
     except Exception as e:
-        print(f"Error generating SQL with Gemini: {e}")
+        print(f"Error generating SQL: {e}")
         return None
 
 
@@ -17082,7 +17234,7 @@ SQL Query:"""
 
 
 def generate_natural_answer(question, sql_query, results_df):
-    """Generate a natural language answer from the query results using Gemini."""
+    """Generate a natural language answer (with HF Fallback)."""
     
     if results_df is None or len(results_df) == 0:
         return "No results found for your query."
@@ -17107,73 +17259,73 @@ Provide a brief, friendly answer that:
 Answer:"""
     
     try:
-        model = genai.GenerativeModel(ACTIVE_MODEL_NAME)
-        response = model.generate_content(
-            prompt,
-            generation_config=genai.GenerationConfig(temperature=0.7)
-        )
-        return response.text.strip()
+        return generate_content_with_fallback(prompt, genai.GenerationConfig(temperature=0.7))
     except Exception as e:
         print(f"Error generating answer: {e}")
         return f"I found {row_count} result{'s' if row_count != 1 else ''} for your query."
 
 def generate_business_insights(table_name, schema, data_summary, focus_area, sample_data):
-    """Generate AI-powered business insights using Gemini."""
+    """Generate AI-powered business insights (with HF Fallback)."""
     
     prompt = f"""You are an expert business analyst and data scientist. Analyze the following database table and provide actionable insights.
 
-Table Name: {table_name}
+                Table Name: {table_name}
 
-Schema:
-{schema}
+                Schema:
+                {schema}
 
-Data Summary:
-- Total Records: {data_summary['total_rows']}
-- Numeric Columns Stats: {json.dumps(data_summary['numeric_stats'], indent=2)}
-- Categorical Columns Stats: {json.dumps(data_summary['categorical_stats'], indent=2)}
+                Data Summary:
+                - Total Records: {data_summary['total_rows']}
+                - Numeric Columns Stats: {
 
-Sample Data Preview:
-{sample_data}
+                            json.dumps(data_summary.get('numeric_stats',{}), indent=2)
+                }
+                - Categorical Columns Stats: {
+                            json.dumps(data_summary.get('categorical_stats',{}), indent=2)
+                }
 
-Focus Area: {focus_area}
+                Sample Data Preview:
+                {sample_data}
 
-Please provide:
-1. **Key Findings**
-2. **Actionable Recommendations**
-3. **Data Quality Observations**
-4. **Suggested Metrics to Track**
-5. **Quick Wins**
+                Focus Area: {focus_area}
 
-Format your response as JSON with the following structure:
-{{
-  "key_findings": ["finding 1", ...],
-  "recommendations": [
-    {{"title": "Title", "description": "Desc", "priority": "high", "impact": "Impact"}}
-  ],
-  "data_quality": ["obs 1", ...],
-  "suggested_metrics": ["metric 1", ...],
-  "quick_wins": [
-    {{"action": "Action", "expected_outcome": "Outcome"}}
-  ]
-}}
+                Please provide:
+                1. **Key Findings**
+                2. **Actionable Recommendations**
+                3. **Data Quality Observations**
+                4. **Suggested Metrics to Track**
+                5. **Quick Wins**
 
-Provide ONLY the JSON response, no additional text or markdown."""
+                Format your response as JSON with the following structure:
+                {{
+                "key_findings": ["finding 1", ...],
+                "recommendations": [
+                    {{"title": "Title", "description": "Desc", "priority": "high", "impact": "Impact"}}
+                ],
+                "data_quality": ["obs 1", ...],
+                "suggested_metrics": ["metric 1", ...],
+                "quick_wins": [
+                    {{"action": "Action", "expected_outcome": "Outcome"}}
+                ]
+                }}
+
+            Provide ONLY the JSON response, no additional text or markdown."""
     
     try:
-        model = genai.GenerativeModel(ACTIVE_MODEL_NAME)
-        response = model.generate_content(
-            prompt,
-            generation_config=genai.GenerationConfig(temperature=0.7)
-        )
+        insights_text = generate_content_with_fallback(prompt, genai.GenerationConfig(temperature=0.7), json_mode=True)
         
-        insights_text = response.text.strip()
-        # Clean up markdown
+        if not insights_text:
+             return {
+                "key_findings": ["Error generating insights (AI returned empty)"],
+                "recommendations": [], "data_quality": [], "suggested_metrics": [], "quick_wins": []
+            }
+            
+         # Clean up markdown if explicitly added by HF (Gemini JSON mode usually handles it, but HF might not)
         insights_text = insights_text.replace('```json', '').replace('```', '').strip()
-        
         return json.loads(insights_text)
         
     except Exception as e:
-        print(f"Error generating insights with Gemini: {e}")
+        print(f"Error generating insights: {e}")
         return {
             "key_findings": ["Error generating insights"],
             "recommendations": [],
@@ -17184,7 +17336,7 @@ Provide ONLY the JSON response, no additional text or markdown."""
 
 
 def generate_contextual_chat_response(user_message, table_name, schema, context, sample_data):
-    """Generate contextual AI responses for dashboard chat using Gemini."""
+    """Generate contextual AI responses (with HF Fallback)."""
     
     context_str = json.dumps(context, indent=2) if context else "No additional context"
     
@@ -17212,21 +17364,14 @@ Provide a helpful, actionable response that:
 Keep your response concise (2-4 paragraphs)."""
     
     try:
-        model = genai.GenerativeModel(ACTIVE_MODEL_NAME)
-        response = model.generate_content(
-            prompt,
-            generation_config=genai.GenerationConfig(temperature=0.8)
-        )
-        
-        return response.text.strip()
-        
+        return generate_content_with_fallback(prompt, genai.GenerationConfig(temperature=0.8))
     except Exception as e:
         print(f"Error generating chat response: {e}")
         return "I apologize, but I'm having trouble generating a response right now. Please try again."
 
 
 def generate_kpi_structure_with_ai(table_name, schema, data_profile, sample_data):
-    """Use Gemini to determine the most relevant KPIs for this table."""
+    """Use AI to determine the most relevant KPIs (with HF Fallback)."""
     
     prompt = f"""You are a data analytics expert. Analyze this database table and determine the most relevant KPIs.
 
@@ -17244,7 +17389,8 @@ Respond ONLY with valid JSON in this exact structure:
       "calculation": "column_name or aggregation",
       "format": "number|currency|percentage|date",
       "icon": "icon_name",
-      "category": "category"
+      "category": "category",
+      "aggregation": "sum|avg|max|min|count|distinct count"
     }}
   ],
   "charts": [
@@ -17253,7 +17399,7 @@ Respond ONLY with valid JSON in this exact structure:
       "title": "Chart Title",
       "x_axis": "column_name",
       "y_axis": "column_name",
-      "aggregation": "sum|count|avg|min|max",
+      "aggregation": "sum|count|avg|min|max|distinct count",
       "description": "Insight provided",
       "limit": 10
     }}
@@ -17263,13 +17409,7 @@ Respond ONLY with valid JSON in this exact structure:
 }}"""
     
     try:
-        model = genai.GenerativeModel(ACTIVE_MODEL_NAME)
-        response = model.generate_content(
-            prompt,
-            generation_config=genai.GenerationConfig(temperature=0.3)
-        )
-        
-        kpi_text = response.text.strip()
+        kpi_text = generate_content_with_fallback(prompt, genai.GenerationConfig(temperature=0.3), json_mode=True)
         kpi_text = kpi_text.replace('```json', '').replace('```', '').strip()
         return json.loads(kpi_text)
         
@@ -17279,7 +17419,7 @@ Respond ONLY with valid JSON in this exact structure:
 
 
 def generate_kpi_insights_with_ai(table_name, kpi_values, chart_data):
-    """Generate business insights based on KPI values using Gemini."""
+    """Generate business insights based on KPI values (with HF Fallback)."""
     
     prompt = f"""You are a business intelligence expert. Analyze these KPI metrics and provide actionable insights.
 
@@ -17298,13 +17438,7 @@ Respond with JSON:
 }}"""
     
     try:
-        model = genai.GenerativeModel(ACTIVE_MODEL_NAME)
-        response = model.generate_content(
-            prompt,
-            generation_config=genai.GenerationConfig(temperature=0.7)
-        )
-        
-        insights_text = response.text.strip()
+        insights_text = generate_content_with_fallback(prompt, genai.GenerationConfig(temperature=0.7), json_mode=True)
         insights_text = insights_text.replace('```json', '').replace('```', '').strip()
         return json.loads(insights_text)
         
@@ -18397,19 +18531,45 @@ def calculate_kpis(df, kpi_structure):
     for kpi in kpi_structure.get('primary_kpis', []):
         try:
             calculation = kpi['calculation']
+            # Default to sum if not specified, but check for specific aggregation instructions
+            aggregation = kpi.get('aggregation', 'sum').lower()
             
-            # Check if it's a simple column reference
-            if calculation in df.columns:
-                if kpi['format'] == 'number':
-                    value = float(df[calculation].sum())
-                elif kpi['format'] == 'currency':
-                    value = float(df[calculation].sum())
-                elif kpi['format'] == 'percentage':
-                    value = float(df[calculation].mean() * 100)
-                else:
-                    value = float(df[calculation].sum())
+            # Check if it's a simple column reference (or if calculation IS the column name)
+            col_name = calculation
+            if col_name in df.columns:
                 
-                # Calculate change (mock for now, you can implement actual trend)
+                # Pre-processing for numeric operations
+                if aggregation in ['sum', 'avg', 'average', 'mean', 'min', 'minimum', 'max', 'maximum']:
+                    numeric_series = pd.to_numeric(df[col_name], errors='coerce').fillna(0)
+                
+                if aggregation == 'sum':
+                    value = float(numeric_series.sum())
+                elif aggregation in ['avg', 'average', 'mean']:
+                    value = float(numeric_series.mean())
+                elif aggregation in ['min', 'minimum']:
+                    value = float(numeric_series.min())
+                elif aggregation in ['max', 'maximum']:
+                    value = float(numeric_series.max())
+                elif aggregation == 'count':
+                    value = float(df[col_name].count())
+                elif aggregation in ['distinct count', 'distinct_count', 'nunique']:
+                    value = float(df[col_name].nunique())
+                else: 
+                     # Fallback logic based on format/name if aggregation is unknown or implicit
+                    if kpi.get('format') == 'number' and 'id' in col_name.lower():
+                         value = float(df[col_name].nunique())
+                    elif kpi.get('format') in ['number', 'currency', 'percentage']:
+                         numeric_series = pd.to_numeric(df[col_name], errors='coerce').fillna(0)
+                         if kpi.get('format') == 'percentage':
+                             value = float(numeric_series.mean() * 100)
+                         else:
+                             value = float(numeric_series.sum())
+                    else:
+                        # numeric default
+                        numeric_series = pd.to_numeric(df[col_name], errors='coerce').fillna(0)
+                        value = float(numeric_series.sum())
+
+                # Calculate change (mock for now)
                 change = 0.0
                 
                 kpi_values.append({
@@ -18423,8 +18583,8 @@ def calculate_kpis(df, kpi_structure):
                     'change_direction': 'up' if change > 0 else 'down' if change < 0 else 'neutral'
                 })
             else:
-                # Handle aggregations like "count(*)"
-                if 'count' in calculation.lower():
+                # Handle generic counts if column not found but "count" is requested
+                if 'count' in calculation.lower() or aggregation == 'count':
                     value = len(df)
                 else:
                     value = 0
@@ -18441,7 +18601,7 @@ def calculate_kpis(df, kpi_structure):
                 })
                 
         except Exception as e:
-            print(f"Error calculating KPI {kpi['name']}: {e}")
+            print(f"Error calculating KPI {kpi.get('name', 'Unknown')}: {e}")
             continue
     
     return kpi_values
@@ -18455,28 +18615,37 @@ def generate_chart_data(df, kpi_structure):
         try:
             x_axis = chart_config['x_axis']
             y_axis = chart_config['y_axis']
-            aggregation = chart_config.get('aggregation', 'sum')
+            aggregation = chart_config.get('aggregation', 'sum').lower()
             limit = chart_config.get('limit', 10)
             
             if x_axis not in df.columns or y_axis not in df.columns:
                 continue
             
+            # --- Ensure Y-Axis is Numeric for Aggregation ---
+            if aggregation in ['sum', 'avg', 'average', 'mean', 'min', 'minimum', 'max', 'maximum']:
+                 df[y_axis] = pd.to_numeric(df[y_axis], errors='coerce').fillna(0)
+
             # Group and aggregate data
             if aggregation == 'sum':
                 grouped = df.groupby(x_axis)[y_axis].sum().reset_index()
             elif aggregation == 'count':
                 grouped = df.groupby(x_axis)[y_axis].count().reset_index()
-            elif aggregation == 'avg':
+            elif aggregation in ['distinct count', 'distinct_count', 'nunique']:
+                 grouped = df.groupby(x_axis)[y_axis].nunique().reset_index()
+            elif aggregation in ['avg', 'average', 'mean']:
                 grouped = df.groupby(x_axis)[y_axis].mean().reset_index()
-            elif aggregation == 'min':
+            elif aggregation in ['min', 'minimum']:
                 grouped = df.groupby(x_axis)[y_axis].min().reset_index()
-            elif aggregation == 'max':
+            elif aggregation in ['max', 'maximum']:
                 grouped = df.groupby(x_axis)[y_axis].max().reset_index()
             else:
                 grouped = df.groupby(x_axis)[y_axis].sum().reset_index()
             
             # Sort and limit
-            grouped = grouped.nlargest(limit, y_axis)
+            if limit is not None:
+                 grouped = grouped.nlargest(int(limit), y_axis) 
+            else:
+                 grouped = grouped.nlargest(10, y_axis)
             
             # Convert to list of dicts
             chart_data = grouped.to_dict('records')
