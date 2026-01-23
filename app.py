@@ -122,7 +122,7 @@ from bar_chart import (
     fetchText_data,
     get_column_names,
     Hierarchial_drill_down,
-    perform_calculation
+    perform_calculation,apply_all_calculations
 )
 from bar_chart import global_df,global_column_names
 # from license_routes import license_bp
@@ -2104,292 +2104,298 @@ def fetch_data_for_ts_decomposition(table_name, x_axis_columns, filter_options, 
             calc_formula = calc_entry.get('calculation', '').strip()
             new_col_name = calc_entry.get('columnName', '').strip()
             replace_col = calc_entry.get('replaceColumn', new_col_name)
+            temp_df, x_axis_columns, y_axis_column = apply_all_calculations(
+                temp_df,
+                calculationData,
+                x_axis_columns,
+                y_axis_column
+            )
 
-            if not calc_formula or not new_col_name:
-                continue
+            # if not calc_formula or not new_col_name:
+            #     continue
 
-            def replace_column_in_formula(match):
-                col_name = match.group(1)
-                if col_name in temp_df.columns:
-                    if pd.api.types.is_numeric_dtype(temp_df[col_name]):
-                        return f"temp_df['{col_name}']"
-                    else:
-                        return f"temp_df['{col_name}']"
-                else:
-                    raise ValueError(f"Column '{col_name}' not found in DataFrame for calculation.")
+            # def replace_column_in_formula(match):
+            #     col_name = match.group(1)
+            #     if col_name in temp_df.columns:
+            #         if pd.api.types.is_numeric_dtype(temp_df[col_name]):
+            #             return f"temp_df['{col_name}']"
+            #         else:
+            #             return f"temp_df['{col_name}']"
+            #     else:
+            #         raise ValueError(f"Column '{col_name}' not found in DataFrame for calculation.")
 
-            # Update x and y axis columns if they are being replaced by a calculated column
-            # This is important for subsequent steps that might reference these columns
-            if y_axis_column:
-                y_axis_column = [new_col_name if col == replace_col else col for col in y_axis_column]
+            # # Update x and y axis columns if they are being replaced by a calculated column
+            # # This is important for subsequent steps that might reference these columns
+            # if y_axis_column:
+            #     y_axis_column = [new_col_name if col == replace_col else col for col in y_axis_column]
 
-            if x_axis_columns:
-                x_axis_columns = [new_col_name if col == replace_col else col for col in x_axis_columns]
+            # if x_axis_columns:
+            #     x_axis_columns = [new_col_name if col == replace_col else col for col in x_axis_columns]
 
-            # Re-apply the calculation logic here for the temp_df
-            # (Copied from your original fetch_data function's calculation block)
-            # This part can be refactored into a separate function if it's identical
-            # to avoid code duplication, but for clarity, it's repeated here.
-            # ... (the entire calculation logic for if, switch, iferror, calculate, etc.) ...
-            if calc_formula.strip().lower().startswith("if"):
-                match = (
-                    re.match(
-                        r"if\s*\(\s*(.+?)\s*\)\s*then\s*'?(.*?)'?\s*else\s*'?(.*?)'?$",
-                        calc_formula.strip(),
-                        re.IGNORECASE
-                    )
-                    or
-                    re.match(
-                        r"if\s*\(\s*(.+?)\s*,\s*'?(.*?)'?\s*,\s*'?(.*?)'?\s*\)$",
-                        calc_formula.strip(),
-                        re.IGNORECASE
-                    )
-                )
+            # # Re-apply the calculation logic here for the temp_df
+            # # (Copied from your original fetch_data function's calculation block)
+            # # This part can be refactored into a separate function if it's identical
+            # # to avoid code duplication, but for clarity, it's repeated here.
+            # # ... (the entire calculation logic for if, switch, iferror, calculate, etc.) ...
+            # if calc_formula.strip().lower().startswith("if"):
+            #     match = (
+            #         re.match(
+            #             r"if\s*\(\s*(.+?)\s*\)\s*then\s*'?(.*?)'?\s*else\s*'?(.*?)'?$",
+            #             calc_formula.strip(),
+            #             re.IGNORECASE
+            #         )
+            #         or
+            #         re.match(
+            #             r"if\s*\(\s*(.+?)\s*,\s*'?(.*?)'?\s*,\s*'?(.*?)'?\s*\)$",
+            #             calc_formula.strip(),
+            #             re.IGNORECASE
+            #         )
+            #     )
 
-                # match = re.match(r"if\s*\((.+?)\)\s*then\s*'?(.*?)'?\s*else\s*'?(.*?)'?$", calc_formula.strip(), re.IGNORECASE)
-                if not match:
-                    raise ValueError("Invalid if-then-else format in calculation.")
+            #     # match = re.match(r"if\s*\((.+?)\)\s*then\s*'?(.*?)'?\s*else\s*'?(.*?)'?$", calc_formula.strip(), re.IGNORECASE)
+            #     if not match:
+            #         raise ValueError("Invalid if-then-else format in calculation.")
 
-                condition_expr, then_val, else_val = match.groups()
-                condition_expr_python = re.sub(r'\[(.*?)\]', replace_column_in_formula, condition_expr)
+            #     condition_expr, then_val, else_val = match.groups()
+            #     condition_expr_python = re.sub(r'\[(.*?)\]', replace_column_in_formula, condition_expr)
 
-                then_val = then_val.strip('"').strip("'")
-                else_val = else_val.strip('"').strip("'")
+            #     then_val = then_val.strip('"').strip("'")
+            #     else_val = else_val.strip('"').strip("'")
 
-                try:
-                    then_val_parsed = float(then_val)
-                except ValueError:
-                    then_val_parsed = then_val
+            #     try:
+            #         then_val_parsed = float(then_val)
+            #     except ValueError:
+            #         then_val_parsed = then_val
 
-                try:
-                    else_val_parsed = float(else_val)
-                except ValueError:
-                    else_val_parsed = else_val
+            #     try:
+            #         else_val_parsed = float(else_val)
+            #     except ValueError:
+            #         else_val_parsed = else_val
 
-                temp_df[new_col_name] = np.where(eval(condition_expr_python), then_val_parsed, else_val_parsed)
+            #     temp_df[new_col_name] = np.where(eval(condition_expr_python), then_val_parsed, else_val_parsed)
 
-            elif calc_formula.lower().startswith("switch"):
-                switch_match = re.match(r"switch\s*\(\s*\[([^\]]+)\](.*?)\)", calc_formula, re.IGNORECASE)
-                if not switch_match:
-                    raise ValueError("Invalid SWITCH syntax")
+            # elif calc_formula.lower().startswith("switch"):
+            #     switch_match = re.match(r"switch\s*\(\s*\[([^\]]+)\](.*?)\)", calc_formula, re.IGNORECASE)
+            #     if not switch_match:
+            #         raise ValueError("Invalid SWITCH syntax")
 
-                col_name_switch, rest = switch_match.groups()
-                if col_name_switch not in temp_df.columns:
-                    raise ValueError(f"Column '{col_name_switch}' not found in DataFrame")
+            #     col_name_switch, rest = switch_match.groups()
+            #     if col_name_switch not in temp_df.columns:
+            #         raise ValueError(f"Column '{col_name_switch}' not found in DataFrame")
 
-                cases = re.findall(r'"(.*?)"\s*,\s*"(.*?)"', rest)
-                default_match = re.search(r'["\']?default["\']?\s*,\s*["\']?(.*?)["\']?\s*$', rest, re.IGNORECASE)
-                default_value = default_match.group(1).strip('"').strip("'") if default_match else None
+            #     cases = re.findall(r'"(.*?)"\s*,\s*"(.*?)"', rest)
+            #     default_match = re.search(r'["\']?default["\']?\s*,\s*["\']?(.*?)["\']?\s*$', rest, re.IGNORECASE)
+            #     default_value = default_match.group(1).strip('"').strip("'") if default_match else None
 
-                mapping = {}
-                for case_val, result_val in cases:
-                    mapping[case_val.strip('"').strip("'")] = result_val.strip('"').strip("'")
+            #     mapping = {}
+            #     for case_val, result_val in cases:
+            #         mapping[case_val.strip('"').strip("'")] = result_val.strip('"').strip("'")
 
-                temp_df[new_col_name] = temp_df[col_name_switch].astype(str).map(mapping).fillna(default_value)
+            #     temp_df[new_col_name] = temp_df[col_name_switch].astype(str).map(mapping).fillna(default_value)
 
-            elif calc_formula.lower().startswith("iferror"):
-                match = re.match(r"iferror\s*\((.+?)\s*,\s*(.+?)\)", calc_formula.strip(), re.IGNORECASE)
-                if not match:
-                    raise ValueError("Invalid IFERROR format")
+            # elif calc_formula.lower().startswith("iferror"):
+            #     match = re.match(r"iferror\s*\((.+?)\s*,\s*(.+?)\)", calc_formula.strip(), re.IGNORECASE)
+            #     if not match:
+            #         raise ValueError("Invalid IFERROR format")
 
-                expr, fallback = match.groups()
-                expr_python = re.sub(r'\[(.*?)\]', replace_column_in_formula, expr)
-                fallback = fallback.strip().strip('"').strip("'")
+            #     expr, fallback = match.groups()
+            #     expr_python = re.sub(r'\[(.*?)\]', replace_column_in_formula, expr)
+            #     fallback = fallback.strip().strip('"').strip("'")
 
-                try:
-                    temp_df[new_col_name] = eval(expr_python)
-                    if pd.api.types.is_numeric_dtype(temp_df[new_col_name]):
-                        temp_df[new_col_name] = temp_df[new_col_name].fillna(pd.to_numeric(fallback, errors='coerce'))
-                    else:
-                        temp_df[new_col_name] = temp_df[new_col_name].fillna(fallback)
-                except Exception as e:
-                    print(f"Error evaluating IFERROR expression '{expr_python}': {e}. Filling with fallback.")
-                    temp_df[new_col_name] = fallback
+            #     try:
+            #         temp_df[new_col_name] = eval(expr_python)
+            #         if pd.api.types.is_numeric_dtype(temp_df[new_col_name]):
+            #             temp_df[new_col_name] = temp_df[new_col_name].fillna(pd.to_numeric(fallback, errors='coerce'))
+            #         else:
+            #             temp_df[new_col_name] = temp_df[new_col_name].fillna(fallback)
+            #     except Exception as e:
+            #         print(f"Error evaluating IFERROR expression '{expr_python}': {e}. Filling with fallback.")
+            #         temp_df[new_col_name] = fallback
 
-            elif calc_formula.lower().startswith("calculate"):
-                match = re.match(r"calculate\s*\(\s*(sum|avg|count|max|min)\s*\(\s*\[([^\]]+)\]\s*\)\s*,\s*\[([^\]]+)\]\s*=\s*['\"](.*?)['\"]\s*\)", calc_formula.strip(), re.IGNORECASE)
-                if not match:
-                    raise ValueError("Invalid CALCULATE format")
+            # elif calc_formula.lower().startswith("calculate"):
+            #     match = re.match(r"calculate\s*\(\s*(sum|avg|count|max|min)\s*\(\s*\[([^\]]+)\]\s*\)\s*,\s*\[([^\]]+)\]\s*=\s*['\"](.*?)['\"]\s*\)", calc_formula.strip(), re.IGNORECASE)
+            #     if not match:
+            #         raise ValueError("Invalid CALCULATE format")
 
-                agg_func, value_col, filter_col, filter_val = match.groups()
+            #     agg_func, value_col, filter_col, filter_val = match.groups()
 
-                df_filtered = temp_df[temp_df[filter_col].astype(str) == filter_val]
-                if agg_func == "sum":
-                    result_val = df_filtered[value_col].astype(float).sum()
-                elif agg_func == "avg":
-                    result_val = df_filtered[value_col].astype(float).mean()
-                elif agg_func == "count":
-                    result_val = df_filtered[value_col].count()
-                elif agg_func == "max":
-                    result_val = df_filtered[value_col].astype(float).max()
-                elif agg_func == "min":
-                    result_val = df_filtered[value_col].astype(float).min()
-                else:
-                    raise ValueError("Unsupported aggregate in CALCULATE")
+            #     df_filtered = temp_df[temp_df[filter_col].astype(str) == filter_val]
+            #     if agg_func == "sum":
+            #         result_val = df_filtered[value_col].astype(float).sum()
+            #     elif agg_func == "avg":
+            #         result_val = df_filtered[value_col].astype(float).mean()
+            #     elif agg_func == "count":
+            #         result_val = df_filtered[value_col].count()
+            #     elif agg_func == "max":
+            #         result_val = df_filtered[value_col].astype(float).max()
+            #     elif agg_func == "min":
+            #         result_val = df_filtered[value_col].astype(float).min()
+            #     else:
+            #         raise ValueError("Unsupported aggregate in CALCULATE")
 
-                temp_df[new_col_name] = result_val
+            #     temp_df[new_col_name] = result_val
             
-            elif calc_formula.lower().startswith("maxx") or calc_formula.lower().startswith("minx"):
-                match = re.match(r'(maxx|minx)\s*\(\s*\[([^\]]+)\]\s*\)', calc_formula, re.IGNORECASE)
-                if not match:
-                    raise ValueError("Invalid MAXX/MINX syntax.")
-                func, col = match.groups()
-                if col not in temp_df.columns:
-                    raise ValueError(f"Column '{col}' not found.")
-                temp_df[col] = pd.to_numeric(temp_df[col], errors='coerce')
-                result_val = temp_df[col].max() if func.lower() == "maxx" else temp_df[col].min()
-                temp_df[new_col_name] = result_val
+            # elif calc_formula.lower().startswith("maxx") or calc_formula.lower().startswith("minx"):
+            #     match = re.match(r'(maxx|minx)\s*\(\s*\[([^\]]+)\]\s*\)', calc_formula, re.IGNORECASE)
+            #     if not match:
+            #         raise ValueError("Invalid MAXX/MINX syntax.")
+            #     func, col = match.groups()
+            #     if col not in temp_df.columns:
+            #         raise ValueError(f"Column '{col}' not found.")
+            #     temp_df[col] = pd.to_numeric(temp_df[col], errors='coerce')
+            #     result_val = temp_df[col].max() if func.lower() == "maxx" else temp_df[col].min()
+            #     temp_df[new_col_name] = result_val
 
-            elif calc_formula.lower().startswith("abs"):
-                match = re.match(r'abs\s*\(\s*\[([^\]]+)\]\s*\)', calc_formula, re.IGNORECASE)
-                if not match:
-                    raise ValueError("Invalid ABS syntax.")
-                col = match.group(1)
-                if col not in temp_df.columns:
-                    raise ValueError(f"Column '{col}' not found.")
-                temp_df[new_col_name] = pd.to_numeric(temp_df[col], errors='coerce').abs()
+            # elif calc_formula.lower().startswith("abs"):
+            #     match = re.match(r'abs\s*\(\s*\[([^\]]+)\]\s*\)', calc_formula, re.IGNORECASE)
+            #     if not match:
+            #         raise ValueError("Invalid ABS syntax.")
+            #     col = match.group(1)
+            #     if col not in temp_df.columns:
+            #         raise ValueError(f"Column '{col}' not found.")
+            #     temp_df[new_col_name] = pd.to_numeric(temp_df[col], errors='coerce').abs()
 
-            elif calc_formula.lower().startswith("len"):
-                match = re.match(r'len\s*\(\s*(?:\[([^\]]+)\]|"([^"]+)")\s*\)', calc_formula, re.IGNORECASE)
-                col = match.group(1) or match.group(2)
-                if col not in temp_df.columns:
-                    raise ValueError(f"Column '{col}' not found.")
-                temp_df[new_col_name] = temp_df[col].astype(str).str.len()
+            # elif calc_formula.lower().startswith("len"):
+            #     match = re.match(r'len\s*\(\s*(?:\[([^\]]+)\]|"([^"]+)")\s*\)', calc_formula, re.IGNORECASE)
+            #     col = match.group(1) or match.group(2)
+            #     if col not in temp_df.columns:
+            #         raise ValueError(f"Column '{col}' not found.")
+            #     temp_df[new_col_name] = temp_df[col].astype(str).str.len()
 
-            elif calc_formula.lower().startswith("lower"):
-                match = re.match(r'lower\s*\(\s*\[([^\]]+)\]\s*\)', calc_formula, re.IGNORECASE)
-                col = match.group(1)
-                temp_df[new_col_name] = temp_df[col].astype(str).str.lower()
+            # elif calc_formula.lower().startswith("lower"):
+            #     match = re.match(r'lower\s*\(\s*\[([^\]]+)\]\s*\)', calc_formula, re.IGNORECASE)
+            #     col = match.group(1)
+            #     temp_df[new_col_name] = temp_df[col].astype(str).str.lower()
 
-            elif calc_formula.lower().startswith("upper"):
-                match = re.match(r'upper\s*\(\s*\[([^\]]+)\]\s*\)', calc_formula, re.IGNORECASE)
-                col = match.group(1)
-                temp_df[new_col_name] = temp_df[col].astype(str).str.upper()
+            # elif calc_formula.lower().startswith("upper"):
+            #     match = re.match(r'upper\s*\(\s*\[([^\]]+)\]\s*\)', calc_formula, re.IGNORECASE)
+            #     col = match.group(1)
+            #     temp_df[new_col_name] = temp_df[col].astype(str).str.upper()
 
-            elif calc_formula.lower().startswith("concat"):
-                match = re.match(r'concat\s*\((.+)\)', calc_formula, re.IGNORECASE)
-                if match:
-                    parts = [p.strip() for p in re.split(r',(?![^\[]*\])', match.group(1))]
-                    concat_parts = []
-                    for part in parts:
-                        if part.startswith('[') and part.endswith(']'):
-                            col = part[1:-1]
-                            if col not in temp_df.columns:
-                                raise ValueError(f"Column '{col}' not found.")
-                            concat_parts.append(temp_df[col].astype(str))
-                        else:
-                            concat_parts.append(part.strip('"').strip("'"))
-                    from functools import reduce
-                    temp_df[new_col_name] = reduce(lambda x, y: x + y, [p if isinstance(p, pd.Series) else pd.Series([p]*len(temp_df)) for p in concat_parts])
+            # elif calc_formula.lower().startswith("concat"):
+            #     match = re.match(r'concat\s*\((.+)\)', calc_formula, re.IGNORECASE)
+            #     if match:
+            #         parts = [p.strip() for p in re.split(r',(?![^\[]*\])', match.group(1))]
+            #         concat_parts = []
+            #         for part in parts:
+            #             if part.startswith('[') and part.endswith(']'):
+            #                 col = part[1:-1]
+            #                 if col not in temp_df.columns:
+            #                     raise ValueError(f"Column '{col}' not found.")
+            #                 concat_parts.append(temp_df[col].astype(str))
+            #             else:
+            #                 concat_parts.append(part.strip('"').strip("'"))
+            #         from functools import reduce
+            #         temp_df[new_col_name] = reduce(lambda x, y: x + y, [p if isinstance(p, pd.Series) else pd.Series([p]*len(temp_df)) for p in concat_parts])
 
-            elif re.match(r'(year|month|day)\s*\(\s*\[([^\]]+)\]\s*\)', calc_formula, re.IGNORECASE):
-                match = re.match(r'(year|month|day)\s*\(\s*\[([^\]]+)\]\s*\)', calc_formula, re.IGNORECASE)
-                func, col = match.groups()
-                if col not in temp_df.columns:
-                    raise ValueError(f"Column '{col}' not found.")
-                temp_df[col] = pd.to_datetime(temp_df[col], errors='coerce')
-                if func.lower() == "year":
-                    temp_df[new_col_name] = temp_df[col].dt.year
-                elif func.lower() == "month":
-                    temp_df[new_col_name] = temp_df[col].dt.month
-                elif func.lower() == "day":
-                    temp_df[new_col_name] = temp_df[col].dt.day
+            # elif re.match(r'(year|month|day)\s*\(\s*\[([^\]]+)\]\s*\)', calc_formula, re.IGNORECASE):
+            #     match = re.match(r'(year|month|day)\s*\(\s*\[([^\]]+)\]\s*\)', calc_formula, re.IGNORECASE)
+            #     func, col = match.groups()
+            #     if col not in temp_df.columns:
+            #         raise ValueError(f"Column '{col}' not found.")
+            #     temp_df[col] = pd.to_datetime(temp_df[col], errors='coerce')
+            #     if func.lower() == "year":
+            #         temp_df[new_col_name] = temp_df[col].dt.year
+            #     elif func.lower() == "month":
+            #         temp_df[new_col_name] = temp_df[col].dt.month
+            #     elif func.lower() == "day":
+            #         temp_df[new_col_name] = temp_df[col].dt.day
 
-            elif calc_formula.lower().startswith("isnull"):
-                match = re.match(r'isnull\s*\(\s*\[([^\]]+)\]\s*,\s*["\']?(.*?)["\']?\s*\)', calc_formula, re.IGNORECASE)
-                if match:
-                    col, fallback = match.groups()
-                    if col not in temp_df.columns:
-                        raise ValueError(f"Column '{col}' not found.")
-                    temp_df[new_col_name] = temp_df[col].fillna(fallback.strip('"').strip("'"))
+            # elif calc_formula.lower().startswith("isnull"):
+            #     match = re.match(r'isnull\s*\(\s*\[([^\]]+)\]\s*,\s*["\']?(.*?)["\']?\s*\)', calc_formula, re.IGNORECASE)
+            #     if match:
+            #         col, fallback = match.groups()
+            #         if col not in temp_df.columns:
+            #             raise ValueError(f"Column '{col}' not found.")
+            #         temp_df[new_col_name] = temp_df[col].fillna(fallback.strip('"').strip("'"))
 
-            elif re.match(r'(?:\[([^\]]+)\]|"([^"]+)")\s+in\s*\((.*?)\)', calc_formula, re.IGNORECASE):
-                match = re.match(r'(?:\[([^\]]+)\]|"([^"]+)")\s+in\s*\((.*?)\)', calc_formula, re.IGNORECASE)
-                col = match.group(1) or match.group(2)
-                raw_values = match.group(3)
+            # elif re.match(r'(?:\[([^\]]+)\]|"([^"]+)")\s+in\s*\((.*?)\)', calc_formula, re.IGNORECASE):
+            #     match = re.match(r'(?:\[([^\]]+)\]|"([^"]+)")\s+in\s*\((.*?)\)', calc_formula, re.IGNORECASE)
+            #     col = match.group(1) or match.group(2)
+            #     raw_values = match.group(3)
 
-                cleaned_values = []
-                for v in raw_values.split(','):
-                    v = v.strip().strip('"').strip("'")
-                    cleaned_values.append(v)
+            #     cleaned_values = []
+            #     for v in raw_values.split(','):
+            #         v = v.strip().strip('"').strip("'")
+            #         cleaned_values.append(v)
 
-                if col not in temp_df.columns:
-                    raise ValueError(f"Column '{col}' not found in DataFrame.")
+            #     if col not in temp_df.columns:
+            #         raise ValueError(f"Column '{col}' not found in DataFrame.")
 
-                temp_df[new_col_name] = temp_df[col].isin(cleaned_values)
+            #     temp_df[new_col_name] = temp_df[col].isin(cleaned_values)
 
-            elif calc_formula.lower().startswith("datediff"):
-                match = re.match(r'datediff\s*\(\s*\[([^\]]+)\]\s*,\s*\[([^\]]+)\]\s*\)', calc_formula, re.IGNORECASE)
-                if not match:
-                    raise ValueError("Invalid DATEDIFF format.")
-                end_col, start_col = match.groups()
-                temp_df[end_col] = pd.to_datetime(temp_df[end_col], errors='coerce')
-                temp_df[start_col] = pd.to_datetime(temp_df[start_col], errors='coerce')
-                temp_df[new_col_name] = (temp_df[end_col] - temp_df[start_col]).dt.days
+            # elif calc_formula.lower().startswith("datediff"):
+            #     match = re.match(r'datediff\s*\(\s*\[([^\]]+)\]\s*,\s*\[([^\]]+)\]\s*\)', calc_formula, re.IGNORECASE)
+            #     if not match:
+            #         raise ValueError("Invalid DATEDIFF format.")
+            #     end_col, start_col = match.groups()
+            #     temp_df[end_col] = pd.to_datetime(temp_df[end_col], errors='coerce')
+            #     temp_df[start_col] = pd.to_datetime(temp_df[start_col], errors='coerce')
+            #     temp_df[new_col_name] = (temp_df[end_col] - temp_df[start_col]).dt.days
 
-            elif calc_formula.lower().startswith("today()"):
-                temp_df[new_col_name] = pd.to_datetime(pd.Timestamp.today().normalize())
+            # elif calc_formula.lower().startswith("today()"):
+            #     temp_df[new_col_name] = pd.to_datetime(pd.Timestamp.today().normalize())
 
-            elif calc_formula.lower().startswith("now()"):
-                temp_df[new_col_name] = pd.Timestamp.now()
+            # elif calc_formula.lower().startswith("now()"):
+            #     temp_df[new_col_name] = pd.Timestamp.now()
 
-            elif calc_formula.lower().startswith("dateadd"):
-                match = re.match(
-                    r'dateadd\s*\(\s*\[([^\]]+)\]\s*,\s*(-?\d+)\s*,\s*["\'](day|month|year)["\']\s*\)',
-                    calc_formula,
-                    re.IGNORECASE
-                )
-                if not match:
-                    raise ValueError("Invalid DATEADD format. Use: dateadd([column], number, 'unit')")
+            # elif calc_formula.lower().startswith("dateadd"):
+            #     match = re.match(
+            #         r'dateadd\s*\(\s*\[([^\]]+)\]\s*,\s*(-?\d+)\s*,\s*["\'](day|month|year)["\']\s*\)',
+            #         calc_formula,
+            #         re.IGNORECASE
+            #     )
+            #     if not match:
+            #         raise ValueError("Invalid DATEADD format. Use: dateadd([column], number, 'unit')")
 
-                col, interval, unit = match.groups()
-                interval = int(interval)
+            #     col, interval, unit = match.groups()
+            #     interval = int(interval)
 
-                if col not in temp_df.columns:
-                    raise ValueError(f"DATEADD error: Column '{col}' not found in dataframe")
+            #     if col not in temp_df.columns:
+            #         raise ValueError(f"DATEADD error: Column '{col}' not found in dataframe")
 
-                temp_df[col] = pd.to_datetime(temp_df[col], errors='coerce')
+            #     temp_df[col] = pd.to_datetime(temp_df[col], errors='coerce')
 
-                if unit == "day":
-                    temp_df[new_col_name] = temp_df[col] + pd.to_timedelta(interval, unit='d')
-                elif unit == "month":
-                    temp_df[new_col_name] = temp_df[col] + pd.DateOffset(months=interval)
-                elif unit == "year":
-                    temp_df[new_col_name] = temp_df[col] + pd.DateOffset(years=interval)
-                else:
-                    raise ValueError("DATEADD error: Unsupported time unit. Use 'day', 'month', or 'year'")
-                temp_df[new_col_name] = temp_df[new_col_name].dt.normalize()
+            #     if unit == "day":
+            #         temp_df[new_col_name] = temp_df[col] + pd.to_timedelta(interval, unit='d')
+            #     elif unit == "month":
+            #         temp_df[new_col_name] = temp_df[col] + pd.DateOffset(months=interval)
+            #     elif unit == "year":
+            #         temp_df[new_col_name] = temp_df[col] + pd.DateOffset(years=interval)
+            #     else:
+            #         raise ValueError("DATEADD error: Unsupported time unit. Use 'day', 'month', or 'year'")
+            #     temp_df[new_col_name] = temp_df[new_col_name].dt.normalize()
 
-            elif calc_formula.lower().startswith("formatdate"):
-                match = re.match(r'formatdate\s*\(\s*(?:\[([^\]]+)\]|"([^"]+)")\s*,\s*["\'](.+?)["\']\s*\)', calc_formula, re.IGNORECASE)
-                if not match:
-                    raise ValueError("Invalid FORMATDATE format.")
+            # elif calc_formula.lower().startswith("formatdate"):
+            #     match = re.match(r'formatdate\s*\(\s*(?:\[([^\]]+)\]|"([^"]+)")\s*,\s*["\'](.+?)["\']\s*\)', calc_formula, re.IGNORECASE)
+            #     if not match:
+            #         raise ValueError("Invalid FORMATDATE format.")
                 
-                col = match.group(1) or match.group(2)
-                fmt = match.group(3)
+            #     col = match.group(1) or match.group(2)
+            #     fmt = match.group(3)
 
-                temp_df[col] = pd.to_datetime(temp_df[col], errors='coerce')
-                temp_df[new_col_name] = temp_df[col].dt.strftime(fmt.replace("YYYY", "%Y").replace("MM", "%m").replace("DD", "%d").replace("HH", "%H").replace("mm", "%M").replace("ss", "%S"))
+            #     temp_df[col] = pd.to_datetime(temp_df[col], errors='coerce')
+            #     temp_df[new_col_name] = temp_df[col].dt.strftime(fmt.replace("YYYY", "%Y").replace("MM", "%m").replace("DD", "%d").replace("HH", "%H").replace("mm", "%M").replace("ss", "%S"))
 
-            elif calc_formula.lower().startswith("replace"):
-                match = re.match(r'replace\s*\(\s*\[([^\]]+)\]\s*,\s*["\'](.*?)["\']\s*,\s*["\'](.*?)["\']\s*\)', calc_formula, re.IGNORECASE)
-                if not match:
-                    raise ValueError("Invalid REPLACE format.")
-                col, old, new = match.groups()
-                temp_df[new_col_name] = temp_df[col].astype(str).str.replace(old, new, regex=False)
+            # elif calc_formula.lower().startswith("replace"):
+            #     match = re.match(r'replace\s*\(\s*\[([^\]]+)\]\s*,\s*["\'](.*?)["\']\s*,\s*["\'](.*?)["\']\s*\)', calc_formula, re.IGNORECASE)
+            #     if not match:
+            #         raise ValueError("Invalid REPLACE format.")
+            #     col, old, new = match.groups()
+            #     temp_df[new_col_name] = temp_df[col].astype(str).str.replace(old, new, regex=False)
 
-            elif calc_formula.lower().startswith("trim"):
-                match = re.match(r'trim\s*\(\s*\[([^\]]+)\]\s*\)', calc_formula, re.IGNORECASE)
-                if not match:
-                    raise ValueError("Invalid TRIM format.")
-                col = match.group(1)
-                temp_df[new_col_name] = temp_df[col].astype(str).str.strip()
-            else:
-                calc_formula_python = re.sub(r'\[(.*?)\]', replace_column_in_formula, calc_formula)
-                try:
-                    temp_df[new_col_name] = eval(calc_formula_python)
-                except Exception as e:
-                    raise ValueError(f"Error evaluating math formula '{calc_formula}': {e}") from e
+            # elif calc_formula.lower().startswith("trim"):
+            #     match = re.match(r'trim\s*\(\s*\[([^\]]+)\]\s*\)', calc_formula, re.IGNORECASE)
+            #     if not match:
+            #         raise ValueError("Invalid TRIM format.")
+            #     col = match.group(1)
+            #     temp_df[new_col_name] = temp_df[col].astype(str).str.strip()
+            # else:
+            #     calc_formula_python = re.sub(r'\[(.*?)\]', replace_column_in_formula, calc_formula)
+            #     try:
+            #         temp_df[new_col_name] = eval(calc_formula_python)
+            #     except Exception as e:
+            #         raise ValueError(f"Error evaluating math formula '{calc_formula}': {e}") from e
     print("📌 AFTER CALCULATIONS SHAPE:", temp_df.shape)
     print("📌 AFTER CALCULATIONS COLUMNS:", list(temp_df.columns))
 
@@ -5947,284 +5953,390 @@ def handle_clicked_category():
     return jsonify({"message": "Category clicked successfully!",
                     "chart_data_list": chart_data_list})
 
+# def apply_calculation_to_df(df, calculation_data_list, x_axis=None, y_axis=None):
+#     if not calculation_data_list:
+#         return df, x_axis, y_axis
+#     skip_calculated_column = False
+#     y_base_column = None
+
+#     for calculation_data in calculation_data_list:
+#         try:
+#             if not (calculation_data.get('calculation') and calculation_data.get('columnName')):
+#                 continue
+
+#             calc_formula = calculation_data['calculation']
+#             new_col_name = calculation_data['columnName']
+#             replace_col_name = calculation_data.get('replaceColumn', new_col_name)
+#             df, x_axis, y_axis = apply_all_calculations(
+#                     df,
+#                     calculation_data,
+#                     x_axis,
+#                     y_axis
+#                 )
+
+#             # if new_col_name not in (x_axis or []) and new_col_name not in (y_axis or []):
+#             #     continue  # Skip if not used in chart
+
+#             # def replace_column(match):
+#             #     col_name = match.group(1)
+#             #     if col_name in df.columns:
+#             #         return f"df['{col_name}']"
+#             #     else:
+#             #         raise ValueError(f"Column {col_name} not found in DataFrame.")
+
+#             # formula_lower = calc_formula.strip().lower()
+
+#             # if formula_lower.startswith("if"):
+#             #     match = (
+#             #         re.match(
+#             #             r"if\s*\(\s*(.+?)\s*\)\s*then\s*'?(.*?)'?\s*else\s*'?(.*?)'?$",
+#             #             calc_formula.strip(),
+#             #             re.IGNORECASE
+#             #         )
+#             #         or
+#             #         re.match(
+#             #             r"if\s*\(\s*(.+?)\s*,\s*'?(.*?)'?\s*,\s*'?(.*?)'?\s*\)$",
+#             #             calc_formula.strip(),
+#             #             re.IGNORECASE
+#             #         )
+#             #     )
+
+#             #     # match = re.match(r"if\s*\((.+?)\)\s*then\s*'?(.*?)'?\s*else\s*'?(.*?)'?$", calc_formula.strip(), re.IGNORECASE)
+#             #     if not match:
+#             #         raise ValueError("Invalid IF format")
+#             #     condition_expr, then_val, else_val = match.groups()
+#             #     condition_expr_python = re.sub(r'\[(.*?)\]', replace_column, condition_expr)
+#             #     df[new_col_name] = np.where(eval(condition_expr_python), then_val.strip("'\""), else_val.strip("'\""))
+#             # elif calc_formula.lower().startswith("round"):
+#             #     # Match formula: round(<expression>, <decimals>)
+#             #     match = re.match(r'round\s*\(\s*(.+?)\s*,\s*(\d+)\s*\)', calc_formula, re.IGNORECASE)
+#             #     if not match:
+#             #         raise ValueError(
+#             #             "Invalid ROUND format. Use round([col], decimals) or round([col1]/[col2], decimals)"
+#             #         )
+
+#             #     expr, decimals = match.groups()
+#             #     decimals = int(decimals)
+
+#             #     # Replace [column] with numeric dataframe references
+#             #     def replace_column(match):
+#             #         col_name = match.group(1)
+#             #         if col_name not in df.columns:
+#             #             raise ValueError(f"Missing column: {col_name}")
+#             #         # Convert to numeric
+#             #         df[col_name] = pd.to_numeric(df[col_name], errors='coerce')
+#             #         return f"df['{col_name}']"
+
+#             #     expr_python = re.sub(r'\[([^\]]+)\]', replace_column, expr)
+
+#             #     # Handle division by zero safely
+#             #     expr_python = re.sub(
+#             #         r"df\['([^']+)'\]\s*/\s*df\['([^']+)'\]",
+#             #         r"np.divide(df['\1'], df['\2'].replace(0, np.nan))",
+#             #         expr_python
+#             #     )
+
+#             #     # Evaluate safely and round
+#             #     try:
+#             #         df[new_col_name] = np.round(eval(expr_python), decimals)
+#             #     except Exception as e:
+#             #         print(f"Error evaluating ROUND formula: {e}")
+#             #         df[new_col_name] = np.nan
+
+
+#             # elif formula_lower.startswith("switch"):
+#             #     switch_match = re.match(r"switch\s*\(\s*\[([^\]]+)\](.*?)\)", calc_formula, re.IGNORECASE)
+#             #     if not switch_match:
+#             #         raise ValueError("Invalid SWITCH format")
+#             #     col_name, rest = switch_match.groups()
+#             #     if col_name not in df.columns:
+#             #         raise ValueError(f"Column '{col_name}' not found")
+#             #     cases = re.findall(r'"(.*?)"\s*,\s*"(.*?)"', rest)
+#             #     default_match = re.search(r'default\s*,\s*["\']?(.*?)["\']?$', rest, re.IGNORECASE)
+#             #     default_val = default_match.group(1) if default_match else None
+#             #     df[new_col_name] = df[col_name].map(dict(cases)).fillna(default_val)
+
+#             # elif formula_lower.startswith("iferror"):
+#             #     match = re.match(r"iferror\s*\((.+?)\s*,\s*(.+?)\)", calc_formula, re.IGNORECASE)
+#             #     if not match:
+#             #         raise ValueError("Invalid IFERROR format")
+#             #     expr, fallback = match.groups()
+#             #     expr_python = re.sub(r'\[(.*?)\]', replace_column, expr)
+#             #     try:
+#             #         df[new_col_name] = eval(expr_python)
+#             #         df[new_col_name] = df[new_col_name].fillna(fallback)
+#             #     except:
+#             #         df[new_col_name] = fallback
+
+#             # elif formula_lower.startswith("calculate"):
+#             #     match = re.match(r"calculate\s*\(\s*(sum|avg|count|max|min)\s*\(\s*\[([^\]]+)\]\)\s*,\s*\[([^\]]+)\]\s*=\s*['\"](.*?)['\"]\s*\)", calc_formula, re.IGNORECASE)
+#             #     if not match:
+#             #         raise ValueError("Invalid CALCULATE format")
+#             #     agg, value_col, filter_col, filter_val = match.groups()
+#             #     df_filtered = df[df[filter_col] == filter_val]
+#             #     result_val = {
+#             #         "sum": df_filtered[value_col].astype(float).sum(),
+#             #         "avg": df_filtered[value_col].astype(float).mean(),
+#             #         "count": df_filtered[value_col].count(),
+#             #         "max": df_filtered[value_col].astype(float).max(),
+#             #         "min": df_filtered[value_col].astype(float).min(),
+#             #     }[agg]
+#             #     df[new_col_name] = result_val
+
+#             # elif formula_lower.startswith(("maxx", "minx")):
+#             #     match = re.match(r"(maxx|minx)\s*\(\s*\[([^\]]+)\]\)", calc_formula, re.IGNORECASE)
+#             #     func, col = match.groups()
+#             #     df[new_col_name] = df[col].max() if func.lower() == "maxx" else df[col].min()
+
+#             # elif formula_lower.startswith("abs"):
+#             #     col = re.match(r"abs\s*\(\s*\[([^\]]+)\]\)", calc_formula, re.IGNORECASE).group(1)
+#             #     df[new_col_name] = df[col].abs()
+
+#             # elif formula_lower.startswith("len"):
+#             #     col = re.match(r"len\s*\(\s*(?:\[([^\]]+)\]|\"([^\"]+)\")\s*\)", calc_formula, re.IGNORECASE).groups()
+#             #     df[new_col_name] = df[col[0] or col[1]].astype(str).str.len()
+
+#             # elif formula_lower.startswith("lower"):
+#             #     col = re.match(r"lower\s*\(\s*\[([^\]]+)\]\)", calc_formula, re.IGNORECASE).group(1)
+#             #     df[new_col_name] = df[col].astype(str).str.lower()
+
+#             # elif formula_lower.startswith("upper"):
+#             #     col = re.match(r"upper\s*\(\s*\[([^\]]+)\]\)", calc_formula, re.IGNORECASE).group(1)
+#             #     df[new_col_name] = df[col].astype(str).str.upper()
+
+#             # elif formula_lower.startswith("concat"):
+#             #     parts = re.split(r",(?![^\[]*\])", re.match(r"concat\s*\((.+)\)", calc_formula, re.IGNORECASE).group(1))
+#             #     concat_parts = []
+#             #     for part in parts:
+#             #         part = part.strip()
+#             #         if part.startswith("[") and part.endswith("]"):
+#             #             col = part[1:-1]
+#             #             concat_parts.append(df[col].astype(str))
+#             #         else:
+#             #             concat_parts.append(part.strip('"').strip("'"))
+#             #     df[new_col_name] = reduce(lambda x, y: x + y, [p if isinstance(p, pd.Series) else pd.Series([p]*len(df)) for p in concat_parts])
+
+#             # elif re.match(r"(year|month|day)\s*\(\s*\[([^\]]+)\]\)", calc_formula, re.IGNORECASE):
+#             #     func, col = re.match(r"(year|month|day)\s*\(\s*\[([^\]]+)\]\)", calc_formula, re.IGNORECASE).groups()
+#             #     df[col] = pd.to_datetime(df[col], errors="coerce")
+#             #     df[new_col_name] = getattr(df[col].dt, func.lower())
+
+#             # elif formula_lower.startswith("isnull"):
+#             #     col, fallback = re.match(r"isnull\s*\(\s*\[([^\]]+)\]\s*,\s*['\"]?(.*?)['\"]?\s*\)", calc_formula, re.IGNORECASE).groups()
+#             #     df[new_col_name] = df[col].fillna(fallback)
+
+#             # elif re.match(r"(?:\[([^\]]+)\]|\"([^\"]+)\")\s+in\s*\((.*?)\)", calc_formula, re.IGNORECASE):
+#             #     match = re.match(r"(?:\[([^\]]+)\]|\"([^\"]+)\")\s+in\s*\((.*?)\)", calc_formula, re.IGNORECASE)
+#             #     col = match.group(1) or match.group(2)
+#             #     values = [v.strip().strip('"').strip("'") for v in match.group(3).split(",")]
+#             #     df[new_col_name] = df[col].isin(values)
+
+#             # elif formula_lower.startswith("datediff"):
+#             #     end_col, start_col = re.match(r"datediff\s*\(\s*\[([^\]]+)\]\s*,\s*\[([^\]]+)\]\)", calc_formula, re.IGNORECASE).groups()
+#             #     df[end_col] = pd.to_datetime(df[end_col], errors="coerce")
+#             #     df[start_col] = pd.to_datetime(df[start_col], errors="coerce")
+#             #     df[new_col_name] = (df[end_col] - df[start_col]).dt.days
+
+#             # elif formula_lower.startswith("today()"):
+#             #     df[new_col_name] = pd.Timestamp.today().normalize()
+
+#             # elif formula_lower.startswith("now()"):
+#             #     df[new_col_name] = pd.Timestamp.now()
+
+#             # elif formula_lower.startswith("dateadd"):
+#             #     col, interval, unit = re.match(r"dateadd\s*\(\s*\[([^\]]+)\]\s*,\s*(-?\d+)\s*,\s*['\"](day|month|year)['\"]\)", calc_formula, re.IGNORECASE).groups()
+#             #     interval = int(interval)
+#             #     df[col] = pd.to_datetime(df[col], errors="coerce")
+#             #     if unit == "day":
+#             #         df[new_col_name] = df[col] + pd.to_timedelta(interval, unit="d")
+#             #     elif unit == "month":
+#             #         df[new_col_name] = df[col] + pd.DateOffset(months=interval)
+#             #     elif unit == "year":
+#             #         df[new_col_name] = df[col] + pd.DateOffset(years=interval)
+
+#             # elif formula_lower.startswith("formatdate"):
+#             #     col, fmt = re.match(r"formatdate\s*\(\s*\[([^\]]+)\]\s*,\s*['\"](.+?)['\"]\)", calc_formula, re.IGNORECASE).groups()
+#             #     df[col] = pd.to_datetime(df[col], errors="coerce")
+#             #     fmt_mapped = fmt.replace("YYYY", "%Y").replace("MM", "%m").replace("DD", "%d")
+#             #     df[new_col_name] = df[col].dt.strftime(fmt_mapped)
+
+#             # elif formula_lower.startswith("replace"):
+#             #     col, old, new = re.match(r"replace\s*\(\s*\[([^\]]+)\]\s*,\s*['\"](.*?)['\"]\s*,\s*['\"](.*?)['\"]\)", calc_formula, re.IGNORECASE).groups()
+#             #     df[new_col_name] = df[col].astype(str).str.replace(old, new, regex=False)
+
+#             # elif formula_lower.startswith("trim"):
+#             #     col = re.match(r"trim\s*\(\s*\[([^\]]+)\]\)", calc_formula, re.IGNORECASE).group(1)
+#             #     df[new_col_name] = df[col].astype(str).str.strip()
+
+#             # elif calc_formula.lower().startswith(("sum", "avg", "min", "max")):
+#             #     match = re.match(
+#             #         r'(sum|avg|min|max)\s*\(\s*\[([^\]]+)\]\s*\)',
+#             #         calc_formula,
+#             #         re.IGNORECASE
+#             #     )
+#             #     if not match:
+#             #         raise ValueError("Invalid aggregation format.")
+
+#             #     agg_func, col = match.groups()
+#             #     agg_func = agg_func.lower()
+
+#             #     # DO NOT create calculated column
+#             #     # Just mark aggregation intent
+#             #     aggregation = agg_func
+#             #     y_base_column = col
+
+#             #     print(f"Detected aggregation: {aggregation}({col})")
+
+#             #     # IMPORTANT: skip dataframe eval
+#             #     skip_calculated_column = True
+
+#             # else:
+#             #     # calc_formula_python = re.sub(r'\[(.*?)\]', replace_column, calc_formula)
+#             #     # print("Evaluating math formula:", calc_formula_python)
+#             #     # Replace column references [col] → temp_df['col']
+#             #     calc_formula_python = re.sub(r'\[(.*?)\]', replace_column, calc_formula)
+
+#             #     # Handle COUNT
+#             #     calc_formula_python = re.sub(
+#             #         r'count\s*\(\s*(temp_df\[.*?\])\s*\)',
+#             #         r'\1.count()',
+#             #         calc_formula_python,
+#             #         flags=re.IGNORECASE
+#             #     )
+
+#             #     # Handle SUM
+#             #     calc_formula_python = re.sub(
+#             #         r'sum\s*\(\s*(temp_df\[.*?\])\s*\)',
+#             #         r'\1.sum()',
+#             #         calc_formula_python,
+#             #         flags=re.IGNORECASE
+#             #     )
+
+#             #     # Handle AVG
+#             #     calc_formula_python = re.sub(
+#             #         r'avg\s*\(\s*(temp_df\[.*?\])\s*\)',
+#             #         r'\1.mean()',
+#             #         calc_formula_python,
+#             #         flags=re.IGNORECASE
+#             #     )
+
+#             #     print("Evaluating math formula:", calc_formula_python)
+#             #     df[new_col_name] = eval(calc_formula_python)
+
+#             print(f"✅ New column '{new_col_name}' created.")
+
+#             # Replace in axes
+#             if y_axis:
+#                 y_axis = [new_col_name if col == replace_col_name else col for col in y_axis]
+#             if x_axis:
+#                 x_axis = [new_col_name if col == replace_col_name else col for col in x_axis]
+#             if skip_calculated_column:
+#                 y_axis = [y_base_column if col == new_col_name else col for col in y_axis]
+
+#         except Exception as e:
+#             print(f"❌ Error applying calculation for column '{calculation_data.get('columnName')}': {e}")
+
+#     return df, x_axis, y_axis
+# def apply_calculation_to_df(df, calculation_data_list, x_axis=None, y_axis=None):
+#     """
+#     Apply a list of calculation formulas to the dataframe.
+
+#     Parameters:
+#         df (pd.DataFrame): The input dataframe.
+#         calculation_data_list (list): List of calculation dicts, each containing:
+#             - calculation: str
+#             - columnName: str
+#             - replaceColumn: optional str
+#         x_axis (list): Columns used in x-axis (optional)
+#         y_axis (list): Columns used in y-axis (optional)
+
+#     Returns:
+#         df (pd.DataFrame): DataFrame with calculated columns added.
+#         x_axis (list): Updated x_axis list with renamed columns.
+#         y_axis (list): Updated y_axis list with renamed columns.
+#     """
+#     if not calculation_data_list:
+#         return df, x_axis, y_axis
+
+#     skip_calculated_column = False
+#     y_base_column = None
+
+#     for calc_entry in calculation_data_list:
+#         if not isinstance(calc_entry, dict):
+#             print(f"❌ Skipping invalid calculation entry (not a dict): {calc_entry}")
+#             continue
+
+#         calc_formula = calc_entry.get('calculation')
+#         new_col_name = calc_entry.get('columnName')
+#         replace_col_name = calc_entry.get('replaceColumn', new_col_name)
+
+#         if not calc_formula or not new_col_name:
+#             print(f"❌ Skipping incomplete calculation entry: {calc_entry}")
+#             continue
+
+#         try:
+#             # Apply the calculation using your modular function
+#             df, x_axis, y_axis = apply_all_calculations(df, calc_entry, x_axis, y_axis)
+#             print("df  ",df)
+
+#             # Update axis columns if needed
+#             if y_axis:
+#                 y_axis = [new_col_name if col == replace_col_name else col for col in y_axis]
+#             if x_axis:
+#                 x_axis = [new_col_name if col == replace_col_name else col for col in x_axis]
+
+#             if skip_calculated_column:
+#                 y_axis = [y_base_column if col == new_col_name else col for col in y_axis]
+
+#             print(f"✅ New column '{new_col_name}' created.")
+
+#         except Exception as e:
+#             print(f"❌ Error applying calculation for column '{new_col_name}': {e}")
+
+#     return df, x_axis, y_axis
 def apply_calculation_to_df(df, calculation_data_list, x_axis=None, y_axis=None):
+    """
+    Apply a list of calculation formulas to the dataframe.
+    """
     if not calculation_data_list:
         return df, x_axis, y_axis
+
     skip_calculated_column = False
     y_base_column = None
 
-    for calculation_data in calculation_data_list:
+    for calc_entry in calculation_data_list:
+        if not isinstance(calc_entry, dict):
+            print(f"❌ Skipping invalid calculation entry (not a dict): {calc_entry}")
+            continue
+
+        calc_formula = calc_entry.get('calculation')
+        new_col_name = calc_entry.get('columnName')
+        replace_col_name = calc_entry.get('replaceColumn', new_col_name)
+
+        if not calc_formula or not new_col_name:
+            print(f"❌ Skipping incomplete calculation entry: {calc_entry}")
+            continue
+
         try:
-            if not (calculation_data.get('calculation') and calculation_data.get('columnName')):
-                continue
+            # Wrap single dict in a list for apply_all_calculations
+            df, x_axis, y_axis = apply_all_calculations(df, [calc_entry], x_axis, y_axis)
 
-            calc_formula = calculation_data['calculation']
-            new_col_name = calculation_data['columnName']
-            replace_col_name = calculation_data.get('replaceColumn', new_col_name)
-
-            if new_col_name not in (x_axis or []) and new_col_name not in (y_axis or []):
-                continue  # Skip if not used in chart
-
-            def replace_column(match):
-                col_name = match.group(1)
-                if col_name in df.columns:
-                    return f"df['{col_name}']"
-                else:
-                    raise ValueError(f"Column {col_name} not found in DataFrame.")
-
-            formula_lower = calc_formula.strip().lower()
-
-            if formula_lower.startswith("if"):
-                match = (
-                    re.match(
-                        r"if\s*\(\s*(.+?)\s*\)\s*then\s*'?(.*?)'?\s*else\s*'?(.*?)'?$",
-                        calc_formula.strip(),
-                        re.IGNORECASE
-                    )
-                    or
-                    re.match(
-                        r"if\s*\(\s*(.+?)\s*,\s*'?(.*?)'?\s*,\s*'?(.*?)'?\s*\)$",
-                        calc_formula.strip(),
-                        re.IGNORECASE
-                    )
-                )
-
-                # match = re.match(r"if\s*\((.+?)\)\s*then\s*'?(.*?)'?\s*else\s*'?(.*?)'?$", calc_formula.strip(), re.IGNORECASE)
-                if not match:
-                    raise ValueError("Invalid IF format")
-                condition_expr, then_val, else_val = match.groups()
-                condition_expr_python = re.sub(r'\[(.*?)\]', replace_column, condition_expr)
-                df[new_col_name] = np.where(eval(condition_expr_python), then_val.strip("'\""), else_val.strip("'\""))
-            elif calc_formula.lower().startswith("round"):
-                # Match formula: round(<expression>, <decimals>)
-                match = re.match(r'round\s*\(\s*(.+?)\s*,\s*(\d+)\s*\)', calc_formula, re.IGNORECASE)
-                if not match:
-                    raise ValueError(
-                        "Invalid ROUND format. Use round([col], decimals) or round([col1]/[col2], decimals)"
-                    )
-
-                expr, decimals = match.groups()
-                decimals = int(decimals)
-
-                # Replace [column] with numeric dataframe references
-                def replace_column(match):
-                    col_name = match.group(1)
-                    if col_name not in df.columns:
-                        raise ValueError(f"Missing column: {col_name}")
-                    # Convert to numeric
-                    df[col_name] = pd.to_numeric(df[col_name], errors='coerce')
-                    return f"df['{col_name}']"
-
-                expr_python = re.sub(r'\[([^\]]+)\]', replace_column, expr)
-
-                # Handle division by zero safely
-                expr_python = re.sub(
-                    r"df\['([^']+)'\]\s*/\s*df\['([^']+)'\]",
-                    r"np.divide(df['\1'], df['\2'].replace(0, np.nan))",
-                    expr_python
-                )
-
-                # Evaluate safely and round
-                try:
-                    df[new_col_name] = np.round(eval(expr_python), decimals)
-                except Exception as e:
-                    print(f"Error evaluating ROUND formula: {e}")
-                    df[new_col_name] = np.nan
-
-
-            elif formula_lower.startswith("switch"):
-                switch_match = re.match(r"switch\s*\(\s*\[([^\]]+)\](.*?)\)", calc_formula, re.IGNORECASE)
-                if not switch_match:
-                    raise ValueError("Invalid SWITCH format")
-                col_name, rest = switch_match.groups()
-                if col_name not in df.columns:
-                    raise ValueError(f"Column '{col_name}' not found")
-                cases = re.findall(r'"(.*?)"\s*,\s*"(.*?)"', rest)
-                default_match = re.search(r'default\s*,\s*["\']?(.*?)["\']?$', rest, re.IGNORECASE)
-                default_val = default_match.group(1) if default_match else None
-                df[new_col_name] = df[col_name].map(dict(cases)).fillna(default_val)
-
-            elif formula_lower.startswith("iferror"):
-                match = re.match(r"iferror\s*\((.+?)\s*,\s*(.+?)\)", calc_formula, re.IGNORECASE)
-                if not match:
-                    raise ValueError("Invalid IFERROR format")
-                expr, fallback = match.groups()
-                expr_python = re.sub(r'\[(.*?)\]', replace_column, expr)
-                try:
-                    df[new_col_name] = eval(expr_python)
-                    df[new_col_name] = df[new_col_name].fillna(fallback)
-                except:
-                    df[new_col_name] = fallback
-
-            elif formula_lower.startswith("calculate"):
-                match = re.match(r"calculate\s*\(\s*(sum|avg|count|max|min)\s*\(\s*\[([^\]]+)\]\)\s*,\s*\[([^\]]+)\]\s*=\s*['\"](.*?)['\"]\s*\)", calc_formula, re.IGNORECASE)
-                if not match:
-                    raise ValueError("Invalid CALCULATE format")
-                agg, value_col, filter_col, filter_val = match.groups()
-                df_filtered = df[df[filter_col] == filter_val]
-                result_val = {
-                    "sum": df_filtered[value_col].astype(float).sum(),
-                    "avg": df_filtered[value_col].astype(float).mean(),
-                    "count": df_filtered[value_col].count(),
-                    "max": df_filtered[value_col].astype(float).max(),
-                    "min": df_filtered[value_col].astype(float).min(),
-                }[agg]
-                df[new_col_name] = result_val
-
-            elif formula_lower.startswith(("maxx", "minx")):
-                match = re.match(r"(maxx|minx)\s*\(\s*\[([^\]]+)\]\)", calc_formula, re.IGNORECASE)
-                func, col = match.groups()
-                df[new_col_name] = df[col].max() if func.lower() == "maxx" else df[col].min()
-
-            elif formula_lower.startswith("abs"):
-                col = re.match(r"abs\s*\(\s*\[([^\]]+)\]\)", calc_formula, re.IGNORECASE).group(1)
-                df[new_col_name] = df[col].abs()
-
-            elif formula_lower.startswith("len"):
-                col = re.match(r"len\s*\(\s*(?:\[([^\]]+)\]|\"([^\"]+)\")\s*\)", calc_formula, re.IGNORECASE).groups()
-                df[new_col_name] = df[col[0] or col[1]].astype(str).str.len()
-
-            elif formula_lower.startswith("lower"):
-                col = re.match(r"lower\s*\(\s*\[([^\]]+)\]\)", calc_formula, re.IGNORECASE).group(1)
-                df[new_col_name] = df[col].astype(str).str.lower()
-
-            elif formula_lower.startswith("upper"):
-                col = re.match(r"upper\s*\(\s*\[([^\]]+)\]\)", calc_formula, re.IGNORECASE).group(1)
-                df[new_col_name] = df[col].astype(str).str.upper()
-
-            elif formula_lower.startswith("concat"):
-                parts = re.split(r",(?![^\[]*\])", re.match(r"concat\s*\((.+)\)", calc_formula, re.IGNORECASE).group(1))
-                concat_parts = []
-                for part in parts:
-                    part = part.strip()
-                    if part.startswith("[") and part.endswith("]"):
-                        col = part[1:-1]
-                        concat_parts.append(df[col].astype(str))
-                    else:
-                        concat_parts.append(part.strip('"').strip("'"))
-                df[new_col_name] = reduce(lambda x, y: x + y, [p if isinstance(p, pd.Series) else pd.Series([p]*len(df)) for p in concat_parts])
-
-            elif re.match(r"(year|month|day)\s*\(\s*\[([^\]]+)\]\)", calc_formula, re.IGNORECASE):
-                func, col = re.match(r"(year|month|day)\s*\(\s*\[([^\]]+)\]\)", calc_formula, re.IGNORECASE).groups()
-                df[col] = pd.to_datetime(df[col], errors="coerce")
-                df[new_col_name] = getattr(df[col].dt, func.lower())
-
-            elif formula_lower.startswith("isnull"):
-                col, fallback = re.match(r"isnull\s*\(\s*\[([^\]]+)\]\s*,\s*['\"]?(.*?)['\"]?\s*\)", calc_formula, re.IGNORECASE).groups()
-                df[new_col_name] = df[col].fillna(fallback)
-
-            elif re.match(r"(?:\[([^\]]+)\]|\"([^\"]+)\")\s+in\s*\((.*?)\)", calc_formula, re.IGNORECASE):
-                match = re.match(r"(?:\[([^\]]+)\]|\"([^\"]+)\")\s+in\s*\((.*?)\)", calc_formula, re.IGNORECASE)
-                col = match.group(1) or match.group(2)
-                values = [v.strip().strip('"').strip("'") for v in match.group(3).split(",")]
-                df[new_col_name] = df[col].isin(values)
-
-            elif formula_lower.startswith("datediff"):
-                end_col, start_col = re.match(r"datediff\s*\(\s*\[([^\]]+)\]\s*,\s*\[([^\]]+)\]\)", calc_formula, re.IGNORECASE).groups()
-                df[end_col] = pd.to_datetime(df[end_col], errors="coerce")
-                df[start_col] = pd.to_datetime(df[start_col], errors="coerce")
-                df[new_col_name] = (df[end_col] - df[start_col]).dt.days
-
-            elif formula_lower.startswith("today()"):
-                df[new_col_name] = pd.Timestamp.today().normalize()
-
-            elif formula_lower.startswith("now()"):
-                df[new_col_name] = pd.Timestamp.now()
-
-            elif formula_lower.startswith("dateadd"):
-                col, interval, unit = re.match(r"dateadd\s*\(\s*\[([^\]]+)\]\s*,\s*(-?\d+)\s*,\s*['\"](day|month|year)['\"]\)", calc_formula, re.IGNORECASE).groups()
-                interval = int(interval)
-                df[col] = pd.to_datetime(df[col], errors="coerce")
-                if unit == "day":
-                    df[new_col_name] = df[col] + pd.to_timedelta(interval, unit="d")
-                elif unit == "month":
-                    df[new_col_name] = df[col] + pd.DateOffset(months=interval)
-                elif unit == "year":
-                    df[new_col_name] = df[col] + pd.DateOffset(years=interval)
-
-            elif formula_lower.startswith("formatdate"):
-                col, fmt = re.match(r"formatdate\s*\(\s*\[([^\]]+)\]\s*,\s*['\"](.+?)['\"]\)", calc_formula, re.IGNORECASE).groups()
-                df[col] = pd.to_datetime(df[col], errors="coerce")
-                fmt_mapped = fmt.replace("YYYY", "%Y").replace("MM", "%m").replace("DD", "%d")
-                df[new_col_name] = df[col].dt.strftime(fmt_mapped)
-
-            elif formula_lower.startswith("replace"):
-                col, old, new = re.match(r"replace\s*\(\s*\[([^\]]+)\]\s*,\s*['\"](.*?)['\"]\s*,\s*['\"](.*?)['\"]\)", calc_formula, re.IGNORECASE).groups()
-                df[new_col_name] = df[col].astype(str).str.replace(old, new, regex=False)
-
-            elif formula_lower.startswith("trim"):
-                col = re.match(r"trim\s*\(\s*\[([^\]]+)\]\)", calc_formula, re.IGNORECASE).group(1)
-                df[new_col_name] = df[col].astype(str).str.strip()
-
-            elif calc_formula.lower().startswith(("sum", "avg", "min", "max")):
-                match = re.match(
-                    r'(sum|avg|min|max)\s*\(\s*\[([^\]]+)\]\s*\)',
-                    calc_formula,
-                    re.IGNORECASE
-                )
-                if not match:
-                    raise ValueError("Invalid aggregation format.")
-
-                agg_func, col = match.groups()
-                agg_func = agg_func.lower()
-
-                # DO NOT create calculated column
-                # Just mark aggregation intent
-                aggregation = agg_func
-                y_base_column = col
-
-                print(f"Detected aggregation: {aggregation}({col})")
-
-                # IMPORTANT: skip dataframe eval
-                skip_calculated_column = True
-
-            else:
-                # calc_formula_python = re.sub(r'\[(.*?)\]', replace_column, calc_formula)
-                # print("Evaluating math formula:", calc_formula_python)
-                # Replace column references [col] → temp_df['col']
-                calc_formula_python = re.sub(r'\[(.*?)\]', replace_column, calc_formula)
-
-                # Handle COUNT
-                calc_formula_python = re.sub(
-                    r'count\s*\(\s*(temp_df\[.*?\])\s*\)',
-                    r'\1.count()',
-                    calc_formula_python,
-                    flags=re.IGNORECASE
-                )
-
-                # Handle SUM
-                calc_formula_python = re.sub(
-                    r'sum\s*\(\s*(temp_df\[.*?\])\s*\)',
-                    r'\1.sum()',
-                    calc_formula_python,
-                    flags=re.IGNORECASE
-                )
-
-                # Handle AVG
-                calc_formula_python = re.sub(
-                    r'avg\s*\(\s*(temp_df\[.*?\])\s*\)',
-                    r'\1.mean()',
-                    calc_formula_python,
-                    flags=re.IGNORECASE
-                )
-
-                print("Evaluating math formula:", calc_formula_python)
-                df[new_col_name] = eval(calc_formula_python)
-
-            print(f"✅ New column '{new_col_name}' created.")
-
-            # Replace in axes
+            # Update axis columns if needed
             if y_axis:
                 y_axis = [new_col_name if col == replace_col_name else col for col in y_axis]
             if x_axis:
                 x_axis = [new_col_name if col == replace_col_name else col for col in x_axis]
+
             if skip_calculated_column:
                 y_axis = [y_base_column if col == new_col_name else col for col in y_axis]
 
+            print(f"✅ New column '{new_col_name}' created.")
+
         except Exception as e:
-            print(f"❌ Error applying calculation for column '{calculation_data.get('columnName')}': {e}")
+            print(f"❌ Error applying calculation for column '{new_col_name}': {e}")
 
     return df, x_axis, y_axis
+
 def apply_and_or_filters(df: pd.DataFrame, filter_options: dict) -> pd.DataFrame:
     """
     Apply AND/OR filters on a DataFrame.
