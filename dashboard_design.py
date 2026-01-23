@@ -40,7 +40,7 @@ def get_database_table_names(db_name, username, password, host='localhost', port
                   'user',
                   'user_management_logs',
                   'activity_log',
-                  'external_db_connections'
+                  'external_db_connections','user_category_mapping'
               )
             ORDER BY table_name
         """)

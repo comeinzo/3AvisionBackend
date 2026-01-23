@@ -1198,16 +1198,73 @@ def upload_csv_to_postgresql(database_name,primary_key_column, username, passwor
                 print(f"Inserted new data source '{directory_name}' into 'datasource' table.")
 
             conn.commit()
+        else:  # Table exists / in use
+            print(f"Table '{table_name}' already exists. Attempting to update/UPSERT existing data...")
 
-        else: # This is the block that needs modification
-            print(f"Table '{table_name}' is in use, skipping deletion and insertion. No changes made to data.")
-            if cur:
-                cur.close()
-                cur = None # Set to None after closing
-            if conn:
-                conn.close()
-                conn = None # Set to None after closing
-            return f"Error: Table '{table_name}' is currently in use by charts. Cannot modify data."
+            try:
+                # Fetch table columns
+                cur.execute(f"""
+                    SELECT column_name, data_type
+                    FROM information_schema.columns
+                    WHERE table_name = '{table_name}'
+                    ORDER BY ordinal_position;
+                """)
+                db_cols_info = cur.fetchall()
+                db_columns = [c[0] for c in db_cols_info]
+                serial_cols_in_db = [c[0] for c in db_cols_info if 'nextval' in c[1]]
+
+                # Determine primary key for UPSERT
+                cur.execute(f"""
+                    SELECT a.attname
+                    FROM pg_index ix
+                    JOIN pg_attribute a ON a.attrelid = ix.indrelid AND a.attnum = ANY(ix.indkey)
+                    WHERE ix.indrelid = '{table_name}'::regclass AND ix.indisprimary;
+                """)
+                db_pk_col_name_info = cur.fetchone()
+                actual_pk_for_upsert = db_pk_col_name_info[0] if db_pk_col_name_info else None
+
+                # Read CSV
+                df = pd.read_csv(csv_file_path)
+                df = preprocess_dates(df)
+                df = clean_data(df)
+                df.columns = [sanitize_column_name(col) for col in df.columns]
+
+                # Drop SERIAL PK from CSV if exists
+                if actual_pk_for_upsert and actual_pk_for_upsert in serial_cols_in_db and actual_pk_for_upsert in df.columns:
+                    print(f"CSV contains '{actual_pk_for_upsert}' which is a SERIAL PK. Dropping it to let DB manage IDs.")
+                    df = df.drop(columns=[actual_pk_for_upsert])
+                    actual_pk_for_upsert = None  # Cannot UPSERT on a dropped column
+
+                # Reindex to match DB columns
+                insert_cols = [col for col in db_columns if col in df.columns and col not in serial_cols_in_db]
+                df = df.reindex(columns=insert_cols)
+
+                print(f"Performing batch UPSERT for table '{table_name}' ({len(df)} rows)...")
+                inserted, updated, skipped = optimized_batch_insert(cur, conn, table_name, df, actual_pk_for_upsert, batch_size=5000)
+
+                rows_added_total += inserted
+                rows_updated_total += updated
+                rows_skipped_total += skipped
+
+                conn.commit()
+                print(f"Update/UPSERT completed for '{table_name}'.")
+
+            except Exception as e:
+                print(f"Error updating table '{table_name}': {e}")
+                traceback.print_exc()
+                if conn:
+                    conn.rollback()
+                return f"Error updating table '{table_name}': {str(e)}"
+
+        # else: # This is the block that needs modification
+        #     print(f"Table '{table_name}' is in use, skipping deletion and insertion. No changes made to data.")
+        #     if cur:
+        #         cur.close()
+        #         cur = None # Set to None after closing
+        #     if conn:
+        #         conn.close()
+        #         conn = None # Set to None after closing
+        #     return f"Error: Table '{table_name}' is currently in use by charts. Cannot modify data."
 
     except Exception as e:
         print("An error occurred:", e)
