@@ -4535,6 +4535,36 @@ def update_data_chart():
     except Exception as e:
         print("Error:", e)
         return jsonify({'error': str(e)})
+def get_chart_names_view(user_id, database_name):
+    """
+    Fetch all chart names for a given user_id from the datasource database.
+    Only fetches charts for the specific user, not reporting employees.
+    """
+    # Step 1: Connect to datasource database
+    conn_datasource = get_db_connection(DB_NAME)
+    dashboard_structure = []
+
+    if conn_datasource:
+        try:
+            with conn_datasource.cursor() as cursor:
+                query = """
+                    SELECT user_id, chart_name
+                    FROM table_chart_save
+                    WHERE user_id = %s AND company_name = %s
+                    ORDER BY updated_at DESC;
+                """
+                cursor.execute(query, (user_id, database_name))
+                charts = cursor.fetchall()
+                
+                # Organize charts
+                for uid, chart_name in charts:
+                    dashboard_structure.append((uid, chart_name))
+        except psycopg2.Error as e:
+            print(f"Error fetching dashboard details: {e}")
+        finally:
+            conn_datasource.close()
+
+    return dashboard_structure
 
 def get_chart_names(user_id, database_name):
     # Step 1: Get employees reporting to the given user_id from the company database.
@@ -4708,6 +4738,37 @@ def chart_names():
 
     # Pass the user_id and database_name to the get_chart_names function
     names = get_chart_names(user_id, database_name)
+
+    print("names====================", names)
+
+    if names is not None:
+        return jsonify({'chart_names': names})
+    else:
+        return jsonify({'error': 'Failed to fetch chart names'})
+    
+@app.route('/total_rows_view', methods=['GET'])
+@employee_required
+@token_required
+
+def chart_names_view():
+    user_id = request.args.get('user_id')
+    database_name = request.args.get('company')  # Getting the database_name
+
+    print("user_id====================", user_id)
+    print("database_name====================", database_name)
+
+    # Validate the user_id
+    try:
+        user_id = int(user_id)  # Convert to integer
+    except ValueError:
+        return jsonify({'error': 'Invalid user_id. Must be an integer.'})
+
+    # Check if the database_name is valid (you can extend this validation if needed)
+    if not database_name:
+        return jsonify({'error': 'Invalid or missing database_name.'})
+
+    # Pass the user_id and database_name to the get_chart_names function
+    names = get_chart_names_view(user_id, database_name)
 
     print("names====================", names)
 
@@ -16915,7 +16976,7 @@ def list_available_tables():
     """List all available tables in the database."""
     try:
         conn = psycopg2.connect(
-            host=HOST, port=PORT, database="comienzonew", user=USER_NAME, password=PASSWORD
+            host=HOST, port=PORT, database="redmi", user=USER_NAME, password=PASSWORD
         )
         cursor = conn.cursor()
         
@@ -16940,7 +17001,7 @@ def list_available_tables():
 #     """Fetch the schema for a specific table."""
 #     try:
 #         conn = psycopg2.connect(
-#             host=HOST, port=PORT, database="comienzonew", user=USER_NAME, password=PASSWORD
+#             host=HOST, port=PORT, database="redmi", user=USER_NAME, password=PASSWORD
 #         )
 #         cursor = conn.cursor()
         
@@ -16977,7 +17038,7 @@ def get_table_schema(table_name):
     """Fetch the schema for a specific table."""
     try:
         conn = psycopg2.connect(
-            host=HOST, port=PORT, database="comienzonew", user=USER_NAME, password=PASSWORD
+            host=HOST, port=PORT, database="redmi", user=USER_NAME, password=PASSWORD
         )
         cursor = conn.cursor()
         
@@ -17014,7 +17075,7 @@ def get_table_schema(table_name):
 #     """Execute SQL query and return results."""
 #     try:
 #         conn = psycopg2.connect(
-#             host=HOST, port=PORT, database="comienzonew", user=USER_NAME, password=PASSWORD
+#             host=HOST, port=PORT, database="redmi", user=USER_NAME, password=PASSWORD
 #         )
         
 #         df = pd.read_sql_query(sql_query, conn)
@@ -17029,7 +17090,7 @@ def execute_sql(sql_query):
     """Execute SQL query and return results."""
     try:
         conn = psycopg2.connect(
-            host=HOST, port=PORT, database="comienzonew", user=USER_NAME, password=PASSWORD
+            host=HOST, port=PORT, database="redmi", user=USER_NAME, password=PASSWORD
         )
         
         df = pd.read_sql_query(sql_query, conn)
@@ -19601,7 +19662,7 @@ if __name__ == "__main__":
 #     """List all available tables in the database."""
 #     try:
 #         conn = psycopg2.connect(
-#             host=HOST, port=PORT, database="comienzonew", user=USER_NAME, password=PASSWORD
+#             host=HOST, port=PORT, database="redmi", user=USER_NAME, password=PASSWORD
 #         )
 #         cursor = conn.cursor()
 #         cursor.execute("""
@@ -19655,7 +19716,7 @@ if __name__ == "__main__":
 #         table_name = table_name.strip()
         
 #         conn = psycopg2.connect(
-#             host=HOST, port=PORT, database="comienzonew", user=USER_NAME, password=PASSWORD
+#             host=HOST, port=PORT, database="redmi", user=USER_NAME, password=PASSWORD
 #         )
 #         cursor = conn.cursor()
         
@@ -19701,7 +19762,7 @@ if __name__ == "__main__":
 #             return None, "Destructive queries are not allowed."
 
 #         conn = psycopg2.connect(
-#             host=HOST, port=PORT, database="comienzonew", user=USER_NAME, password=PASSWORD
+#             host=HOST, port=PORT, database="redmi", user=USER_NAME, password=PASSWORD
 #         )
 #         df = pd.read_sql_query(sql_query, conn)
 #         conn.close()
